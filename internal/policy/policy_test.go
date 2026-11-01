@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -137,13 +138,25 @@ func TestRunHTTPRedactsAndKeepsSecretFromRedirect(t *testing.T) {
 
 func TestRunExec(t *testing.T) {
 	get := func(string) ([]byte, error) { return []byte("supersecretvalue"), nil }
-	a := &Action{TimeoutSec: 5, Exec: &ExecSpec{Argv: []string{"/usr/bin/printenv", "T"}, Env: map[string]string{"T": "{{secret:s}}"}}}
+	printenv, err := exec.LookPath("printenv")
+	if err != nil {
+		t.Skip("printenv not installed")
+	}
+	a := &Action{TimeoutSec: 5, Exec: &ExecSpec{Argv: []string{printenv, "T"}, Env: map[string]string{"T": "{{secret:s}}"}}}
 	r := Run(context.Background(), a, get)
 	if !r.OK || strings.Contains(r.Output, "supersecretvalue") || !strings.Contains(r.Output, "[REDACTED]") {
 		t.Fatalf("%+v", r)
 	}
 	a = &Action{TimeoutSec: 1, Exec: &ExecSpec{Argv: []string{"/bin/sleep", "20"}}}
 	if r := Run(context.Background(), a, get); r.OK || !strings.Contains(r.Output, "timed out") {
+		t.Fatalf("%+v", r)
+	}
+}
+
+func TestRunExecReportsMissingBinary(t *testing.T) {
+	a := &Action{TimeoutSec: 5, Exec: &ExecSpec{Argv: []string{"/no/such/tool"}}}
+	r := Run(context.Background(), a, nil)
+	if r.OK || r.Exit != -1 || !strings.Contains(r.Output, "could not start") {
 		t.Fatalf("%+v", r)
 	}
 }

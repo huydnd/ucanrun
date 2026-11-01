@@ -149,6 +149,7 @@ func runExec(ctx context.Context, e *ExecSpec, get func(string) string) Result {
 		r.Exit = cmd.ProcessState.ExitCode()
 	} else {
 		r.Exit = -1
+		r.Output = "could not start: " + err.Error()
 	}
 	if ctx.Err() != nil {
 		r.Output += "\n[timed out]"
