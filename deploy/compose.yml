@@ -13,7 +13,7 @@ services:
     tmpfs:
       - /tmp:size=16m,mode=1777
     environment:
-      - UCANRUN_SECURE_COOKIE=0
+      - UCANRUN_SECURE_COOKIE=1
     volumes:
       - ./data:/data
     ports:
