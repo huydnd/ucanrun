@@ -1,0 +1,5 @@
+/ucr
+/data/
+.env
+*.age
+*.token
