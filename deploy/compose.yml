@@ -9,7 +9,7 @@ services:
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     pids_limit: 128
-    mem_limit: 256m
+    mem_limit: 768m
     tmpfs:
       - /tmp:size=16m,mode=1777
     environment:
