@@ -95,3 +95,8 @@ html{scroll-padding-top:72px}
 pre.cfg{user-select:all}
 .picklist .check{margin-top:10px;color:var(--text)}
 .picklist .check code{color:var(--muted)}
+.health{list-style:none;padding:0;margin:0}
+.health li{display:flex;gap:10px;align-items:baseline;padding:6px 0}
+.dot{flex:none;width:10px;height:10px;border-radius:50%;background:var(--accent)}
+.dot.warn{background:var(--warn)}
+.dot.bad{background:var(--danger)}

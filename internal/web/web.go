@@ -309,6 +309,7 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("GET /api/requests", s.auth(func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, 200, s.C.Requests()) }))
 	m.HandleFunc("POST /api/requests/{id}/decide", s.auth(s.decide))
 	m.HandleFunc("GET /api/audit", s.auth(s.auditLog))
+	m.HandleFunc("GET /api/health", s.auth(s.health))
 	m.HandleFunc("PUT /api/telegram", s.auth(s.setTelegram))
 	m.HandleFunc("POST /api/telegram/pair", s.auth(func(w http.ResponseWriter, _ *http.Request) {
 		c, err := s.C.NewPairCode()
@@ -533,6 +534,23 @@ func (s *Server) auditLog(w http.ResponseWriter, _ *http.Request) {
 	}
 	n, verr := audit.Verify(s.AuditPath)
 	writeJSON(w, 200, map[string]any{"entries": es, "valid_entries": n, "chain_ok": verr == nil, "truncated": s.C.AuditTruncated()})
+}
+
+func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
+	items, err := s.C.Health()
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	gate := core.HealthItem{Key: "gate", Level: "ok", Message: "Có mã truy cập chặn trước trang đăng nhập."}
+	if s.GateToken == "" {
+		gate = core.HealthItem{Key: "gate", Level: "bad", Message: "Cổng mã truy cập đang tắt, ai tới được địa chỉ này cũng thấy trang đăng nhập."}
+	}
+	https := core.HealthItem{Key: "https", Level: "ok", Message: "Cookie phiên chỉ đi qua HTTPS."}
+	if !s.SecureCookie {
+		https = core.HealthItem{Key: "https", Level: "warn", Message: "Cookie phiên chưa đặt Secure. Đặt UCANRUN_PUBLIC_URL với địa chỉ https."}
+	}
+	writeJSON(w, 200, append(items, gate, https))
 }
 
 func (s *Server) setTelegram(w http.ResponseWriter, r *http.Request) {
