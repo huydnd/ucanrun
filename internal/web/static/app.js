@@ -81,7 +81,7 @@ function renderShell() {
     h("button", {class: state.tab === k ? "on" : "", "data-req": k === "requests" ? "1" : null, onclick: () => { state.tab = k; renderShell(); }}, v)));
   const waiting = h("span", {class: "count"});
   api("GET", "/api/requests").then(l => { const n = l.filter(r => r.state === "pending").length; if (n) { waiting.textContent = n; nav.querySelector("[data-req]").append(" ", waiting); } }).catch(() => {});
-  app.replaceChildren(h("header", null, h("b", null, "ucanrun"), nav,
+  app.replaceChildren(h("header", null, h("img", {class: "brand", src: "logo.svg", alt: "", width: 28, height: 28}), h("b", null, "ucanrun"), nav,
     h("button", {onclick: async () => { await api("POST", "/api/lock"); boot(); }}, "Khoá kho")), body);
   clearInterval(state.timer);
   const views = {start: viewStart, requests: viewRequests, secrets: viewSecrets, profiles: viewProfiles, tokens: viewTokens, settings: viewSettings, audit: viewAudit};
