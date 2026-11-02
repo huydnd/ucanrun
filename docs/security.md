@@ -41,4 +41,18 @@
 
 ## Backup
 
-Back up the `data` volume. Secrets stay encrypted and need the master password. Keep originals of important secrets in a password manager.
+```bash
+docker exec ucanrun ucr backup - > ucanrun-backup.tar.gz
+docker exec -i ucanrun ucr backup-check - < ucanrun-backup.tar.gz
+```
+
+Secrets stay encrypted and need the master password. `gate.token` is not included, because it is a plaintext access code. Keep originals of important secrets in a password manager.
+
+To restore, start a fresh container, then:
+
+```bash
+docker exec -i ucanrun ucr restore - < ucanrun-backup.tar.gz
+docker restart ucanrun
+```
+
+Restore refuses a vault that already has data. The restart is required, because a running server keeps its audit position in memory.
