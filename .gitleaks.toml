@@ -1,0 +1,6 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Test fixtures written with a throwaway passphrase"
+paths = ['''rs/testdata/golden/''']
