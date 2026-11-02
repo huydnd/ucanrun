@@ -185,3 +185,48 @@ fn expand_replaces_only_secrets() {
     let got = expand("a {{x}} {{ secret:db.pw }}", &|n| format!("<{n}>"));
     assert_eq!(got, "a {{x}} <db.pw>");
 }
+
+#[test]
+fn public_field_cannot_choose_the_host() {
+    use std::collections::BTreeMap;
+    use ucanrun::policy::{Call, FieldMeta, HttpSpec, SecretMeta, from_call};
+    let mut meta = BTreeMap::new();
+    meta.insert(
+        "gh".to_string(),
+        SecretMeta {
+            hosts: vec!["api.github.com".into()],
+            ..Default::default()
+        },
+    );
+    meta.insert(
+        "db".to_string(),
+        SecretMeta {
+            fields: vec![FieldMeta {
+                name: "host".into(),
+                public: true,
+            }],
+            ..Default::default()
+        },
+    );
+    let mut h = BTreeMap::new();
+    h.insert(
+        "Authorization".to_string(),
+        "Bearer {{secret:gh}}".to_string(),
+    );
+    for url in [
+        "https://{{secret:db.host}}/x",
+        "https://api.github.com{{secret:db.host}}/x",
+        "https://{{secret:db.host}}.api.github.com/x",
+    ] {
+        let call = Call {
+            http: Some(HttpSpec {
+                method: "GET".into(),
+                url: url.into(),
+                headers: h.clone(),
+                body: String::new(),
+            }),
+            exec: None,
+        };
+        assert!(from_call(&call, &meta).is_err(), "{url} accepted");
+    }
+}
