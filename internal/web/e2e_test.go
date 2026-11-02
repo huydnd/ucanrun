@@ -1004,6 +1004,68 @@ func TestNewerStateIsExplained(t *testing.T) {
 	}
 }
 
+func TestOwnerTestRun(t *testing.T) {
+	e := setup(t, time.Minute)
+	e.pair()
+	before := strings.Count(e.tg.dump(), "reply_markup")
+	code, m := e.req("POST", "/api/profiles/create/test", map[string]any{"params": map[string]string{"repo": "x"}})
+	if code != 200 || m["state"] != "done" || e.gotAuth() != "token "+secret {
+		t.Fatalf("%d %v", code, m)
+	}
+	if strings.Contains(fmt.Sprint(m), secret) {
+		t.Fatal("secret in test run result")
+	}
+	time.Sleep(200 * time.Millisecond)
+	if strings.Count(e.tg.dump(), "reply_markup") != before {
+		t.Fatal("test run sent a Telegram approval")
+	}
+	if code, _ := e.req("POST", "/api/profiles/create/test", map[string]any{"params": map[string]string{"repo": "../x"}}); code == 200 {
+		t.Fatal("bad param accepted")
+	}
+	// High risk still needs TOTP.
+	if code, _ := e.req("POST", "/api/profiles/danger/test", map[string]any{"params": map[string]string{"repo": "x"}}); code == 200 {
+		t.Fatal("high risk ran without TOTP")
+	}
+	n := e.hits()
+	sec := e.enableTOTP()
+	c, _ := totp.Code(sec, time.Now())
+	if code, m := e.req("POST", "/api/profiles/danger/test", map[string]any{"params": map[string]string{"repo": "x"}, "totp": c}); code != 200 || m["state"] != "done" {
+		t.Fatalf("%d %v", code, m)
+	}
+	if e.hits() != n+1 {
+		t.Fatal("high risk did not run once")
+	}
+	// Anonymous callers cannot use it.
+	anon, _ := http.Post(e.web.URL+"/api/profiles/create/test", "application/json", strings.NewReader(`{}`))
+	if anon.StatusCode != 403 && anon.StatusCode != 401 {
+		t.Fatalf("anonymous: %d", anon.StatusCode)
+	}
+}
+
+func TestUnlockAtStart(t *testing.T) {
+	e := setup(t, time.Minute)
+	e.pair()
+	e.req("POST", "/api/lock", nil)
+	if err := e.c.UnlockAtStart([]byte("wrong passphrase here")); err == nil || !e.c.Locked() {
+		t.Fatal("wrong passphrase unlocked")
+	}
+	if err := e.c.UnlockAtStart([]byte(pass)); err != nil || e.c.Locked() {
+		t.Fatalf("unlock: %v", err)
+	}
+	// The web still needs a full sign-in.
+	if code, _ := e.req("GET", "/api/secrets", nil); code != 401 {
+		t.Fatalf("session after auto unlock: %d", code)
+	}
+	val, err := e.c.CreateToken("c", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cl := &client.Client{URL: e.agent.URL, Token: val, HTTP: http.DefaultClient}
+	if _, err := cl.Profiles(context.Background()); err != nil {
+		t.Fatalf("agents should work after auto unlock: %v", err)
+	}
+}
+
 func TestSetupDisabledWithoutToken(t *testing.T) {
 	dir := t.TempDir()
 	c, _ := core.New(core.Options{DataDir: dir, WorkFactor: 10})

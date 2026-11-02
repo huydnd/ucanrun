@@ -31,6 +31,23 @@
 | Container | Not root, read-only root filesystem, no capabilities, no shell in the default image. |
 | Audit | A hash chain detects edited lines, and the signed state anchors the head on save and lock to detect truncation (entries after the last save are not covered). |
 
+## Unlocking at start
+
+By default a restart locks the vault until you sign in, and agents get error 423. `UCANRUN_UNLOCK_FILE` reads the master password from a file at start instead. The web still needs the password and TOTP.
+
+The trade-off: anyone who can read that file can decrypt every secret. Only use it with a Docker secret on a host where agents have no Docker or root access.
+
+```yaml
+services:
+  ucanrun:
+    environment:
+      - UCANRUN_UNLOCK_FILE=/run/secrets/ucanrun_pass
+    secrets: [ucanrun_pass]
+secrets:
+  ucanrun_pass:
+    file: ./ucanrun_pass.txt   # chmod 600
+```
+
 ## When something leaks
 
 - **Bot token:** `/revoke` with @BotFather, paste the new token in Settings, pair again.

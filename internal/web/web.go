@@ -251,6 +251,24 @@ func (s *Server) Handler() http.Handler {
 		}
 		writeJSON(w, 200, s.C.Preview(in.Profile, in.Sample))
 	}))
+	m.HandleFunc("POST /api/profiles/{name}/test", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Params map[string]string `json:"params"`
+			TOTP   string            `json:"totp"`
+			Secret string            `json:"secret"`
+		}
+		if !read(w, r, &in) {
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
+		defer cancel()
+		q, err := s.C.TestRun(ctx, r.PathValue("name"), in.Params, in.TOTP, in.Secret)
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		writeJSON(w, 200, q)
+	}))
 	m.HandleFunc("DELETE /api/profiles/{name}", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		if err := s.C.DeleteProfile(r.PathValue("name")); err != nil {
 			fail(w, err)

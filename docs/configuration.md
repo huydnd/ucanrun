@@ -9,6 +9,7 @@ Nothing is required. All variables are optional.
 | `UCANRUN_GATE` | On | `off` removes the gate. Only use it behind another access layer. |
 | `UCANRUN_ENABLE_EXEC` | Off | `1` allows profiles that run programs. |
 | `UCANRUN_LANG` | `en` | Telegram language, `en` or `vi`. The web UI has its own setting. |
+| `UCANRUN_UNLOCK_FILE` | Empty | A file holding the master password, read at start so a restart does not lock agents out. Skips TOTP. Use a Docker secret, and read [the trade-off](security.md). |
 | `UCANRUN_APPROVAL_TTL` | `2m` | How long a request waits. |
 | `UCANRUN_PORT` | `8780` | Web port in `compose.yml`. |
 | `UCANRUN_AGENT_PORT` | `8781` | Agent port in `compose.yml`. |
@@ -50,7 +51,17 @@ The agent API is unencrypted and bound to localhost. Reach it over a private net
 
 ## Releases
 
-Pushing a `v*` tag to GitHub runs `.github/workflows/release.yml`, which builds `amd64` and `arm64` images for GHCR. Then no clone is needed:
+Pushing a `v*` tag to GitHub runs `.github/workflows/release.yml`. It builds `amd64` and `arm64` images for GHCR with an SBOM and provenance, signs them with cosign keyless, and attaches `ucr` binaries with `SHA256SUMS` to the release.
+
+Verify an image:
+
+```bash
+cosign verify ghcr.io/<owner>/ucanrun:latest \
+  --certificate-identity-regexp "https://github.com/<owner>/ucanrun/" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+The binaries also replace the `docker cp` step for agent machines. Then no clone is needed:
 
 ```bash
 docker run -d --name ucanrun -p 127.0.0.1:8780:8780 -p 127.0.0.1:8781:8781 \
