@@ -54,7 +54,10 @@ func New(cfg Config, h Handler) *Bot {
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = "https://api.telegram.org"
 	}
-	return &Bot{cfg: cfg, h: h, http: &http.Client{Timeout: 40 * time.Second},
+	// A reused connection that died silently hangs until the timeout, which
+	// would delay an approval message. Requests are rare, so open one each time.
+	tr := &http.Transport{Proxy: http.ProxyFromEnvironment, DisableKeepAlives: true, TLSHandshakeTimeout: 10 * time.Second}
+	return &Bot{cfg: cfg, h: h, http: &http.Client{Timeout: 40 * time.Second, Transport: tr},
 		waiting: map[int64]pendingCode{}, msgs: map[string]int64{}}
 }
 
@@ -134,10 +137,20 @@ func (b *Bot) Notify(ctx context.Context, id, short, text string, choices []stri
 	var m struct {
 		MessageID int64 `json:"message_id"`
 	}
-	err := b.call(ctx, "sendMessage", map[string]any{
-		"chat_id": chat, "text": text, "reply_markup": keyboard(id, short, choices),
-		"disable_web_page_preview": true,
-	}, &m)
+	// A second copy is harmless, because each decision applies only once. A
+	// message that never arrives leaves the agent waiting for nothing.
+	var err error
+	for try := 0; try < 2; try++ {
+		c, cancel := context.WithTimeout(ctx, 15*time.Second)
+		err = b.call(c, "sendMessage", map[string]any{
+			"chat_id": chat, "text": text, "reply_markup": keyboard(id, short, choices),
+			"disable_web_page_preview": true,
+		}, &m)
+		cancel()
+		if err == nil || ctx.Err() != nil {
+			break
+		}
+	}
 	if err == nil {
 		b.mu.Lock()
 		b.msgs[id] = m.MessageID

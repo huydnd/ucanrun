@@ -25,6 +25,8 @@ Trong giao diện:
 2. Tab **Secret**, tên `server_sudo_password`, nhập mật khẩu sudo.
 3. Tab **Profile**, thẻ **Khởi động lại dịch vụ**, bấm **Tuỳ chỉnh**, sửa danh sách dịch vụ, chọn mức **Hỏi và cần mã TOTP**, rồi lưu.
 
+Đặt tên secret khác cũng được. Trong form, mục 3 có ô **Mật khẩu đưa vào chương trình** cho mật khẩu sudo, và **File tạm từ secret** cho khoá SSH với tên file `id_key`. Không cần thêm biến môi trường.
+
 Xoá khoá khỏi máy: `rm ~/ucanrun_key ~/ucanrun_key.pub`.
 
 ## Quy tắc khi viết thêm lệnh root
