@@ -14,6 +14,7 @@ services:
       - /tmp:size=16m,mode=1777
     environment:
       - UCANRUN_SECURE_COOKIE=1
+      - UCANRUN_GATE_TOKEN=${UCANRUN_GATE_TOKEN:?missing}
     volumes:
       - ./data:/data
     ports:

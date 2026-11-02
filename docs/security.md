@@ -19,6 +19,7 @@
 
 | Lớp | Cách làm |
 |---|---|
+| Cổng | Không có mã truy cập thì mọi đường dẫn web đều trả 401, chỉ trừ `/healthz`. |
 | Kho | Mỗi secret một file `age`. Khoá giải mã bọc bằng mật khẩu chính qua scrypt, chỉ ở RAM khi mở khoá. |
 | Trạng thái | Profile, token ký HMAC bằng khoá dẫn xuất từ kho. File bị sửa thì không mở khoá. |
 | Tham số | Escape theo vị trí, chặn `..`, ký tự điều khiển, bidi, giá trị bắt đầu bằng `-`. |
