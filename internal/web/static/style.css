@@ -80,3 +80,12 @@ button{min-height:44px}
 input,select,textarea{font-size:16px}
 .row button{flex:1}
 }
+.codes{font-size:15px;letter-spacing:.04em;columns:2;background:var(--panel)}
+.steps{list-style:none;margin:0;padding:0;counter-reset:s}
+.steps li{counter-increment:s;position:relative;padding:8px 0 8px 36px;border-top:1px solid var(--line)}
+.steps li:first-child{border-top:0}
+.steps li::before{content:counter(s);position:absolute;left:0;top:10px;width:26px;height:26px;line-height:26px;border-radius:50%;text-align:center;font-size:13px;background:var(--code);color:var(--muted)}
+.steps li.on::before{background:var(--accent);color:var(--accent-text)}
+.steps li.ok::before{content:"✓";background:var(--code);color:var(--accent)}
+.steps b{display:block;font-weight:600}
+details>summary{min-height:32px}

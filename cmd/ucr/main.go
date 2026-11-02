@@ -23,12 +23,12 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/huydnd/ucanrun/internal/audit"
-	"github.com/huydnd/ucanrun/internal/client"
-	"github.com/huydnd/ucanrun/internal/core"
-	"github.com/huydnd/ucanrun/internal/mcp"
-	"github.com/huydnd/ucanrun/internal/vault"
-	"github.com/huydnd/ucanrun/internal/web"
+	"ucanrun/internal/audit"
+	"ucanrun/internal/client"
+	"ucanrun/internal/core"
+	"ucanrun/internal/mcp"
+	"ucanrun/internal/vault"
+	"ucanrun/internal/web"
 )
 
 var version = "0.1.0"

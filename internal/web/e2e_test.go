@@ -16,12 +16,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/huydnd/ucanrun/internal/audit"
-	"github.com/huydnd/ucanrun/internal/client"
-	"github.com/huydnd/ucanrun/internal/core"
-	"github.com/huydnd/ucanrun/internal/mcp"
-	"github.com/huydnd/ucanrun/internal/policy"
-	"github.com/huydnd/ucanrun/internal/totp"
+	"ucanrun/internal/audit"
+	"ucanrun/internal/client"
+	"ucanrun/internal/core"
+	"ucanrun/internal/mcp"
+	"ucanrun/internal/policy"
+	"ucanrun/internal/totp"
 )
 
 const (
@@ -887,6 +887,73 @@ func TestExecOffByDefault(t *testing.T) {
 	}
 	if _, err := off.Submit(tk, "e", nil, ""); err == nil {
 		t.Fatal("stored exec profile ran while exec is off")
+	}
+}
+
+func TestRecoveryCodes(t *testing.T) {
+	e := setup(t, time.Minute)
+	code, m := e.req("POST", "/api/totp/start", nil)
+	if code != 200 {
+		t.Fatal(m)
+	}
+	sec := m["secret"].(string)
+	c, _ := totp.Code(sec, time.Now().Add(-30*time.Second))
+	code, m = e.req("POST", "/api/totp/confirm", map[string]string{"code": c})
+	if code != 200 {
+		t.Fatal(m)
+	}
+	list := m["recovery_codes"].([]any)
+	if len(list) != 8 || len(list[0].(string)) != 11 {
+		t.Fatalf("%v", list)
+	}
+	first := list[0].(string)
+	raw, _ := os.ReadFile(filepath.Join(e.dir, "state.json"))
+	if bytes.Contains(raw, []byte(first)) {
+		t.Fatal("recovery code stored in plain text")
+	}
+	e.req("POST", "/api/lock", nil)
+	if code, _ := e.req("POST", "/api/login", map[string]string{"passphrase": pass, "totp": "AAAAA-AAAAA"}); code != 401 {
+		t.Fatal("made-up code accepted")
+	}
+	// Lowercase and without a dash, as typed on a phone.
+	typed := strings.ToLower(strings.ReplaceAll(first, "-", ""))
+	if code, m := e.req("POST", "/api/login", map[string]string{"passphrase": pass, "totp": typed}); code != 200 {
+		t.Fatalf("recovery login: %d %v", code, m)
+	}
+	if !e.c.Locked() && e.c.RecoveryLeft() != 7 {
+		t.Fatalf("left %d", e.c.RecoveryLeft())
+	}
+	e.req("POST", "/api/lock", nil)
+	time.Sleep(1100 * time.Millisecond) // past the failed-login backoff
+	if code, _ := e.req("POST", "/api/login", map[string]string{"passphrase": pass, "totp": first}); code == 200 {
+		t.Fatal("recovery code reused")
+	}
+	time.Sleep(1100 * time.Millisecond)
+	second := list[1].(string)
+	if code, m := e.req("POST", "/api/login", map[string]string{"passphrase": pass, "totp": second}); code != 200 {
+		t.Fatalf("second code: %v", m)
+	}
+	// A recovery code must not approve high risk work.
+	cl := e.token("c", nil)
+	r, _ := cl.Run(context.Background(), "danger", map[string]string{"repo": "a"}, "", 0)
+	if code, _ := e.req("POST", "/api/requests/"+r["id"].(string)+"/decide", map[string]any{"approve": true, "hash": r["hash"], "totp": list[2]}); code == 200 {
+		t.Fatal("recovery code approved a high risk request")
+	}
+	// A new phone: passphrase plus a recovery code resets TOTP.
+	if code, _ := e.req("POST", "/api/totp/reset", map[string]string{"passphrase": "wrong wrong wrong", "code": list[2].(string)}); code == 200 {
+		t.Fatal("reset without passphrase")
+	}
+	time.Sleep(1100 * time.Millisecond)
+	if code, m := e.req("POST", "/api/totp/reset", map[string]string{"passphrase": pass, "code": list[2].(string)}); code != 200 {
+		t.Fatalf("reset: %d %v", code, m)
+	}
+	if e.c.TOTPEnabled() || e.c.RecoveryLeft() != 0 {
+		t.Fatal("reset left TOTP on")
+	}
+	sec2 := e.enableTOTP()
+	now, _ := totp.Code(sec2, time.Now())
+	if code, m := e.req("POST", "/api/totp/recovery", map[string]string{"code": now}); code != 200 || len(m["recovery_codes"].([]any)) != 8 {
+		t.Fatalf("regenerate: %d %v", code, m)
 	}
 }
 

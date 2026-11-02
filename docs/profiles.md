@@ -50,7 +50,7 @@ Mục **Nâng cao** trên form cho xem và dán JSON. Chạy lệnh có thêm ha
   "params": [{"name": "repo", "pattern": "[a-z0-9._-]{1,64}", "required": true}],
   "http": {
     "method": "POST",
-    "url": "http://gitea:3000/api/v1/user/repos",
+    "url": "https://gitea.example.com/api/v1/user/repos",
     "headers": {"Authorization": "token {{secret:gitea_token}}", "Content-Type": "application/json"},
     "body": "{\"name\":\"{{repo}}\",\"private\":true}"
   }

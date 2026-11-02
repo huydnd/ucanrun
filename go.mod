@@ -1,4 +1,4 @@
-module github.com/huydnd/ucanrun
+module ucanrun
 
 go 1.27.3
 

@@ -46,6 +46,10 @@ async function boot() {
   const s = state.status;
   if (!s.initialized) return renderSetup();
   if (!s.authed) return renderLogin(s.locked);
+  const {steps} = await loadSteps();
+  state.incomplete = steps.some(x => !x.done);
+  if (state.incomplete && !state.opened && !steps.every(x => x.done || skipped().includes(x.key))) state.tab = "start";
+  state.opened = true;
   renderShell();
 }
 
@@ -57,30 +61,30 @@ function renderSetup() {
     if (p1.input.value !== p2.input.value) throw new Error("Hai mật khẩu không khớp");
     await api("POST", "/api/setup", {setup_token: tok.input.value, passphrase: p1.input.value});
     boot();
-  }, h("p", {class: "note"}, "Không có cách khôi phục nếu mất mật khẩu chính. Hãy lưu vào Bitwarden."))));
+  }, h("p", {class: "note"}, "Không có cách khôi phục nếu mất mật khẩu chính. Hãy lưu vào trình quản lý mật khẩu."))));
 }
 
 function renderLogin(locked) {
   const p = field("Mật khẩu chính", {type: "password", autocomplete: "current-password"});
-  const t = field("Mã TOTP (nếu đã bật)", {inputmode: "numeric", autocomplete: "one-time-code", maxlength: 6});
+  const t = field("Mã TOTP hoặc mã khôi phục (nếu đã bật)", {autocomplete: "one-time-code", maxlength: 12});
   app.replaceChildren(h("div", {class: "narrow"}, form(locked ? "Mở khoá ucanrun" : "Đăng nhập", [p, t], "Tiếp tục", async () => {
     await api("POST", "/api/login", {passphrase: p.input.value, totp: t.input.value});
     boot();
   }, locked ? h("p", {class: "muted"}, "Kho đang khoá, agent chưa chạy được lệnh nào.") : null)));
 }
 
-const tabs = {requests: "Yêu cầu", secrets: "Secret", profiles: "Profile", tokens: "Token agent", settings: "Cài đặt", audit: "Nhật ký"};
+const tabs = {start: "Bắt đầu", requests: "Yêu cầu", secrets: "Secret", profiles: "Profile", tokens: "Token agent", settings: "Cài đặt", audit: "Nhật ký"};
 
 function renderShell() {
   const body = h("main");
-  const nav = h("nav", null, Object.entries(tabs).map(([k, v]) =>
-    h("button", {class: state.tab === k ? "on" : "", onclick: () => { state.tab = k; renderShell(); }}, v)));
+  const nav = h("nav", null, Object.entries(tabs).filter(([k]) => k !== "start" || state.incomplete).map(([k, v]) =>
+    h("button", {class: state.tab === k ? "on" : "", "data-req": k === "requests" ? "1" : null, onclick: () => { state.tab = k; renderShell(); }}, v)));
   const waiting = h("span", {class: "count"});
-  api("GET", "/api/requests").then(l => { const n = l.filter(r => r.state === "pending").length; if (n) { waiting.textContent = n; nav.firstChild.append(" ", waiting); } }).catch(() => {});
+  api("GET", "/api/requests").then(l => { const n = l.filter(r => r.state === "pending").length; if (n) { waiting.textContent = n; nav.querySelector("[data-req]").append(" ", waiting); } }).catch(() => {});
   app.replaceChildren(h("header", null, h("b", null, "ucanrun"), nav,
     h("button", {onclick: async () => { await api("POST", "/api/lock"); boot(); }}, "Khoá kho")), body);
   clearInterval(state.timer);
-  const views = {requests: viewRequests, secrets: viewSecrets, profiles: viewProfiles, tokens: viewTokens, settings: viewSettings, audit: viewAudit};
+  const views = {start: viewStart, requests: viewRequests, secrets: viewSecrets, profiles: viewProfiles, tokens: viewTokens, settings: viewSettings, audit: viewAudit};
   const draw = () => views[state.tab](body).catch(e => { if (e.status === 401) boot(); else fill(body, h("div", {class: "err"}, e.message)); });
   draw();
   if (state.tab === "requests") state.timer = setInterval(() => { if (!body.querySelector("input:focus, select:focus")) draw(); }, 3000);
@@ -178,7 +182,7 @@ const templates = {
   blank: {label: "Trống", d: {}},
   bearer: {label: "API có Bearer token", d: {description: "Đọc dữ liệu từ API", method: "GET", url: "https://api.example.com/v1/items/{{item_id}}", auth: "bearer",
     params: [{name: "item_id", type: "slug", required: true}]}},
-  gitea: {label: "Gitea: tạo repo", d: {description: "Tạo repo private trên Gitea", method: "POST", url: "http://gitea:3000/api/v1/user/repos", auth: "token",
+  gitea: {label: "Gitea: tạo repo", d: {description: "Tạo repo private trên Gitea", method: "POST", url: "https://gitea.example.com/api/v1/user/repos", auth: "token",
     bodyMode: "json", jsonRows: [{key: "name", value: "{{repo}}"}, {key: "private", value: "true"}], params: [{name: "repo", type: "slug", required: true}]}},
   webhook: {label: "Gọi webhook", d: {description: "Kích hoạt webhook", method: "POST", url: "https://hooks.example.com/run", auth: "header", authHeader: "X-Api-Key",
     bodyMode: "json", jsonRows: [{key: "event", value: "{{event}}"}], params: [{name: "event", type: "choice", choices: "deploy, restart", required: true}]}},
@@ -534,31 +538,139 @@ async function viewTokens(body) {
       h("button", {class: "danger", onclick: async () => { if (confirm(`Thu hồi token ${t.name}?`)) { await api("DELETE", "/api/tokens/" + t.id); viewTokens(body); } }}, "Thu hồi"))) : h("p", {class: "muted"}, "Chưa có token.")));
 }
 
-async function viewSettings(body) {
-  const s = await api("GET", "/api/status");
+function showRecovery(box, codes, done) {
+  const go = h("button", {class: "primary", disabled: true, onclick: done}, "Tiếp tục");
+  const seen = h("input", {type: "checkbox", onchange: e => { go.disabled = !e.target.checked; }});
+  const list = h("pre", {class: "codes"}, codes.join("\n"));
+  const copied = h("span", {class: "muted"});
+  box.replaceChildren(h("div", {class: "note"}, h("b", null, "Lưu các mã khôi phục này ngay."),
+    h("div", null, "Mỗi mã dùng được một lần khi mất điện thoại, và chỉ hiện lần này."), list,
+    h("div", {class: "row"}, h("button", {onclick: async () => {
+      try { await navigator.clipboard.writeText(codes.join("\n")); copied.textContent = "Đã sao chép"; }
+      catch (_) { copied.textContent = "Không sao chép được, hãy chép tay."; }
+    }}, "Sao chép"), copied),
+    h("label", {class: "check"}, seen, h("span", null, "Tôi đã lưu các mã này")), h("div", {class: "row"}, go)));
+}
+
+function telegramCard(s, after) {
   const tg = field("Token bot từ @BotFather", {type: "password", autocomplete: "off"});
   const out = h("div");
-  const pairHint = (bot, code) => out.replaceChildren(h("div", {class: "note"}, `Mở chat riêng với ${bot ? "@" + bot : "bot"} và gửi trong 3 phút:`, h("pre", null, "/pair " + code)));
-  const tgCard = form("Telegram", [tg], "Lưu token", async () => {
+  const pairHint = (bot, code) => out.replaceChildren(h("div", {class: "note"}, `Mở chat riêng với ${bot ? "@" + bot : "bot"} và gửi trong 3 phút:`, h("pre", null, "/pair " + code),
+    h("div", {class: "muted"}, "Sai 3 lần thì mã bị huỷ, khi đó tạo mã mới.")));
+  const paired = s.telegram && s.telegram.paired, configured = s.telegram && s.telegram.configured;
+  const card = form("Telegram", [tg], "Lưu token", async () => {
     const r = await api("PUT", "/api/telegram", {token: tg.input.value});
-    tg.input.value = ""; pairHint(r.bot, r.code);
-  }, h("p", {class: "muted"}, s.telegram && s.telegram.paired ? `Đã ghép nối với user ${s.telegram.user_id}.` : (s.telegram && s.telegram.configured ? "Đã có bot, chưa ghép nối." : "Chưa cấu hình. Dùng bot riêng, không dùng chung bot khác.")));
-  if (s.telegram && s.telegram.configured) tgCard.append(h("div", {class: "row"}, h("button", {onclick: async () => pairHint("", (await api("POST", "/api/telegram/pair")).code)}, "Tạo mã ghép nối mới")));
-  tgCard.append(out);
+    tg.input.value = ""; pairHint(r.bot, r.code); after && after();
+  }, h("p", {class: "muted"}, paired ? `Đã ghép nối với user ${s.telegram.user_id}.` : configured ? "Đã có bot, chưa ghép nối." :
+    "Tạo bot bằng @BotFather trên Telegram, rồi dán token vào đây. Dùng bot riêng, không dùng chung bot khác."));
+  if (configured) card.append(h("div", {class: "row"}, h("button", {onclick: async () => pairHint("", (await api("POST", "/api/telegram/pair")).code)}, "Tạo mã ghép nối mới")));
+  card.append(out);
+  return card;
+}
+
+function totpCard(s, after) {
   const box = h("div");
-  const totpCard = h("div", {class: "card"}, h("h2", null, "TOTP"), s.totp ? h("p", {class: "muted"}, "Đã bật. Cần khi đăng nhập và duyệt yêu cầu rủi ro cao. Hãy lưu mã bí mật TOTP vào Bitwarden, mất nó thì không đăng nhập được.") :
-    h("div", null, h("p", {class: "muted"}, "Yêu cầu rủi ro cao không duyệt được cho đến khi bật TOTP."), h("button", {onclick: async () => {
-      const r = await api("POST", "/api/totp/start");
-      const c = field("Nhập mã 6 số để xác nhận", {inputmode: "numeric", maxlength: 6});
-      box.replaceChildren(h("img", {class: "qr", src: r.qr, alt: "Mã QR TOTP"}), h("pre", null, r.secret), form("Xác nhận", [c], "Bật TOTP", async () => {
-        await api("POST", "/api/totp/confirm", {code: c.input.value}); viewSettings(body);
-      }));
-    }}, "Bật TOTP"), box));
+  const card = h("div", {class: "card"}, h("h2", null, "TOTP"), box);
+  if (!s.totp) {
+    box.append(h("p", {class: "muted"}, "Mã 6 số từ ứng dụng xác thực như Aegis, Google Authenticator. Yêu cầu rủi ro cao không duyệt được cho đến khi bật TOTP."),
+      h("button", {class: "primary", onclick: async () => {
+        const r = await api("POST", "/api/totp/start");
+        const c = field("Nhập mã 6 số để xác nhận", {inputmode: "numeric", maxlength: 6, autocomplete: "one-time-code"});
+        box.replaceChildren(h("img", {class: "qr", src: r.qr, alt: "Mã QR TOTP"}), h("p", {class: "muted"}, "Không quét được thì nhập mã này:"), h("pre", null, r.secret),
+          form("Xác nhận", [c], "Bật TOTP", async () => {
+            const d = await api("POST", "/api/totp/confirm", {code: c.input.value});
+            showRecovery(box, d.recovery_codes, after);
+          }));
+      }}, "Bật TOTP"));
+    return card;
+  }
+  const code = field("Mã TOTP hiện tại", {inputmode: "numeric", maxlength: 6, autocomplete: "one-time-code"});
+  const err = h("div", {class: "err"});
+  box.append(h("p", {class: s.recovery_left ? "muted" : "note"}, s.recovery_left ? `Đã bật. Còn ${s.recovery_left} mã khôi phục.` : "Đã bật nhưng chưa có mã khôi phục. Mất điện thoại sẽ không đăng nhập được."),
+    code.el, h("div", {class: "row"}, h("button", {class: s.recovery_left ? "" : "primary", onclick: async () => {
+      err.textContent = "";
+      try { const d = await api("POST", "/api/totp/recovery", {code: code.input.value}); showRecovery(box, d.recovery_codes, after); }
+      catch (e) { err.textContent = e.message; }
+    }}, s.recovery_left ? "Tạo bộ mã mới" : "Tạo mã khôi phục")), err);
+  if (after) return card;
+  const p = field("Mật khẩu chính", {type: "password", autocomplete: "current-password"});
+  const c2 = field("Mã TOTP hoặc mã khôi phục", {autocomplete: "one-time-code", maxlength: 12});
+  card.append(h("details", null, h("summary", null, "Đổi điện thoại"),
+    h("p", {class: "muted"}, "Tắt TOTP hiện tại để quét lại trên điện thoại mới."),
+    form("Tắt TOTP", [p, c2], "Tắt để đăng ký lại", async () => {
+      await api("POST", "/api/totp/reset", {passphrase: p.input.value, code: c2.input.value}); boot();
+    })));
+  return card;
+}
+
+async function viewSettings(body) {
+  const s = await api("GET", "/api/status");
   const o = field("Mật khẩu hiện tại", {type: "password", autocomplete: "current-password"});
   const n = field("Mật khẩu mới", {type: "password", autocomplete: "new-password"});
-  fill(body, tgCard, totpCard, form("Đổi mật khẩu chính", [o, n], "Đổi", async () => {
+  fill(body, telegramCard(s), totpCard(s), form("Đổi mật khẩu chính", [o, n], "Đổi", async () => {
     await api("POST", "/api/passphrase", {old: o.input.value, new: n.input.value}); o.input.value = n.input.value = "";
   }));
+}
+
+function skipped() { try { return JSON.parse(localStorage.getItem("ucr_skip") || "[]"); } catch (_) { return []; } }
+function skip(k) { try { localStorage.setItem("ucr_skip", JSON.stringify([...new Set(skipped().concat(k))])); } catch (_) {} }
+
+async function loadSteps() {
+  const [s, profiles, tokens] = await Promise.all([api("GET", "/api/status"), api("GET", "/api/profiles"), api("GET", "/api/tokens")]);
+  const steps = [
+    {key: "telegram", title: "Nối Telegram", why: "Để nhận yêu cầu duyệt trên điện thoại.", done: !!(s.telegram && s.telegram.paired)},
+    {key: "totp", title: "Bật TOTP và lưu mã khôi phục", why: "Lớp bảo vệ thứ hai khi đăng nhập và duyệt việc rủi ro cao.", done: !!s.totp && s.recovery_left > 0},
+    {key: "service", title: "Thêm dịch vụ đầu tiên", why: "Dán token của dịch vụ, ví dụ GitHub.", done: profiles.length > 0},
+    {key: "agent", title: "Tạo token cho agent", why: "Để agent gửi được yêu cầu tới ucanrun.", done: tokens.length > 0},
+  ];
+  return {s, steps};
+}
+
+async function viewStart(body) {
+  const {s, steps} = await loadSteps();
+  const skips = skipped();
+  const cur = steps.find(x => !x.done && !skips.includes(x.key));
+  const redraw = () => viewStart(body);
+  const list = h("ol", {class: "steps"}, steps.map(x => h("li", {class: x.done ? "ok" : x === cur ? "on" : ""}, h("b", null, x.title), h("small", {class: "muted"}, x.done ? "Xong" : x.why))));
+  const head = h("div", {class: "card"}, h("h2", null, "Bắt đầu"), list);
+  if (!cur) {
+    head.append(h("p", null, steps.every(x => x.done) ? "Đã thiết lập xong." : "Các bước còn lại có thể làm sau trong Cài đặt."),
+      h("div", {class: "row"}, h("button", {class: "primary", onclick: () => { state.tab = "requests"; renderShell(); }}, "Vào trang yêu cầu")));
+    fill(body, head); return;
+  }
+  const skipBtn = h("div", {class: "row"}, h("button", {onclick: () => { skip(cur.key); redraw(); }}, "Bỏ qua, làm sau"));
+  let panel;
+  if (cur.key === "telegram") {
+    panel = telegramCard(s, null);
+    if (s.telegram && s.telegram.configured) {
+      clearInterval(state.timer);
+      state.timer = setInterval(async () => {
+        const n = await api("GET", "/api/status").catch(() => null);
+        if (n && n.telegram && n.telegram.paired) { clearInterval(state.timer); redraw(); }
+      }, 3000);
+    }
+    const save = panel.querySelector("button.primary");
+    save.addEventListener("click", () => setTimeout(() => { clearInterval(state.timer); state.timer = setInterval(async () => {
+      const n = await api("GET", "/api/status").catch(() => null);
+      if (n && n.telegram && n.telegram.paired) { clearInterval(state.timer); redraw(); }
+    }, 3000); }, 1500));
+  } else if (cur.key === "totp") {
+    panel = totpCard(s, redraw);
+  } else if (cur.key === "service") {
+    panel = h("div", {class: "card"}, h("h2", null, "Thêm dịch vụ"), h("p", {class: "muted"}, "Tab Profile có sẵn các mẫu như GitHub, Cloudflare. Dán token rồi bấm Thêm."),
+      h("div", {class: "row"}, h("button", {class: "primary", onclick: () => { state.tab = "profiles"; renderShell(); }}, "Mở danh sách mẫu")));
+  } else {
+    const n = field("Tên agent", {autocomplete: "off", value: "claude"});
+    n.input.value = "claude";
+    panel = form("Tạo token", [n], "Tạo", async () => {
+      const r = await api("POST", "/api/tokens", {name: n.input.value, profiles: []});
+      const go = h("button", {class: "primary", onclick: redraw}, "Tiếp tục");
+      fill(body, head, h("div", {class: "card"}, h("h2", null, "Nối agent"),
+        h("p", {class: "note"}, "Token chỉ hiện một lần. Chạy trên máy agent, không dán vào chat với AI:"),
+        h("pre", null, `mkdir -p ~/.config/ucanrun\n(umask 077; printf '%s\\n' '${r.token}' > ~/.config/ucanrun/token)\nclaude mcp add --scope user ucanrun -- ucr mcp`), h("div", {class: "row"}, go)));
+    });
+  }
+  fill(body, head, panel, skipBtn);
 }
 
 async function viewAudit(body) {

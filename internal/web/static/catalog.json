@@ -1,24 +1,302 @@
 [
-  {"group": "GitHub", "title": "Xem repo của tôi", "secrets": ["github_token"], "hint": "Fine-grained token, quyền đọc Metadata.",
-   "profile": {"name": "github-list-repos", "description": "Liệt kê repo GitHub", "risk": "low", "http": {"method": "GET", "url": "https://api.github.com/user/repos?per_page=100&sort=updated", "headers": {"Authorization": "Bearer {{secret:github_token}}", "Accept": "application/vnd.github+json"}}}},
-  {"group": "GitHub", "title": "Tạo issue", "secrets": ["github_token"], "hint": "Cần quyền ghi Issues.",
-   "profile": {"name": "github-create-issue", "description": "Tạo issue trên GitHub", "risk": "low", "params": [{"name": "owner", "pattern": "[A-Za-z0-9-]{1,39}", "required": true}, {"name": "repo", "pattern": "[a-z0-9._-]{1,64}", "required": true}, {"name": "title", "pattern": "[\\p{L}\\p{N} ._,:@/-]{1,200}", "required": true}], "http": {"method": "POST", "url": "https://api.github.com/repos/{{owner}}/{{repo}}/issues", "headers": {"Authorization": "Bearer {{secret:github_token}}", "Accept": "application/vnd.github+json", "Content-Type": "application/json"}, "body": "{\"title\":\"{{title}}\"}"}}},
-  {"group": "Gitea", "title": "Xem repo", "secrets": ["gitea_token"], "hint": "Token Gitea, quyền đọc repository.",
-   "profile": {"name": "gitea-list-repos", "description": "Liệt kê repo Gitea", "risk": "low", "http": {"method": "GET", "url": "http://gitea:3000/api/v1/user/repos?limit=50", "headers": {"Authorization": "token {{secret:gitea_token}}"}}}},
-  {"group": "Gitea", "title": "Tạo repo private", "secrets": ["gitea_token"], "hint": "Cần quyền ghi repository.",
-   "profile": {"name": "gitea-create-repo", "description": "Tạo repo private trên Gitea", "risk": "low", "params": [{"name": "repo", "pattern": "[a-z0-9._-]{1,64}", "required": true}], "http": {"method": "POST", "url": "http://gitea:3000/api/v1/user/repos", "headers": {"Authorization": "token {{secret:gitea_token}}", "Content-Type": "application/json"}, "body": "{\"name\":\"{{repo}}\",\"private\":true}"}}},
-  {"group": "Cloudflare", "title": "Xem domain", "secrets": ["cloudflare_token"], "hint": "API token, quyền Zone Read.",
-   "profile": {"name": "cloudflare-list-zones", "description": "Liệt kê domain Cloudflare", "risk": "low", "http": {"method": "GET", "url": "https://api.cloudflare.com/client/v4/zones", "headers": {"Authorization": "Bearer {{secret:cloudflare_token}}"}}}},
-  {"group": "Cloudflare", "title": "Xoá cache domain", "secrets": ["cloudflare_token"], "hint": "Cần quyền Cache Purge. Yêu cầu TOTP.",
-   "profile": {"name": "cloudflare-purge-cache", "description": "Xoá toàn bộ cache một domain", "risk": "high", "params": [{"name": "zone_id", "pattern": "[0-9a-f]{32}", "required": true}], "http": {"method": "POST", "url": "https://api.cloudflare.com/client/v4/zones/{{zone_id}}/purge_cache", "headers": {"Authorization": "Bearer {{secret:cloudflare_token}}", "Content-Type": "application/json"}, "body": "{\"purge_everything\":true}"}}},
-  {"group": "AI", "title": "DeepSeek: xem số dư", "secrets": ["deepseek_key"], "hint": "API key DeepSeek.",
-   "profile": {"name": "deepseek-balance", "description": "Xem số dư DeepSeek", "risk": "low", "auto_approve": true, "http": {"method": "GET", "url": "https://api.deepseek.com/user/balance", "headers": {"Authorization": "Bearer {{secret:deepseek_key}}"}}}},
-  {"group": "AI", "title": "Google AI: xem model", "secrets": ["google_ai_key"], "hint": "API key từ Google AI Studio.",
-   "profile": {"name": "google-ai-list-models", "description": "Liệt kê model Google AI", "risk": "low", "auto_approve": true, "http": {"method": "GET", "url": "https://generativelanguage.googleapis.com/v1beta/models", "headers": {"x-goog-api-key": "{{secret:google_ai_key}}"}}}},
-  {"group": "Notion", "title": "Tìm trang", "secrets": ["notion_token"], "hint": "Internal integration token.",
-   "profile": {"name": "notion-search", "description": "Tìm trang Notion", "risk": "low", "params": [{"name": "query", "pattern": "[\\p{L}\\p{N} ._,:@/-]{1,200}", "required": true}], "http": {"method": "POST", "url": "https://api.notion.com/v1/search", "headers": {"Authorization": "Bearer {{secret:notion_token}}", "Notion-Version": "2022-06-28", "Content-Type": "application/json"}, "body": "{\"query\":\"{{query}}\"}"}}},
-  {"group": "Chọn secret khi duyệt", "title": "GitHub: chọn tài khoản", "secrets": [], "hint": "Sửa danh sách cho đúng secret của bạn, rồi chọn trên Telegram.",
-   "profile": {"name": "github-whoami", "description": "Kiểm tra token GitHub, chọn tài khoản khi duyệt", "risk": "low", "secret_choices": ["github_token", "github_work_token"], "http": {"method": "GET", "url": "https://api.github.com/user", "headers": {"Authorization": "Bearer {{secret:choice}}", "Accept": "application/vnd.github+json"}}}},
-  {"group": "Máy chủ", "title": "Khởi động lại dịch vụ", "secrets": ["server_ssh_key", "server_sudo_password"], "custom": true, "hint": "Dùng khoá SSH và mật khẩu sudo. Xem docs/server-root.md trước khi thêm. Sửa danh sách dịch vụ cho đúng.",
-   "profile": {"name": "server-restart-service", "description": "Khởi động lại một dịch vụ trên máy chủ", "risk": "high", "timeout_sec": 60, "params": [{"name": "service", "pattern": "nginx|cron|ssh", "required": true}], "exec": {"argv": ["/usr/bin/ssh", "-i", "id_key", "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", "UserKnownHostsFile=known_hosts", "huydnd@host.docker.internal", "sudo -S -p '' /usr/bin/systemctl restart {{service}}"], "stdin": "{{secret:server_sudo_password}}", "files": {"id_key": "{{secret:server_ssh_key}}"}}}}
+ {
+  "group": "GitHub",
+  "title": "Xem repo của tôi",
+  "secrets": [
+   "github_token"
+  ],
+  "hint": "Fine-grained token, quyền đọc Metadata.",
+  "profile": {
+   "name": "github-list-repos",
+   "description": "Liệt kê repo GitHub",
+   "risk": "low",
+   "http": {
+    "method": "GET",
+    "url": "https://api.github.com/user/repos?per_page=100&sort=updated",
+    "headers": {
+     "Authorization": "Bearer {{secret:github_token}}",
+     "Accept": "application/vnd.github+json"
+    }
+   }
+  }
+ },
+ {
+  "group": "GitHub",
+  "title": "Tạo issue",
+  "secrets": [
+   "github_token"
+  ],
+  "hint": "Cần quyền ghi Issues.",
+  "profile": {
+   "name": "github-create-issue",
+   "description": "Tạo issue trên GitHub",
+   "risk": "low",
+   "params": [
+    {
+     "name": "owner",
+     "pattern": "[A-Za-z0-9-]{1,39}",
+     "required": true
+    },
+    {
+     "name": "repo",
+     "pattern": "[a-z0-9._-]{1,64}",
+     "required": true
+    },
+    {
+     "name": "title",
+     "pattern": "[\\p{L}\\p{N} ._,:@/-]{1,200}",
+     "required": true
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "url": "https://api.github.com/repos/{{owner}}/{{repo}}/issues",
+    "headers": {
+     "Authorization": "Bearer {{secret:github_token}}",
+     "Accept": "application/vnd.github+json",
+     "Content-Type": "application/json"
+    },
+    "body": "{\"title\":\"{{title}}\"}"
+   }
+  }
+ },
+ {
+  "group": "Gitea",
+  "title": "Xem repo",
+  "secrets": [
+   "gitea_token"
+  ],
+  "hint": "Token Gitea, quyền đọc repository. Sửa địa chỉ cho đúng máy chủ của bạn.",
+  "profile": {
+   "name": "gitea-list-repos",
+   "description": "Liệt kê repo Gitea",
+   "risk": "low",
+   "http": {
+    "method": "GET",
+    "url": "https://gitea.example.com/api/v1/user/repos?limit=50",
+    "headers": {
+     "Authorization": "token {{secret:gitea_token}}"
+    }
+   }
+  },
+  "custom": true
+ },
+ {
+  "group": "Gitea",
+  "title": "Tạo repo private",
+  "secrets": [
+   "gitea_token"
+  ],
+  "hint": "Cần quyền ghi repository. Sửa địa chỉ cho đúng máy chủ của bạn.",
+  "profile": {
+   "name": "gitea-create-repo",
+   "description": "Tạo repo private trên Gitea",
+   "risk": "low",
+   "params": [
+    {
+     "name": "repo",
+     "pattern": "[a-z0-9._-]{1,64}",
+     "required": true
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "url": "https://gitea.example.com/api/v1/user/repos",
+    "headers": {
+     "Authorization": "token {{secret:gitea_token}}",
+     "Content-Type": "application/json"
+    },
+    "body": "{\"name\":\"{{repo}}\",\"private\":true}"
+   }
+  },
+  "custom": true
+ },
+ {
+  "group": "Cloudflare",
+  "title": "Xem domain",
+  "secrets": [
+   "cloudflare_token"
+  ],
+  "hint": "API token, quyền Zone Read.",
+  "profile": {
+   "name": "cloudflare-list-zones",
+   "description": "Liệt kê domain Cloudflare",
+   "risk": "low",
+   "http": {
+    "method": "GET",
+    "url": "https://api.cloudflare.com/client/v4/zones",
+    "headers": {
+     "Authorization": "Bearer {{secret:cloudflare_token}}"
+    }
+   }
+  }
+ },
+ {
+  "group": "Cloudflare",
+  "title": "Xoá cache domain",
+  "secrets": [
+   "cloudflare_token"
+  ],
+  "hint": "Cần quyền Cache Purge. Yêu cầu TOTP.",
+  "profile": {
+   "name": "cloudflare-purge-cache",
+   "description": "Xoá toàn bộ cache một domain",
+   "risk": "high",
+   "params": [
+    {
+     "name": "zone_id",
+     "pattern": "[0-9a-f]{32}",
+     "required": true
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "url": "https://api.cloudflare.com/client/v4/zones/{{zone_id}}/purge_cache",
+    "headers": {
+     "Authorization": "Bearer {{secret:cloudflare_token}}",
+     "Content-Type": "application/json"
+    },
+    "body": "{\"purge_everything\":true}"
+   }
+  }
+ },
+ {
+  "group": "AI",
+  "title": "DeepSeek: xem số dư",
+  "secrets": [
+   "deepseek_key"
+  ],
+  "hint": "API key DeepSeek.",
+  "profile": {
+   "name": "deepseek-balance",
+   "description": "Xem số dư DeepSeek",
+   "risk": "low",
+   "auto_approve": true,
+   "http": {
+    "method": "GET",
+    "url": "https://api.deepseek.com/user/balance",
+    "headers": {
+     "Authorization": "Bearer {{secret:deepseek_key}}"
+    }
+   }
+  }
+ },
+ {
+  "group": "AI",
+  "title": "Google AI: xem model",
+  "secrets": [
+   "google_ai_key"
+  ],
+  "hint": "API key từ Google AI Studio.",
+  "profile": {
+   "name": "google-ai-list-models",
+   "description": "Liệt kê model Google AI",
+   "risk": "low",
+   "auto_approve": true,
+   "http": {
+    "method": "GET",
+    "url": "https://generativelanguage.googleapis.com/v1beta/models",
+    "headers": {
+     "x-goog-api-key": "{{secret:google_ai_key}}"
+    }
+   }
+  }
+ },
+ {
+  "group": "Notion",
+  "title": "Tìm trang",
+  "secrets": [
+   "notion_token"
+  ],
+  "hint": "Internal integration token.",
+  "profile": {
+   "name": "notion-search",
+   "description": "Tìm trang Notion",
+   "risk": "low",
+   "params": [
+    {
+     "name": "query",
+     "pattern": "[\\p{L}\\p{N} ._,:@/-]{1,200}",
+     "required": true
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "url": "https://api.notion.com/v1/search",
+    "headers": {
+     "Authorization": "Bearer {{secret:notion_token}}",
+     "Notion-Version": "2022-06-28",
+     "Content-Type": "application/json"
+    },
+    "body": "{\"query\":\"{{query}}\"}"
+   }
+  }
+ },
+ {
+  "group": "Chọn secret khi duyệt",
+  "title": "GitHub: chọn tài khoản",
+  "secrets": [],
+  "hint": "Sửa danh sách cho đúng secret của bạn, rồi chọn trên Telegram.",
+  "profile": {
+   "name": "github-whoami",
+   "description": "Kiểm tra token GitHub, chọn tài khoản khi duyệt",
+   "risk": "low",
+   "secret_choices": [
+    "github_token",
+    "github_work_token"
+   ],
+   "http": {
+    "method": "GET",
+    "url": "https://api.github.com/user",
+    "headers": {
+     "Authorization": "Bearer {{secret:choice}}",
+     "Accept": "application/vnd.github+json"
+    }
+   }
+  }
+ },
+ {
+  "group": "Máy chủ",
+  "title": "Khởi động lại dịch vụ qua SSH",
+  "secrets": [
+   "ssh_key",
+   "sudo_password"
+  ],
+  "custom": true,
+  "hint": "Cần image exec. Sửa máy chủ và danh sách dịch vụ. Xem docs/ssh-sudo.md.",
+  "profile": {
+   "name": "ssh-restart-service",
+   "description": "Khởi động lại một dịch vụ trên máy chủ",
+   "risk": "high",
+   "timeout_sec": 60,
+   "params": [
+    {
+     "name": "service",
+     "pattern": "nginx|cron",
+     "required": true
+    }
+   ],
+   "exec": {
+    "argv": [
+     "/usr/bin/ssh",
+     "-i",
+     "id_key",
+     "-o",
+     "IdentitiesOnly=yes",
+     "-o",
+     "BatchMode=yes",
+     "-o",
+     "StrictHostKeyChecking=accept-new",
+     "-o",
+     "UserKnownHostsFile=known_hosts",
+     "deploy@server.example.com",
+     "sudo -S -p '' /usr/bin/systemctl restart {{service}}"
+    ],
+    "stdin": "{{secret:sudo_password}}",
+    "files": {
+     "id_key": "{{secret:ssh_key}}"
+    }
+   }
+  }
+ }
 ]

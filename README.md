@@ -16,7 +16,7 @@ Agent <──── kết quả ───────────────┘
 - [Cấu hình](docs/configuration.md)
 - [Danh mục mẫu](docs/catalog.md): thêm dịch vụ bằng một lần bấm.
 - [Tạo profile](docs/profiles.md), gồm chọn secret trên Telegram.
-- [Lệnh root trên máy chủ](docs/server-root.md)
+- [Lệnh root qua SSH](docs/ssh-sudo.md)
 - [Mô hình bảo mật](docs/security.md)
 - [Xử lý sự cố](docs/troubleshooting.md)
 
@@ -43,4 +43,4 @@ Biến `UCANRUN_LIVE_TG_TOKEN`, `UCANRUN_LIVE_TG_CHAT` bật bài test với Bot
 
 ## Giấy phép
 
-[Apache-2.0](LICENSE)
+[MIT](LICENSE)
