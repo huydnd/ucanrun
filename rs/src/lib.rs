@@ -12,3 +12,4 @@ pub mod state;
 pub mod telegram;
 pub mod totp;
 pub mod vault;
+pub mod web;
