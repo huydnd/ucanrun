@@ -75,6 +75,8 @@ function renderShell() {
   const body = h("main");
   const nav = h("nav", null, Object.entries(tabs).map(([k, v]) =>
     h("button", {class: state.tab === k ? "on" : "", onclick: () => { state.tab = k; renderShell(); }}, v)));
+  const waiting = h("span", {class: "count"});
+  api("GET", "/api/requests").then(l => { const n = l.filter(r => r.state === "pending").length; if (n) { waiting.textContent = n; nav.firstChild.append(" ", waiting); } }).catch(() => {});
   app.replaceChildren(h("header", null, h("b", null, "ucanrun"), nav,
     h("button", {onclick: async () => { await api("POST", "/api/lock"); boot(); }}, "Khoá kho")), body);
   clearInterval(state.timer);

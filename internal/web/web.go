@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io/fs"
+	"mime"
 	"net/http"
 	"strings"
 	"sync"
@@ -25,6 +26,8 @@ import (
 	"github.com/huydnd/ucanrun/internal/policy"
 	"github.com/huydnd/ucanrun/internal/vault"
 )
+
+func init() { mime.AddExtensionType(".webmanifest", "application/manifest+json") }
 
 //go:embed static
 var staticFS embed.FS
@@ -93,7 +96,7 @@ func (s *Server) secure(next http.Handler) http.Handler {
 		if s.SecureCookie {
 			h.Set("Strict-Transport-Security", "max-age=31536000")
 		}
-		h.Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; img-src data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+		h.Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "no-referrer")
