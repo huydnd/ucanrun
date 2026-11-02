@@ -2,6 +2,7 @@
 
 | Triệu chứng | Nguyên nhân | Cách xử lý |
 |---|---|---|
+| Chỉ thấy ô "Mã truy cập" | Trình duyệt chưa nhập mã cổng | Lấy mã trong `.env`, xem [Bắt đầu nhanh](quickstart.md) |
 | Agent nhận lỗi 423 | Kho đang khoá | Đăng nhập web |
 | Không có tin Telegram | Kho khoá, hoặc chưa ghép nối | Đăng nhập, xem **Cài đặt** |
 | `/pair` không phản hồi | Mã sai, hết 3 phút, hoặc sai 3 lần | Tạo mã mới trong **Cài đặt** |

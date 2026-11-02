@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Truy cập</title>
+<style>
+:root{--bg:#f7f7f5;--panel:#fff;--text:#1c1c1a;--line:#e2e2dd;--accent:#1f6f54;--accent-text:#fff}
+@media (prefers-color-scheme:dark){:root{--bg:#161615;--panel:#1f1f1d;--text:#ececE8;--line:#33332f;--accent:#4fb78f;--accent-text:#0d1f18}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,sans-serif}
+form{max-width:360px;margin:15vh auto;padding:16px}
+input,button{width:100%;padding:10px;border-radius:6px;font:inherit}
+input{border:1px solid var(--line);background:var(--panel);color:var(--text)}
+button{margin-top:10px;border:0;background:var(--accent);color:var(--accent-text);cursor:pointer}
+</style>
+</head>
+<body>
+<form method="post" action="/gate">
+<label for="code">Mã truy cập</label>
+<input id="code" name="code" type="password" autocomplete="current-password" autofocus required>
+<button type="submit">Tiếp tục</button>
+</form>
+</body>
+</html>

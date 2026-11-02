@@ -43,6 +43,7 @@ type Server struct {
 	SecureCookie bool
 	SetupToken   string
 	AuditPath    string
+	GateToken    string
 
 	mu       sync.Mutex
 	sessions map[string]*session
@@ -310,7 +311,7 @@ func (s *Server) Handler() http.Handler {
 		}
 		writeJSON(w, 200, map[string]bool{"ok": true})
 	}))
-	return s.secure(csrf(m))
+	return s.gate(s.secure(csrf(m)))
 }
 
 func (s *Server) status(w http.ResponseWriter, r *http.Request) {

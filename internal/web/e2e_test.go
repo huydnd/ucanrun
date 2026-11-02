@@ -768,6 +768,76 @@ func TestCatalogIsValid(t *testing.T) {
 	}
 }
 
+func TestGateBlocksEverythingWithoutCode(t *testing.T) {
+	e := setup(t, time.Minute)
+	e.s.GateToken = "open sesame gate code"
+	srv := httptest.NewServer(e.s.Handler())
+	defer srv.Close()
+	noRedirect := func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	anon := &http.Client{CheckRedirect: noRedirect}
+	for _, p := range []string{"/", "/app.js", "/api/status", "/api/secrets", "/api/profiles", "/catalog.json"} {
+		resp, err := anon.Get(srv.URL + p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != 401 || bytes.Contains(b, []byte("initialized")) || bytes.Contains(b, []byte("ucanrun")) {
+			t.Fatalf("%s: %d %s", p, resp.StatusCode, b[:min(len(b), 80)])
+		}
+	}
+	post := func(path, body string, hdr map[string]string) *http.Response {
+		req, _ := http.NewRequest("POST", srv.URL+path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		for k, v := range hdr {
+			req.Header.Set(k, v)
+		}
+		resp, err := anon.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp
+	}
+	if r := post("/api/login", `{"passphrase":"`+pass+`"}`, map[string]string{"X-Ucanrun": "1", "Content-Type": "application/json"}); r.StatusCode != 401 {
+		t.Fatalf("login reachable through the gate: %d", r.StatusCode)
+	}
+	if r := post("/gate", "code=wrong", nil); r.StatusCode != 401 || len(r.Cookies()) != 0 {
+		t.Fatalf("wrong code: %d", r.StatusCode)
+	}
+	if r := post("/gate", "code=open+sesame+gate+code", map[string]string{"Sec-Fetch-Site": "cross-site"}); r.StatusCode == 303 {
+		t.Fatal("cross-site gate accepted")
+	}
+	if resp, err := http.Get(srv.URL + "/healthz"); err != nil || resp.StatusCode != 200 {
+		t.Fatalf("healthz: %v", resp)
+	}
+	r := post("/gate", "code=open+sesame+gate+code", nil)
+	if r.StatusCode != 303 || len(r.Cookies()) != 1 || !r.Cookies()[0].HttpOnly {
+		t.Fatalf("right code: %d %v", r.StatusCode, r.Cookies())
+	}
+	if strings.Contains(r.Cookies()[0].Value, "sesame") {
+		t.Fatal("token stored in cookie")
+	}
+	req, _ := http.NewRequest("GET", srv.URL+"/api/status", nil)
+	req.AddCookie(r.Cookies()[0])
+	resp, _ := http.DefaultClient.Do(req)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status after gate: %d", resp.StatusCode)
+	}
+	// The cookie opens only the gate: data still needs a login.
+	req, _ = http.NewRequest("GET", srv.URL+"/api/secrets", nil)
+	req.AddCookie(r.Cookies()[0])
+	resp, _ = http.DefaultClient.Do(req)
+	if resp.StatusCode != 401 {
+		t.Fatalf("secrets without login: %d", resp.StatusCode)
+	}
+	// The agent API stays on its own port and does not use the gate.
+	cl := e.token("c", nil)
+	if _, err := cl.Profiles(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSetupDisabledWithoutToken(t *testing.T) {
 	dir := t.TempDir()
 	c, _ := core.New(core.Options{DataDir: dir, WorkFactor: 10})

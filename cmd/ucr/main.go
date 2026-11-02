@@ -141,6 +141,10 @@ func serve() error {
 		fmt.Printf("ucanrun chưa khởi tạo. Setup token: %s\n", setup)
 	}
 	s := web.New(c, setup, filepath.Join(dir, "audit.jsonl"), os.Getenv("UCANRUN_SECURE_COOKIE") == "1")
+	s.GateToken = os.Getenv("UCANRUN_GATE_TOKEN")
+	if s.GateToken == "" {
+		slog.Warn("UCANRUN_GATE_TOKEN is empty, the web UI has no access gate")
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	harden()

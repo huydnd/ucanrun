@@ -2,6 +2,16 @@
 
 Hướng dẫn này dành cho người dùng mới. Khoảng 10 phút.
 
+## 0. Mã truy cập
+
+Trang công khai có một lớp cổng. Không có mã thì không thấy cả trang đăng nhập. Mã nằm trong `.env`, lấy trên máy chủ:
+
+```bash
+grep UCANRUN_GATE_TOKEN /srv/ucanrun/.env
+```
+
+Lưu mã vào Bitwarden. Mỗi trình duyệt chỉ nhập một lần trong 30 ngày. Đổi mã: sửa `.env` rồi chạy `docker compose up -d`.
+
 ## 1. Khởi tạo kho
 
 1. Mở giao diện web. Ví dụ: `https://ucanrun.example.com`.
