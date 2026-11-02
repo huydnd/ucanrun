@@ -16,6 +16,7 @@ services:
     environment:
       - UCANRUN_PUBLIC_URL=${UCANRUN_PUBLIC_URL:-}
       - UCANRUN_GATE_TOKEN=${UCANRUN_GATE_TOKEN:-}
+      - UCANRUN_LANG=${UCANRUN_LANG:-en}
     volumes:
       - ucanrun-data:/data
     ports:

@@ -93,7 +93,9 @@ type Options struct {
 	// AllowExec permits profiles that run programs. Off by default: the default
 	// image only calls APIs.
 	AllowExec bool
-	Now       func() time.Time
+	// Lang is "vi" or "en" for Telegram messages. Empty means English.
+	Lang string
+	Now  func() time.Time
 }
 
 type Core struct {
@@ -398,7 +400,7 @@ func (c *Core) startBotLocked() {
 		return
 	}
 	bot := telegram.New(telegram.Config{BaseURL: c.opt.TelegramAPI, Token: string(tok),
-		UserID: c.st.Telegram.UserID, ChatID: c.st.Telegram.ChatID}, c)
+		UserID: c.st.Telegram.UserID, ChatID: c.st.Telegram.ChatID, Translate: c.Translate}, c)
 	ctx, cancel := context.WithCancel(c.baseCtx)
 	c.bot, c.botStop = bot, cancel
 	go bot.Run(ctx)
@@ -773,7 +775,7 @@ func (c *Core) Submit(t Token, profile string, params map[string]string, reason 
 		return r.public(), nil
 	}
 	if bot := c.bot; bot != nil && c.st.Telegram.UserID != 0 {
-		id, short, text, choices := r.ID, r.Hash[:16], approvalText(r), r.Choices
+		id, short, text, choices := r.ID, r.Hash[:16], approvalText(r, c.opt.Lang == "vi"), r.Choices
 		go func() {
 			if err := bot.Notify(c.baseCtx, id, short, text, choices); err != nil {
 				slog.Warn("telegram notify", "err", err)
@@ -784,26 +786,32 @@ func (c *Core) Submit(t Token, profile string, params map[string]string, reason 
 	return r.public(), nil
 }
 
-func approvalText(r *Request) string {
+func approvalText(r *Request, vi bool) string {
+	l := map[string]string{"head": "Approval request", "high": "⚠️ HIGH RISK, needs TOTP", "agent": "Agent", "exp": "Expires in", "sec": "seconds", "cmd": "Command to run", "cut": "… [SHORTENED, read it all on the web before approving]",
+		"why": "Reason (stated by the agent, unverified)", "pick": "Tap the secret to use this time.", "code": "Code"}
+	if vi {
+		l = map[string]string{"head": "Yêu cầu chạy lệnh", "high": "⚠️ RỦI RO CAO, cần TOTP", "agent": "Agent", "exp": "Hết hạn sau", "sec": "giây", "cmd": "Lệnh sẽ chạy", "cut": "… [ĐÃ CẮT BỚT, xem đủ trên web trước khi duyệt]",
+			"why": "Lý do (agent tự khai, chưa kiểm chứng)", "pick": "Bấm tên secret muốn dùng cho lần này.", "code": "Mã"}
+	}
 	var b strings.Builder
-	head := "Yêu cầu chạy lệnh"
+	head := l["head"]
 	if r.Risk == policy.RiskHigh {
-		head = "⚠️ RỦI RO CAO, cần TOTP"
+		head = l["high"]
 	}
 	// Telegram drops messages over 4096 characters, which would leave the
 	// request invisible. Say so plainly when text is cut.
 	shown := r.Display
 	if rs := []rune(shown); len(rs) > maxDisplay {
-		shown = string(rs[:maxDisplay]) + "\n… [ĐÃ CẮT BỚT, xem đủ trên web trước khi duyệt]"
+		shown = string(rs[:maxDisplay]) + "\n" + l["cut"]
 	}
-	fmt.Fprintf(&b, "%s\n\nProfile: %s\nAgent: %s\nHết hạn sau: %.0f giây\n\nLệnh sẽ chạy:\n%s\n", head, r.Profile, r.Caller, r.Expires.Sub(r.Created).Seconds(), shown)
+	fmt.Fprintf(&b, "%s\n\nProfile: %s\n%s: %s\n%s: %.0f %s\n\n%s:\n%s\n", head, r.Profile, l["agent"], r.Caller, l["exp"], r.Expires.Sub(r.Created).Seconds(), l["sec"], l["cmd"], shown)
 	if r.Reason != "" {
-		fmt.Fprintf(&b, "\nLý do (agent tự khai, chưa kiểm chứng): %s\n", r.Reason)
+		fmt.Fprintf(&b, "\n%s: %s\n", l["why"], r.Reason)
 	}
 	if len(r.Choices) > 0 {
-		b.WriteString("\nBấm tên secret muốn dùng cho lần này.\n")
+		fmt.Fprintf(&b, "\n%s\n", l["pick"])
 	}
-	fmt.Fprintf(&b, "\nMã: %s", r.Hash[:8])
+	fmt.Fprintf(&b, "\n%s: %s", l["code"], r.Hash[:8])
 	return b.String()
 }
 
@@ -823,11 +831,15 @@ func (c *Core) finishLocked(r *Request, s ReqState, by string) {
 	close(r.done)
 	c.log("request_"+string(s), by, map[string]any{"id": r.ID, "hash": r.Hash})
 	if bot := c.bot; bot != nil {
+		label, usedLabel, codeLabel := "Finished", "Secret used", "Code"
+		if c.opt.Lang == "vi" {
+			label, usedLabel, codeLabel = "Kết thúc", "Secret đã dùng", "Mã"
+		}
 		used := ""
 		if r.Secret != "" {
-			used = "\nSecret đã dùng: " + r.Secret
+			used = "\n" + usedLabel + ": " + r.Secret
 		}
-		id, text := r.ID, fmt.Sprintf("Kết thúc: %s (%s)\nProfile: %s%s\nMã: %s", s, by, r.Profile, used, r.Hash[:8])
+		id, text := r.ID, fmt.Sprintf("%s: %s (%s)\nProfile: %s%s\n%s: %s", label, s, by, r.Profile, used, codeLabel, r.Hash[:8])
 		go bot.Finish(c.baseCtx, id, text)
 	}
 }

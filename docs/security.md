@@ -1,43 +1,44 @@
-# Mô hình bảo mật
+# Security model
 
-## ucanrun chống được gì
+## What ucanrun protects against
 
-- Secret lộ qua transcript, log, ngữ cảnh gửi lên cloud.
-- Prompt injection khiến agent gửi secret ra ngoài: agent không có secret để gửi.
-- Agent gọi lệnh lạ hoặc tới máy lạ: chỉ có profile được phép.
-- Người lạ trên Telegram bấm duyệt: chỉ nhận đúng user và chat đã ghép nối.
-- Dùng lại mã: duyệt và TOTP đều dùng một lần.
+- Secrets leaking through transcripts, logs and model context.
+- Prompt injection making an agent send a secret away: the agent has none.
+- An agent calling something unexpected: only declared profiles exist.
+- Strangers approving on Telegram: only the paired user and chat count.
+- Replay: approvals, TOTP codes and recovery codes all work once.
 
-## ucanrun không chống được
+## What it does not protect against
 
-- **Agent chủ động vượt rào khi có quyền cao hơn.** User thuộc nhóm `docker` vào được container. Đừng đưa agent vào nhóm `docker`. Nếu buộc phải dùng, hãy đặt socket proxy có allowlist phía trước.
-- Người duyệt bấm mà không đọc. Hãy đọc dòng lệnh, đừng đọc lý do. Lý do là agent tự viết.
-- Dịch vụ đích bị lộ hoặc token có quyền quá rộng.
-- Máy chủ bị chiếm root.
+- **An agent with more privilege than ucanrun.** A user in the `docker` group can enter the container. Do not put agents in that group. If you must, put a socket proxy with an allowlist in front.
+- An approver who taps without reading. Read the command, not the reason. The agent writes the reason.
+- A compromised destination service, or a token with too much scope.
+- Root on the host.
 
-## Các lớp bảo vệ
+## Layers
 
-| Lớp | Cách làm |
+| Layer | How |
 |---|---|
-| Cổng | Không có mã truy cập thì mọi đường dẫn web đều trả 401, chỉ trừ `/healthz`. |
-| Kho | Mỗi secret một file `age`. Khoá giải mã bọc bằng mật khẩu chính qua scrypt, chỉ ở RAM khi mở khoá. |
-| Trạng thái | Profile, token ký HMAC bằng khoá dẫn xuất từ kho. File bị sửa thì không mở khoá. |
-| Tham số | Escape theo vị trí, chặn `..`, ký tự điều khiển, bidi, giá trị bắt đầu bằng `-`. |
-| Duyệt | Gắn với hash lệnh, hết hạn sau 2 phút, im lặng là từ chối. |
-| Chọn secret | Chỉ người duyệt chọn, trong danh sách khai báo, ghi audit. |
-| Lệnh | Không shell, HOME riêng mỗi lần chạy, chặn biến nguy hiểm. |
-| Output | Che secret và dạng base64, hex, URL-encode. Không theo redirect. |
-| Web | Không có API đọc secret, cookie HttpOnly và SameSite=Strict, CSP chặt, giới hạn đăng nhập. |
-| Container | Không root, rootfs chỉ đọc, bỏ mọi capability. |
-| Audit | Chuỗi băm phát hiện sửa dòng. Cắt bớt phần cuối file thì chưa phát hiện được. |
+| Gate | Without the access code every web path returns 401, except `/healthz`. |
+| Vault | One `age` file per secret. The key is wrapped with the master password using scrypt and is only in RAM while unlocked. |
+| State | Profiles and tokens are HMAC-signed with a key derived from the vault. A modified file refuses to unlock. |
+| Params | Escaped by position. Blocks `..`, control and bidi characters, and values that start a command line option. |
+| Approval | Bound to a hash of the action, expires in 2 minutes, silence means no. |
+| Choosing a secret | Only the approver chooses, from a declared list, recorded in the audit log. |
+| Commands | Off by default. No shell, a private HOME per run, dangerous variables blocked. |
+| Output | Redacts secrets and their base64, hex and URL-encoded forms. Redirects are not followed. |
+| Web | No API reads a secret. HttpOnly and SameSite cookies, strict CSP, sign-in throttling. |
+| Container | Not root, read-only root filesystem, no capabilities, no shell in the default image. |
+| Audit | A hash chain detects edited lines. Truncating the end of the file is not detected yet. |
 
-## Khi token bị lộ
+## When something leaks
 
-- **Token bot:** `/revoke` với @BotFather, dán token mới vào **Cài đặt**, ghép nối lại.
-- **Token agent:** thu hồi ở **Token agent**, tạo mới.
-- **Secret dịch vụ:** đổi ở dịch vụ đó, nhập lại trùng tên trong **Secret**.
-- **Mật khẩu chính:** đổi trong **Cài đặt**.
+- **Bot token:** `/revoke` with @BotFather, paste the new token in Settings, pair again.
+- **Agent token:** revoke it on the Agent tokens tab and create a new one.
+- **Service secret:** rotate it at the service, then save it again under the same name.
+- **Master password:** change it in Settings.
+- **Recovery codes:** create a new set in Settings.
 
-## Sao lưu
+## Backup
 
-Sao lưu volume `data`. Secret vẫn ở dạng mã hoá, cần mật khẩu chính mới đọc được. Giữ bản gốc của secret quan trọng trong trình quản lý mật khẩu.
+Back up the `data` volume. Secrets stay encrypted and need the master password. Keep originals of important secrets in a password manager.

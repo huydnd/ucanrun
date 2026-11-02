@@ -1,26 +1,29 @@
 # ucanrun
 
-Broker giữ mật khẩu và token cho AI agent. Lệnh là `ucr`.
+A credential broker for AI agents, with a human in the loop. The command is `ucr`.
 
-Agent không bao giờ nhận secret. Agent xin chạy một **profile**, bạn duyệt trên Telegram hoặc web, rồi ucanrun tự chạy và trả về kết quả đã che secret.
+Agents never receive a secret. An agent asks to run a **profile**, you approve on Telegram or the web, and ucanrun runs the action itself and returns a redacted result.
 
 ```
-Agent ──run(profile, params)──> ucanrun ──lệnh thật──> Telegram, bạn duyệt
-                                   │ giải mã secret, chạy, che output
-Agent <──── kết quả ───────────────┘
+Agent ── run(profile, params) ──> ucanrun ── the real command ──> you approve on Telegram
+                                     │ decrypt, run, redact
+Agent <──── result ──────────────────┘
 ```
 
-## Tài liệu
+[Tiếng Việt](docs/vi/quickstart.md)
 
-- [Bắt đầu nhanh](docs/quickstart.md)
-- [Cấu hình](docs/configuration.md)
-- [Danh mục mẫu](docs/catalog.md): thêm dịch vụ bằng một lần bấm.
-- [Tạo profile](docs/profiles.md), gồm chọn secret trên Telegram.
-- [Lệnh root qua SSH](docs/ssh-sudo.md)
-- [Mô hình bảo mật](docs/security.md)
-- [Xử lý sự cố](docs/troubleshooting.md)
+## Why
 
-## Chạy nhanh
+Giving an agent a token means the token ends up in transcripts, logs and model context, and a prompt injection can send it anywhere. With ucanrun the agent has nothing to leak, and every sensitive action needs your approval.
+
+- Single small binary, no database.
+- Default image is 12 MB with no shell.
+- No API or MCP tool can read a secret value.
+- Approvals show the real command, not the agent's description of it.
+- MCP server for Claude Code, Cursor, Codex and others.
+- Works from a phone as an installable web app.
+
+## Quick start
 
 ```bash
 git clone <repo> && cd ucanrun
@@ -28,19 +31,27 @@ docker compose up -d
 docker logs ucanrun
 ```
 
-Không cần tạo file cấu hình. Mở `http://127.0.0.1:8780`, nhập mã truy cập trong log, rồi làm theo [Bắt đầu nhanh](docs/quickstart.md).
+No config file is needed. Open `http://127.0.0.1:8780`, enter the access code from the log, and follow the Start tab. See the [quick start](docs/quickstart.md).
 
-Mặc định, image chỉ có binary và chỉ gọi được API. Muốn chạy lệnh, xem [cấu hình](docs/configuration.md).
+## Documentation
 
-## Phát triển
+- [Quick start](docs/quickstart.md)
+- [Configuration](docs/configuration.md)
+- [Template catalog](docs/catalog.md)
+- [Creating profiles](docs/profiles.md)
+- [Root commands over SSH](docs/ssh-sudo.md)
+- [Security model](docs/security.md)
+- [Troubleshooting](docs/troubleshooting.md)
+
+## Development
 
 ```bash
 mise install
 go test -race ./...
 ```
 
-Biến `UCANRUN_LIVE_TG_TOKEN`, `UCANRUN_LIVE_TG_CHAT` bật bài test với Bot API thật.
+Set `UCANRUN_LIVE_TG_TOKEN` and `UCANRUN_LIVE_TG_CHAT` to run the test against the real Bot API. See [CONTRIBUTING](CONTRIBUTING.md) and [SECURITY](SECURITY.md).
 
-## Giấy phép
+## License
 
 [MIT](LICENSE)

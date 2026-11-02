@@ -1,37 +1,38 @@
-# Cấu hình
+# Configuration
 
-Mặc định không cần cấu hình gì. Mọi biến đều tuỳ chọn.
+Nothing is required. All variables are optional.
 
-| Biến | Mặc định | Ý nghĩa |
+| Variable | Default | Meaning |
 |---|---|---|
-| `UCANRUN_PUBLIC_URL` | Trống | Địa chỉ người dùng truy cập. Bắt đầu bằng `https://` thì bật cookie Secure và HSTS. |
-| `UCANRUN_GATE_TOKEN` | Tự sinh | Mã truy cập. Để trống thì tạo một lần trong `data/gate.token`. |
-| `UCANRUN_GATE` | Bật | `off` tắt lớp cổng. Chỉ dùng khi đã có lớp bảo vệ khác phía trước. |
-| `UCANRUN_ENABLE_EXEC` | Tắt | `1` cho phép profile chạy lệnh. |
-| `UCANRUN_APPROVAL_TTL` | `2m` | Thời gian chờ duyệt. |
-| `UCANRUN_PORT` | `8780` | Cổng web trong `compose.yml`. |
-| `UCANRUN_AGENT_PORT` | `8781` | Cổng agent trong `compose.yml`. |
+| `UCANRUN_PUBLIC_URL` | Empty | The address people use. `https://` turns on Secure cookies and HSTS. |
+| `UCANRUN_GATE_TOKEN` | Generated | The access code. When empty, one is created once in `data/gate.token`. |
+| `UCANRUN_GATE` | On | `off` removes the gate. Only use it behind another access layer. |
+| `UCANRUN_ENABLE_EXEC` | Off | `1` allows profiles that run programs. |
+| `UCANRUN_LANG` | `en` | Telegram language, `en` or `vi`. The web UI has its own setting. |
+| `UCANRUN_APPROVAL_TTL` | `2m` | How long a request waits. |
+| `UCANRUN_PORT` | `8780` | Web port in `compose.yml`. |
+| `UCANRUN_AGENT_PORT` | `8781` | Agent port in `compose.yml`. |
 
-## Hai loại image
+## Images
 
-| Image | Nội dung | Làm được |
+| Image | Contents | Can do |
 |---|---|---|
-| Mặc định | Chỉ binary và CA, không shell, không công cụ | Gọi API |
-| `exec` | Thêm Alpine, `git`, `ssh`, `curl` | Gọi API và chạy lệnh |
+| Default | Binary and CA roots, no shell, no tools | Call APIs |
+| `exec` | Adds Alpine, `git`, `ssh`, `curl` | Call APIs and run programs |
 
-Nên dùng image mặc định trừ khi thật sự cần chạy lệnh. Bản `exec` có bề mặt tấn công lớn hơn.
+Use the default image unless you need to run programs. The `exec` image has a larger attack surface.
 
 ```bash
 docker build --target exec -t ucanrun:exec .
 ```
 
-Image `exec` tự bật `UCANRUN_ENABLE_EXEC=1`.
+The `exec` image sets `UCANRUN_ENABLE_EXEC=1`.
 
-## Truy cập từ xa
+## Remote access
 
-Chỉ publish cổng web `8780`, không bao giờ publish cổng agent `8781`. Đặt `UCANRUN_PUBLIC_URL` trùng domain.
+Publish only the web port `8780`, never the agent port `8781`. Set `UCANRUN_PUBLIC_URL` to the domain.
 
-**Caddy** tự lấy chứng chỉ TLS:
+**Caddy** gets a TLS certificate automatically:
 
 ```
 ucanrun.example.com {
@@ -39,13 +40,17 @@ ucanrun.example.com {
 }
 ```
 
-**Cloudflare Tunnel:** thêm public hostname trỏ tới dịch vụ `ucanrun:8780`.
+**Cloudflare Tunnel:** add a public hostname pointing at `ucanrun:8780`.
 
 **Tailscale:** `tailscale serve --bg 8780`.
 
-## Phát hành
+## Agents on another machine
 
-Đẩy tag `v*` lên GitHub sẽ chạy `.github/workflows/release.yml`, build cho `amd64` và `arm64` rồi đưa lên GHCR. Sau đó có thể cài không cần clone:
+The agent API is unencrypted and bound to localhost. Reach it over a private network such as Tailscale, and set `UCANRUN_URL` in the agent settings. Do not expose it to the internet.
+
+## Releases
+
+Pushing a `v*` tag to GitHub runs `.github/workflows/release.yml`, which builds `amd64` and `arm64` images for GHCR. Then no clone is needed:
 
 ```bash
 docker run -d --name ucanrun -p 127.0.0.1:8780:8780 -p 127.0.0.1:8781:8781 \

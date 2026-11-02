@@ -206,7 +206,7 @@ func (e *env) raw(method, path string, body any, hdr map[string]string) (int, []
 func setup(t *testing.T, ttl time.Duration) *env {
 	dir := t.TempDir()
 	tg := newTG(t)
-	c, err := core.New(core.Options{DataDir: dir, ApprovalTTL: ttl, TelegramAPI: tg.srv.URL, WorkFactor: 10})
+	c, err := core.New(core.Options{DataDir: dir, ApprovalTTL: ttl, TelegramAPI: tg.srv.URL, WorkFactor: 10, Lang: "vi"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -954,6 +954,20 @@ func TestRecoveryCodes(t *testing.T) {
 	now, _ := totp.Code(sec2, time.Now())
 	if code, m := e.req("POST", "/api/totp/recovery", map[string]string{"code": now}); code != 200 || len(m["recovery_codes"].([]any)) != 8 {
 		t.Fatalf("regenerate: %d %v", code, m)
+	}
+}
+
+func TestTelegramSpeaksEnglishByDefault(t *testing.T) {
+	dir := t.TempDir()
+	c, _ := core.New(core.Options{DataDir: dir, WorkFactor: 10})
+	defer c.Close()
+	if got := c.Translate("sai mã TOTP"); got != "Wrong TOTP code" {
+		t.Fatal(got)
+	}
+	vi, _ := core.New(core.Options{DataDir: t.TempDir(), WorkFactor: 10, Lang: "vi"})
+	defer vi.Close()
+	if got := vi.Translate("sai mã TOTP"); got != "sai mã TOTP" {
+		t.Fatal(got)
 	}
 }
 

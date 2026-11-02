@@ -1,27 +1,21 @@
-# Danh mục mẫu
+# Template catalog
 
-Tab **Profile**, mục **Thêm nhanh**. Mỗi mẫu cần một secret; nếu kho chưa có thì ô dán hiện ngay trên thẻ. Mẫu lưu ở `internal/web/static/catalog.json`, mỗi lần chạy test đều được kiểm tra.
+Profiles tab, **Quick add**. Each template names the secret it needs; if the vault lacks it, a paste field appears on the card. Templates live in `internal/web/static/catalog.json` and are validated by the test suite.
 
-| Mẫu | Tên lệnh | Secret | Duyệt |
+| Template | Command | Secret | Approval |
 |---|---|---|---|
-| GitHub: xem repo | `github-list-repos` | `github_token` | Hỏi |
-| GitHub: tạo issue | `github-create-issue` | `github_token` | Hỏi |
-| Gitea: xem repo (cần sửa địa chỉ) | `gitea-list-repos` | `gitea_token` | Hỏi |
-| Gitea: tạo repo private (cần sửa địa chỉ) | `gitea-create-repo` | `gitea_token` | Hỏi |
-| Cloudflare: xem domain | `cloudflare-list-zones` | `cloudflare_token` | Hỏi |
-| Cloudflare: xoá cache | `cloudflare-purge-cache` | `cloudflare_token` | TOTP |
-| DeepSeek: xem số dư | `deepseek-balance` | `deepseek_key` | Tự chạy |
-| Google AI: xem model | `google-ai-list-models` | `google_ai_key` | Tự chạy |
-| Notion: tìm trang | `notion-search` | `notion_token` | Hỏi |
-| GitHub: chọn tài khoản | `github-whoami` | Chọn trên Telegram | Hỏi |
-| Khởi động lại dịch vụ qua SSH | `ssh-restart-service` | Khoá SSH và mật khẩu sudo | TOTP |
+| GitHub: list repos | `github-list-repos` | `github_token` | Ask |
+| GitHub: create an issue | `github-create-issue` | `github_token` | Ask |
+| Gitea: list repos (edit the URL) | `gitea-list-repos` | `gitea_token` | Ask |
+| Gitea: create a private repo (edit the URL) | `gitea-create-repo` | `gitea_token` | Ask |
+| Cloudflare: list domains | `cloudflare-list-zones` | `cloudflare_token` | Ask |
+| Cloudflare: purge a cache | `cloudflare-purge-cache` | `cloudflare_token` | TOTP |
+| DeepSeek: check balance | `deepseek-balance` | `deepseek_key` | Automatic |
+| Google AI: list models | `google-ai-list-models` | `google_ai_key` | Automatic |
+| Notion: search pages | `notion-search` | `notion_token` | Ask |
+| GitHub: choose an account | `github-whoami` | Chosen on Telegram | Ask |
+| Restart a service over SSH | `ssh-restart-service` | SSH key and sudo password | TOTP |
 
-Các mục cần sửa phải bấm **Tuỳ chỉnh**. Mục SSH cần image `exec` và [thiết lập riêng](ssh-sudo.md).
+Some templates need **Customize**. The SSH one needs the `exec` image and [its own setup](ssh-sudo.md).
 
-## Cấp quyền token
-
-Tạo token với quyền hẹp nhất đủ dùng. Mẫu đọc thì chỉ cần token đọc. Một token cho một việc giúp thu hồi dễ hơn.
-
-## Thêm mẫu mới
-
-Thêm một mục vào `catalog.json`, gồm `group`, `title`, `hint`, `secrets` và `profile`, rồi chạy `go test ./internal/web`. Test sẽ báo nếu profile sai luật.
+Create tokens with the narrowest scope that works. One token per job makes revoking easy.
