@@ -52,7 +52,7 @@ No config file is needed. Open `http://127.0.0.1:8780`, enter the access code fr
 
 ```bash
 mise install
-go test -race ./...
+cargo test
 ```
 
 Set `UCANRUN_LIVE_TG_TOKEN` and `UCANRUN_LIVE_TG_CHAT` to run the test against the real Bot API. See [CONTRIBUTING](CONTRIBUTING.md) and [SECURITY](SECURITY.md).

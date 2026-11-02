@@ -1,0 +1,28 @@
+{
+ "audit_entries": 8,
+ "connections": [
+  "github"
+ ],
+ "mac_key_hex": "247d9165f7acebdf56021eca46ca7b97f9f70239aebbc88037bb0623bd9c3de7",
+ "passphrase": "golden passphrase 123",
+ "profiles": [
+  "github-whoami"
+ ],
+ "recovery_codes": [
+  "XTGHM-EYUKJ",
+  "4WGJ6-QKCMD",
+  "JR3T3-ZAXED",
+  "B92ZQ-K7G7T",
+  "MWKBH-M95X9",
+  "2KQBC-D2784",
+  "EN5FS-349MW",
+  "6V43M-ACQF3"
+ ],
+ "secrets": {
+  "github_token": "ghp_golden_value_123",
+  "multi": "line one\nline two\n",
+  "unicode": "mật-khẩu-✓"
+ },
+ "token": "ucr_698b4d9e84a5ab0ee49a8fc5d024d43da890bcc51d8703ddb06931a37e47246a",
+ "totp_secret": "HB3JRRVVSMDTF4AX4F73HB6GT34I4HZK"
+}

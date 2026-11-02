@@ -47,6 +47,14 @@ The agent calls the MCP tool `list_secrets`, then `call` with a header such as `
 - You approve every request; the message says the agent wrote it.
 - With the `exec` image, `run_command` can use secrets marked "allow in commands". These always need TOTP.
 
+### Secrets with several fields
+
+A database login has a host, a port, a user and a password. Choose **Several fields** when saving the secret, and mark the fields agents may see, such as host, port, user and database, as **Public**. The agent then writes `{{secret:db.host}}` or `{{secret:db.password}}`.
+
+- Public fields are shown to the agent and may go anywhere, including the URL and command arguments.
+- Private fields follow the rules above and are masked in the output.
+- `{{secret:db}}` without a field is refused.
+
 For tighter control, the Advanced tab defines fixed actions agents may only fill in, see [fixed actions](catalog.md).
 
 ## Lost your phone
