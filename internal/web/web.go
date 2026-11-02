@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"log/slog"
 	"mime"
@@ -246,6 +247,32 @@ func (s *Server) Handler() http.Handler {
 		}
 		writeJSON(w, 200, p)
 	}))
+	m.HandleFunc("GET /api/connections", s.auth(func(w http.ResponseWriter, _ *http.Request) {
+		l, err := s.C.Connections()
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		writeJSON(w, 200, l)
+	}))
+	m.HandleFunc("PUT /api/connections", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var x policy.Connection
+		if !read(w, r, &x) {
+			return
+		}
+		if err := s.C.PutConnection(x); err != nil {
+			fail(w, err)
+			return
+		}
+		writeJSON(w, 200, x)
+	}))
+	m.HandleFunc("DELETE /api/connections/{name}", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		if err := s.C.DeleteConnection(r.PathValue("name")); err != nil {
+			fail(w, err)
+			return
+		}
+		writeJSON(w, 200, map[string]bool{"ok": true})
+	}))
 	m.HandleFunc("POST /api/profiles/preview", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Profile policy.Profile    `json:"profile"`
@@ -375,74 +402,129 @@ func (s *Server) Handler() http.Handler {
 	return s.gate(s.secure(csrf(m)))
 }
 
-type catalogEntry struct {
-	Group   string         `json:"group"`
-	GroupEn string         `json:"group_en,omitempty"`
+// A catalog entry is one service (a connection and its actions) or a group of
+// standalone actions such as command profiles.
+type catalogAction struct {
 	Title   string         `json:"title"`
 	TitleEn string         `json:"title_en,omitempty"`
-	Hint    string         `json:"hint"`
-	HintEn  string         `json:"hint_en,omitempty"`
-	Secrets []string       `json:"secrets"`
-	Custom  bool           `json:"custom,omitempty"`
 	Profile policy.Profile `json:"profile"`
 }
 
-func (s *Server) catalog(w http.ResponseWriter, _ *http.Request) {
-	raw, _ := staticFS.ReadFile("static/catalog.json")
-	var base []catalogEntry
-	_ = json.Unmarshal(raw, &base)
-	out := make([]catalogEntry, 0, len(base))
-	seen := make(map[string]bool, len(base))
-	for _, e := range base {
-		if e.Secrets == nil {
-			e.Secrets = []string{}
+type catalogEntry struct {
+	Service *policy.Connection `json:"service,omitempty"`
+	Title   string             `json:"title,omitempty"`
+	TitleEn string             `json:"title_en,omitempty"`
+	Hint    string             `json:"hint"`
+	HintEn  string             `json:"hint_en,omitempty"`
+	Custom  bool               `json:"custom,omitempty"`
+	Actions []catalogAction    `json:"actions"`
+}
+
+// validEntry checks every action the way a save would, so a template can never
+// produce a profile the server refuses.
+func validEntry(e catalogEntry) error {
+	conns := map[string]policy.Connection{}
+	if e.Service != nil {
+		if err := e.Service.Validate(); err != nil {
+			return err
 		}
-		seen[e.Profile.Name] = true
-		out = append(out, e)
+		conns[e.Service.Name] = *e.Service
 	}
-	if s.CatalogDir != "" {
-		entries, err := os.ReadDir(s.CatalogDir)
+	if len(e.Actions) == 0 {
+		return errors.New("no actions")
+	}
+	for _, a := range e.Actions {
+		p := a.Profile
+		if e.Service != nil {
+			p.Connection = e.Service.Name
+		} else if p.Connection != "" {
+			return errors.New("standalone action names a connection")
+		}
+		if err := p.Validate(); err != nil {
+			return fmt.Errorf("%s: %w", p.Name, err)
+		}
+		r, err := policy.Resolve(p, conns)
+		if err == nil {
+			err = r.Validate()
+		}
 		if err != nil {
-			if !errors.Is(err, fs.ErrNotExist) {
-				slog.Warn("reading catalog dir", "dir", s.CatalogDir, "reason", err)
-			}
-		} else {
-			for _, d := range entries {
-				if !strings.HasSuffix(d.Name(), ".json") || d.IsDir() || d.Type()&fs.ModeSymlink != 0 {
-					continue
-				}
-				info, err := d.Info()
-				if err != nil || !info.Mode().IsRegular() || info.Size() > 1<<20 {
-					continue
-				}
-				b, err := os.ReadFile(filepath.Join(s.CatalogDir, d.Name()))
-				if err != nil || len(b) > 1<<20 {
-					continue
-				}
-				var extra []catalogEntry
-				if err := json.Unmarshal(b, &extra); err != nil {
-					slog.Warn("skipping catalog file", "file", d.Name(), "reason", err)
-					continue
-				}
-				for _, e := range extra {
-					if err := e.Profile.Validate(); err != nil {
-						slog.Warn("skipping catalog entry", "file", d.Name(), "profile", e.Profile.Name, "reason", err)
-						continue
-					}
-					if seen[e.Profile.Name] {
-						slog.Warn("skipping duplicate catalog entry", "file", d.Name(), "profile", e.Profile.Name, "reason", "duplicate profile name")
-						continue
-					}
-					if e.Secrets == nil {
-						e.Secrets = []string{}
-					}
-					seen[e.Profile.Name] = true
-					out = append(out, e)
-				}
-			}
+			return fmt.Errorf("%s: %w", p.Name, err)
 		}
 	}
-	writeJSON(w, http.StatusOK, out)
+	return nil
+}
+
+func readCatalog(dir string) []catalogEntry {
+	raw, _ := staticFS.ReadFile("static/catalog.json")
+	var out []catalogEntry
+	if err := json.Unmarshal(raw, &out); err != nil {
+		slog.Error("embedded catalog", "err", err)
+		return nil
+	}
+	seenConn, seenProfile := map[string]bool{}, map[string]bool{}
+	mark := func(e catalogEntry) {
+		if e.Service != nil {
+			seenConn[e.Service.Name] = true
+		}
+		for _, a := range e.Actions {
+			seenProfile[a.Profile.Name] = true
+		}
+	}
+	for _, e := range out {
+		mark(e)
+	}
+	if dir == "" {
+		return out
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			slog.Warn("reading catalog dir", "dir", dir, "reason", err)
+		}
+		return out
+	}
+	for _, d := range entries {
+		if !strings.HasSuffix(d.Name(), ".json") || d.IsDir() || d.Type()&fs.ModeSymlink != 0 {
+			continue
+		}
+		info, err := d.Info()
+		if err != nil || !info.Mode().IsRegular() || info.Size() > 1<<20 {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(dir, d.Name()))
+		if err != nil || len(b) > 1<<20 {
+			continue
+		}
+		var extra []catalogEntry
+		if err := json.Unmarshal(b, &extra); err != nil {
+			slog.Warn("skipping catalog file", "file", d.Name(), "reason", err)
+			continue
+		}
+	next:
+		for _, e := range extra {
+			if err := validEntry(e); err != nil {
+				slog.Warn("skipping catalog entry", "file", d.Name(), "reason", err)
+				continue
+			}
+			if e.Service != nil && seenConn[e.Service.Name] {
+				slog.Warn("skipping catalog entry", "file", d.Name(), "reason", "duplicate service "+e.Service.Name)
+				continue
+			}
+			for _, a := range e.Actions {
+				if seenProfile[a.Profile.Name] {
+					slog.Warn("skipping catalog entry", "file", d.Name(), "reason", "duplicate profile "+a.Profile.Name)
+					continue next
+				}
+			}
+			mark(e)
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+func (s *Server) catalog(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, readCatalog(s.CatalogDir))
 }
 
 func (s *Server) status(w http.ResponseWriter, r *http.Request) {

@@ -190,7 +190,7 @@ func (c *Core) Setup(pass []byte) error {
 	if err := c.Vault.Init(pass); err != nil {
 		return err
 	}
-	c.st = &State{Version: currentStateVersion, Profiles: map[string]policy.Profile{}, Tokens: map[string]Token{}}
+	c.st = &State{Version: currentStateVersion, Profiles: map[string]policy.Profile{}, Tokens: map[string]Token{}, Connections: map[string]policy.Connection{}}
 	if err := c.saveLocked(); err != nil {
 		return err
 	}
@@ -631,8 +631,81 @@ func (c *Core) PutProfile(p policy.Profile) error {
 	if c.st == nil {
 		return ErrLocked
 	}
+	if r, err := policy.Resolve(p, c.st.Connections); err != nil {
+		return err
+	} else if err := r.Validate(); err != nil {
+		return err
+	}
 	c.st.Profiles[p.Name] = p
 	c.log("profile_put", "web", map[string]any{"name": p.Name, "risk": p.Risk})
+	return c.saveLocked()
+}
+
+func (c *Core) Connections() ([]policy.Connection, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.st == nil {
+		return nil, ErrLocked
+	}
+	out := make([]policy.Connection, 0, len(c.st.Connections))
+	for _, x := range c.st.Connections {
+		out = append(out, x)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
+// PutConnection saves a connection. Every profile that uses it must still be
+// valid afterwards, or nothing changes.
+func (c *Core) PutConnection(x policy.Connection) error {
+	if err := x.Validate(); err != nil {
+		return err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.st == nil {
+		return ErrLocked
+	}
+	next := map[string]policy.Connection{}
+	for k, v := range c.st.Connections {
+		next[k] = v
+	}
+	next[x.Name] = x
+	for _, p := range c.st.Profiles {
+		if p.Connection != x.Name {
+			continue
+		}
+		r, err := policy.Resolve(p, next)
+		if err == nil {
+			err = r.Validate()
+		}
+		if err != nil {
+			return fmt.Errorf("profile %q would break: %w", p.Name, err)
+		}
+	}
+	c.st.Connections = next
+	c.log("connection_put", "web", map[string]any{"name": x.Name, "base_url": x.BaseURL, "auth": x.Auth.Type})
+	return c.saveLocked()
+}
+
+func (c *Core) DeleteConnection(name string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.st == nil {
+		return ErrLocked
+	}
+	var users []string
+	for _, p := range c.st.Profiles {
+		if p.Connection == name {
+			users = append(users, p.Name)
+		}
+	}
+	if len(users) > 0 {
+		sort.Strings(users)
+		return fmt.Errorf("connection is used by: %s", strings.Join(users, ", "))
+	}
+	delete(c.st.Connections, name)
+	c.log("connection_delete", "web", map[string]any{"name": name})
 	return c.saveLocked()
 }
 
@@ -802,12 +875,16 @@ func (c *Core) submitLocked(t Token, profile string, params map[string]string, r
 		c.log("request_forbidden", t.Name, map[string]any{"profile": profile})
 		return Request{}, ErrForbidden
 	}
-	p, ok := c.st.Profiles[profile]
+	stored, ok := c.st.Profiles[profile]
 	if !ok {
 		return Request{}, ErrNotFound
 	}
-	if p.Exec != nil && !c.opt.AllowExec {
+	if stored.Exec != nil && !c.opt.AllowExec {
 		return Request{}, ErrExecOff
+	}
+	p, err := policy.Resolve(stored, c.st.Connections)
+	if err != nil {
+		return Request{}, err
 	}
 	a, err := p.Render(params)
 	if err != nil {
@@ -1091,6 +1168,18 @@ func (c *Core) Preview(p policy.Profile, sample map[string]string) Preview {
 		out.Error = err.Error()
 		return out
 	}
+	c.mu.Lock()
+	var conns map[string]policy.Connection
+	if c.st != nil {
+		conns = c.st.Connections
+	}
+	r, err := policy.Resolve(p, conns)
+	c.mu.Unlock()
+	if err != nil {
+		out.Error = err.Error()
+		return out
+	}
+	p = r
 	if p.Exec != nil && !c.opt.AllowExec {
 		out.Error = ErrExecOff.Error()
 		return out

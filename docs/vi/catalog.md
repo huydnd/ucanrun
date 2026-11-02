@@ -1,27 +1,24 @@
-# Danh mục mẫu
+# Dịch vụ và hành động
 
-Tab **Profile**, mục **Thêm nhanh**. Mỗi mẫu cần một secret; nếu kho chưa có thì ô dán hiện ngay trên thẻ. Mẫu lưu ở `internal/web/static/catalog.json`, mỗi lần chạy test đều được kiểm tra.
+ucanrun dùng một mô hình chung thay vì code riêng cho từng dịch vụ:
 
-| Mẫu | Tên lệnh | Secret | Duyệt |
-|---|---|---|---|
-| GitHub: xem repo | `github-list-repos` | `github_token` | Hỏi |
-| GitHub: tạo issue | `github-create-issue` | `github_token` | Hỏi |
-| Gitea: xem repo (cần sửa địa chỉ) | `gitea-list-repos` | `gitea_token` | Hỏi |
-| Gitea: tạo repo private (cần sửa địa chỉ) | `gitea-create-repo` | `gitea_token` | Hỏi |
-| Cloudflare: xem domain | `cloudflare-list-zones` | `cloudflare_token` | Hỏi |
-| Cloudflare: xoá cache | `cloudflare-purge-cache` | `cloudflare_token` | TOTP |
-| DeepSeek: xem số dư | `deepseek-balance` | `deepseek_key` | Tự chạy |
-| Google AI: xem model | `google-ai-list-models` | `google_ai_key` | Tự chạy |
-| Notion: tìm trang | `notion-search` | `notion_token` | Hỏi |
-| GitHub: chọn tài khoản | `github-whoami` | Chọn trên Telegram | Hỏi |
-| Khởi động lại dịch vụ qua SSH | `ssh-restart-service` | Khoá SSH và mật khẩu sudo | TOTP |
+- **Kết nối** khai báo một dịch vụ một lần: địa chỉ gốc, cách đăng nhập, secret và header chung.
+- **Hành động** (profile) dùng một kết nối, chỉ ghi phương thức, đường dẫn và các giá trị agent được điền.
 
-Các mục cần sửa phải bấm **Tuỳ chỉnh**. Mục SSH cần image `exec` và [thiết lập riêng](ssh-sudo.md).
+Máy chủ và đăng nhập luôn lấy từ kết nối, nên hành động không thể gửi secret đi nơi khác. Sửa kết nối, ví dụ đổi máy chủ, thì mọi hành động đi theo; thay đổi làm hỏng hành động nào sẽ bị từ chối.
 
-## Cấp quyền token
+## Thêm nhanh
 
-Tạo token với quyền hẹp nhất đủ dùng. Mẫu đọc thì chỉ cần token đọc. Một token cho một việc giúp thu hồi dễ hơn.
+Tab Profile, **Thêm nhanh**. Chọn dịch vụ, dán token một lần, tích các hành động agent được xin, bấm **Thêm**. **Dịch vụ khác** khai báo được mọi API dùng token.
 
-## Thêm mẫu mới
+Danh sách sẵn là dữ liệu trong `internal/web/static/catalog.json`: GitHub, Gitea, Cloudflare, DeepSeek, Google AI, Notion, và một lệnh SSH đứng riêng (cần image `exec`, xem [ssh-sudo](ssh-sudo.md)).
 
-Thêm một mục vào `catalog.json`, gồm `group`, `title`, `hint`, `secrets` và `profile`, rồi chạy `go test ./internal/web`. Test sẽ báo nếu profile sai luật.
+## Nhiều tài khoản cho một dịch vụ
+
+Sửa kết nối, chọn **Chọn khi duyệt**, tích các secret. Telegram hiện mỗi secret một nút **Dùng tên**, kết quả ghi rõ secret đã dùng.
+
+## Mẫu riêng
+
+Đặt file `*.json` vào `data/catalog.d/` (hoặc `UCANRUN_CATALOG_DIR`), cùng định dạng như bản tiếng Anh của tài liệu này. Mục sai được bỏ qua và ghi log.
+
+Xuất và nhập ở tab Profile mang theo cả kết nối và profile. File chỉ có tên secret, không có giá trị.

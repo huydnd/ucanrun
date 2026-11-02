@@ -5,8 +5,8 @@ Profile là một việc cụ thể bạn cho phép agent xin làm. Agent chỉ 
 ## Các bước trên form
 
 1. **Việc cần làm:** viết một câu. Tên lệnh tự sinh từ câu này.
-2. **Gọi tới đâu:** chọn **Gọi API** nếu được. **Chạy lệnh** chạy chương trình trong container nên rủi ro hơn.
-3. **Đăng nhập bằng gì:** chọn kiểu, rồi chọn secret, hoặc **Chọn khi duyệt trên Telegram**.
+2. **Gọi tới đâu:** nên chọn **Dùng kết nối** rồi chỉ ghi đường dẫn. **Địa chỉ đầy đủ** cho việc lẻ. **Chạy lệnh** cần image `exec`.
+3. **Đăng nhập bằng gì:** lấy từ kết nối. Với địa chỉ đầy đủ thì chọn kiểu và secret, hoặc **Chọn khi duyệt trên Telegram**.
 4. **Agent được điền gì:** thêm giá trị và chọn kiểu dữ liệu. Bấm nút tên giá trị để chèn vào ô đang chọn.
 5. **Nội dung gửi đi:** chỉ cần với POST, PUT, PATCH.
 6. **Ai duyệt:** chọn mức phù hợp.

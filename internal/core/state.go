@@ -33,12 +33,13 @@ const currentStateVersion = 1
 // who can write the data directory but lacks the passphrase cannot add a profile
 // or a token.
 type State struct {
-	Version      int                       `json:"version"`
-	Profiles     map[string]policy.Profile `json:"profiles"`
-	Tokens       map[string]Token          `json:"tokens"`
-	Telegram     TelegramCfg               `json:"telegram"`
-	TOTPEnabled  bool                      `json:"totp_enabled"`
-	LastTOTPStep int64                     `json:"last_totp_step"`
+	Version      int                          `json:"version"`
+	Profiles     map[string]policy.Profile    `json:"profiles"`
+	Connections  map[string]policy.Connection `json:"connections,omitempty"`
+	Tokens       map[string]Token             `json:"tokens"`
+	Telegram     TelegramCfg                  `json:"telegram"`
+	TOTPEnabled  bool                         `json:"totp_enabled"`
+	LastTOTPStep int64                        `json:"last_totp_step"`
 	// RecoveryHashes are SHA-256 of single-use recovery codes. The codes carry
 	// 50 random bits, so a fast hash is enough.
 	RecoveryHashes []string `json:"recovery_hashes,omitempty"`
@@ -116,6 +117,9 @@ func loadState(path string, key []byte) (*State, error) {
 	}
 	if st.Tokens == nil {
 		st.Tokens = map[string]Token{}
+	}
+	if st.Connections == nil {
+		st.Connections = map[string]policy.Connection{}
 	}
 	return st, nil
 }

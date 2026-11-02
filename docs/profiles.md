@@ -5,8 +5,8 @@ A profile is one specific action an agent may request. The agent only fills the 
 ## The form
 
 1. **What to do:** write one sentence. The command name is generated from it.
-2. **Where to call:** prefer **Call an API**. **Run a command** needs the `exec` image.
-3. **How to authenticate:** pick a style and a secret, or **Choose when approving on Telegram**.
+2. **Where to call:** prefer **Use a connection**, then write only the path. **Full URL** is for one-off calls. **Run a command** needs the `exec` image.
+3. **How to authenticate:** comes from the connection. With a full URL, pick a style and a secret, or **Choose when approving on Telegram**.
 4. **What the agent may fill in:** add values and pick a type. Tap a value name to insert it into the focused field.
 5. **Request body:** only for POST, PUT and PATCH.
 6. **Who approves:** pick a level.
