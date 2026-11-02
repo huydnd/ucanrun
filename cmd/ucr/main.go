@@ -55,7 +55,7 @@ Agent:
   ucr mcp                   stdio MCP server
 
 Environment: UCANRUN_PUBLIC_URL, UCANRUN_GATE_TOKEN, UCANRUN_GATE=off,
-UCANRUN_ENABLE_EXEC=1, UCANRUN_LANG=vi|en, UCANRUN_UNLOCK_FILE, UCANRUN_DATA, UCANRUN_WEB_ADDR, UCANRUN_AGENT_ADDR,
+UCANRUN_ENABLE_EXEC=1, UCANRUN_LANG=vi|en, UCANRUN_UNLOCK_FILE, UCANRUN_CATALOG_DIR, UCANRUN_DATA, UCANRUN_WEB_ADDR, UCANRUN_AGENT_ADDR,
 UCANRUN_APPROVAL_TTL, UCANRUN_URL, UCANRUN_TOKEN
 `
 
@@ -178,6 +178,7 @@ func serve() error {
 		return err
 	}
 	s := web.New(c, setup, filepath.Join(dir, "audit.jsonl"), strings.HasPrefix(public, "https://"))
+	s.CatalogDir = env("UCANRUN_CATALOG_DIR", filepath.Join(dir, "catalog.d"))
 	if os.Getenv("UCANRUN_GATE") == "off" {
 		slog.Warn("UCANRUN_GATE=off: the web UI has no access gate")
 	} else {

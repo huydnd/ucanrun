@@ -18,4 +18,8 @@ Profiles tab, **Quick add**. Each template names the secret it needs; if the vau
 
 Some templates need **Customize**. The SSH one needs the `exec` image and [its own setup](ssh-sudo.md).
 
+## Your own templates
+
+Put `*.json` files in `data/catalog.d/` (or `UCANRUN_CATALOG_DIR`), each an array of entries shaped like `catalog.json`. They appear in Quick add without a rebuild. The Profiles tab can also export all profiles to a file and import them on another server; the file holds secret names, never values.
+
 Create tokens with the narrowest scope that works. One token per job makes revoking easy.
