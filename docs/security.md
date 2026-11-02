@@ -29,7 +29,7 @@
 | Output | Redacts secrets and their base64, hex and URL-encoded forms. Redirects are not followed. |
 | Web | No API reads a secret. HttpOnly and SameSite cookies, strict CSP, sign-in throttling. |
 | Container | Not root, read-only root filesystem, no capabilities, no shell in the default image. |
-| Audit | A hash chain detects edited lines. Truncating the end of the file is not detected yet. |
+| Audit | A hash chain detects edited lines, and the signed state anchors the head on save and lock to detect truncation (entries after the last save are not covered). |
 
 ## When something leaks
 
