@@ -1,12 +1,20 @@
 package web
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	_ "embed"
+	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
+
+	"github.com/huydnd/ucanrun/internal/vault"
 )
 
 //go:embed gate.html
@@ -16,6 +24,33 @@ const (
 	gateCookie = "ucr_gate"
 	gateMaxAge = 30 * 24 * time.Hour
 )
+
+// LoadGateToken returns the access code. An explicit value wins, otherwise a code
+// is created once in the data directory, so that a default install is gated
+// without any configuration. Created reports a new code.
+func LoadGateToken(dir, explicit string) (token string, created bool, err error) {
+	if explicit != "" {
+		return explicit, false, nil
+	}
+	path := filepath.Join(dir, "gate.token")
+	b, err := os.ReadFile(path)
+	if err == nil {
+		if t := strings.TrimSpace(string(b)); t != "" {
+			return t, false, nil
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", false, err
+	}
+	r := make([]byte, 18)
+	if _, err := rand.Read(r); err != nil {
+		return "", false, err
+	}
+	t := base64.RawURLEncoding.EncodeToString(r)
+	if err := vault.AtomicWrite(path, []byte(t+"\n")); err != nil {
+		return "", false, err
+	}
+	return t, true, nil
+}
 
 // gateValue derives the cookie from the token, so the browser never stores the
 // token itself and changing the token signs everyone out.

@@ -1,5 +1,7 @@
 # Lệnh root trên máy chủ
 
+Cần image `exec`. Xem [cấu hình](configuration.md).
+
 Máy chủ tắt đăng nhập SSH bằng mật khẩu (`PasswordAuthentication no`), nên mật khẩu root không dùng để SSH được. Không nên bật lại. ucanrun dùng hai lớp thay thế:
 
 1. **Khoá SSH riêng** để vào máy bằng user `huydnd`.

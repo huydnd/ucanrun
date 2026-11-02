@@ -2,21 +2,30 @@
 
 Hướng dẫn này dành cho người dùng mới. Khoảng 10 phút.
 
-## 0. Mã truy cập
-
-Trang công khai có một lớp cổng. Không có mã thì không thấy cả trang đăng nhập. Mã nằm trong `.env`, lấy trên máy chủ:
+## 0. Cài đặt
 
 ```bash
-grep UCANRUN_GATE_TOKEN /srv/ucanrun/.env
+git clone <repo> && cd ucanrun
+docker compose up -d
+docker logs ucanrun
 ```
 
-Lưu mã vào Bitwarden. Mỗi trình duyệt chỉ nhập một lần trong 30 ngày. Đổi mã: sửa `.env` rồi chạy `docker compose up -d`.
+Log in ra **mã truy cập** và **setup token**. Không cần tạo file cấu hình. Mở `http://127.0.0.1:8780`, nhập mã truy cập. Lưu mã vào trình quản lý mật khẩu; xem lại bằng `docker exec ucanrun ucr gate`.
+
+Đổi cổng khi bị trùng: `UCANRUN_PORT=9000 docker compose up -d`.
+
+### Dùng qua domain
+
+Đặt địa chỉ công khai rồi chạy lại, xem [cấu hình](configuration.md):
+
+```bash
+UCANRUN_PUBLIC_URL=https://ucanrun.example.com docker compose up -d
+```
 
 ## 1. Khởi tạo kho
 
-1. Mở giao diện web. Ví dụ: `https://ucanrun.example.com`.
-2. Lấy setup token: `docker logs ucanrun | tail -3`.
-3. Đặt **mật khẩu chính**, lưu vào Bitwarden. Mất mật khẩu này thì không khôi phục được.
+1. Nhập setup token từ log.
+2. Đặt **mật khẩu chính**, lưu vào Bitwarden. Mất mật khẩu này thì không khôi phục được.
 
 ## 2. Nối Telegram
 
