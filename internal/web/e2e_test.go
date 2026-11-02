@@ -690,6 +690,84 @@ func TestPairCodeIsShortAndBurnsAfterGuesses(t *testing.T) {
 	waitFor(t, "pairing", func() bool { return e.c.TelegramStatus().Paired })
 }
 
+func TestApproverChoosesSecretOnTelegram(t *testing.T) {
+	e := setup(t, time.Minute)
+	e.pair()
+	if code, _ := e.req("PUT", "/api/secrets/other", map[string]string{"value": "second-secret-value-42"}); code != 200 {
+		t.Fatal("secret")
+	}
+	p := policy.Profile{Name: "pick", Risk: policy.RiskLow, SecretChoices: []string{"gitea", "other", "absent"},
+		HTTP: &policy.HTTPSpec{Method: "GET", URL: e.target.URL + "/x", Headers: map[string]string{"Authorization": "token {{secret:choice}}"}}}
+	if code, m := e.req("PUT", "/api/profiles", p); code != 200 {
+		t.Fatalf("%d %v", code, m)
+	}
+	cl := e.token("c", nil)
+	ctx := context.Background()
+	r, err := cl.Run(ctx, "pick", nil, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, hash := r["id"].(string), r["hash"].(string)
+	if !strings.Contains(r["display"].(string), "‹secret bạn chọn khi duyệt›") {
+		t.Fatalf("%v", r)
+	}
+	e.tg.lastButton(t, "Bấm tên secret")
+	short := hash[:16]
+	// Plain approve, an out of range button, a secret off the list, and a
+	// listed secret missing from the vault must all fail.
+	e.tg.press(stranger, owner, "a:"+id+":"+short+":1")
+	e.tg.press(owner, owner, "a:"+id+":"+short)
+	e.tg.press(owner, owner, "a:"+id+":"+short+":9")
+	waitFor(t, "invalid choice", func() bool { return strings.Contains(e.tg.dump(), "Lựa chọn không hợp lệ") })
+	if code, _ := e.req("POST", "/api/requests/"+id+"/decide", map[string]any{"approve": true, "hash": hash, "secret": "_totp_secret"}); code == 200 {
+		t.Fatal("off-list secret accepted")
+	}
+	if code, _ := e.req("POST", "/api/requests/"+id+"/decide", map[string]any{"approve": true, "hash": hash, "secret": "absent"}); code == 200 {
+		t.Fatal("missing secret accepted")
+	}
+	if e.hits() != 0 {
+		t.Fatal("ran before a valid choice")
+	}
+	e.tg.press(owner, owner, "a:"+id+":"+short+":1")
+	q := e.wait(id, core.Done)
+	if e.gotAuth() != "token second-secret-value-42" || q.Secret != "other" {
+		t.Fatalf("%q %+v", e.gotAuth(), q)
+	}
+	if strings.Contains(q.Result.Output, "second-secret-value-42") {
+		t.Fatal("leak")
+	}
+	waitFor(t, "secret named in result", func() bool { return strings.Contains(e.tg.dump(), "Secret đã dùng: other") })
+	if strings.Contains(e.tg.dump(), "second-secret-value-42") {
+		t.Fatal("secret on Telegram")
+	}
+}
+
+func TestCatalogIsValid(t *testing.T) {
+	raw, err := staticFS.ReadFile("static/catalog.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cat []struct {
+		Title   string         `json:"title"`
+		Secrets []string       `json:"secrets"`
+		Profile policy.Profile `json:"profile"`
+	}
+	if err := json.Unmarshal(raw, &cat); err != nil {
+		t.Fatal(err)
+	}
+	if len(cat) < 8 {
+		t.Fatalf("only %d entries", len(cat))
+	}
+	for _, c := range cat {
+		if err := c.Profile.Validate(); err != nil {
+			t.Errorf("%s: %v", c.Profile.Name, err)
+		}
+		if len(c.Secrets) == 0 && len(c.Profile.SecretChoices) == 0 {
+			t.Errorf("%s: names no secret", c.Profile.Name)
+		}
+	}
+}
+
 func TestSetupDisabledWithoutToken(t *testing.T) {
 	dir := t.TempDir()
 	c, _ := core.New(core.Options{DataDir: dir, WorkFactor: 10})

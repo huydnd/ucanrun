@@ -246,3 +246,62 @@ func TestExecRunsInPrivateHome(t *testing.T) {
 		t.Fatalf("%q %q", r1.Output, r2.Output)
 	}
 }
+
+func TestExecStdinAndFiles(t *testing.T) {
+	cat, err := exec.LookPath("cat")
+	if err != nil {
+		t.Skip("cat missing")
+	}
+	const v = "key-material-0123456789"
+	get := func(string) ([]byte, error) { return []byte(v), nil }
+	r := Run(context.Background(), &Action{TimeoutSec: 5, Exec: &ExecSpec{Argv: []string{cat}, Stdin: "{{secret:p}}"}}, get)
+	if !r.OK || !strings.Contains(r.Output, "[REDACTED]") || strings.Contains(r.Output, v) {
+		t.Fatalf("stdin: %+v", r)
+	}
+	r = Run(context.Background(), &Action{TimeoutSec: 5, Exec: &ExecSpec{Argv: []string{cat, "id_key"}, Files: map[string]string{"id_key": "{{secret:k}}"}}}, get)
+	if !r.OK || !strings.Contains(r.Output, "[REDACTED]") {
+		t.Fatalf("file: %+v", r)
+	}
+	bad := map[string]*ExecSpec{
+		"path escape":   {Argv: []string{"/bin/x"}, Files: map[string]string{"../x": "{{secret:k}}"}},
+		"param in file": {Argv: []string{"/bin/x"}, Files: map[string]string{"k": "{{a}}"}},
+	}
+	for name, e := range bad {
+		p := &Profile{Name: "x", Risk: RiskLow, Exec: e, Params: []Param{{Name: "a", Pattern: "a"}}}
+		if p.Validate() == nil {
+			t.Errorf("%s accepted", name)
+		}
+	}
+	if d := (&Action{Exec: &ExecSpec{Argv: []string{"/bin/x"}, Stdin: "{{secret:p}}", Files: map[string]string{"k": "{{secret:q}}"}}}).Display(); !strings.Contains(d, "stdin: ‹secret:p›") || !strings.Contains(d, "file k: ‹secret:q›") {
+		t.Fatal(d)
+	}
+}
+
+func TestSecretChoiceRules(t *testing.T) {
+	base := func() *Profile {
+		return &Profile{Name: "p", Risk: RiskLow, SecretChoices: []string{"a"},
+			HTTP: &HTTPSpec{Method: "GET", URL: "https://x.example/", Headers: map[string]string{"A": "{{secret:choice}}"}}}
+	}
+	if err := base().Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for name, f := range map[string]func(*Profile){
+		"no list":  func(p *Profile) { p.SecretChoices = nil },
+		"internal": func(p *Profile) { p.SecretChoices = []string{"_totp_secret"} },
+		"auto":     func(p *Profile) { p.AutoApprove = true },
+		"no slot":  func(p *Profile) { p.HTTP.Headers = nil },
+	} {
+		p := base()
+		f(p)
+		if p.Validate() == nil {
+			t.Errorf("%s accepted", name)
+		}
+	}
+	a, _ := base().Render(nil)
+	if got := a.WithChoice("zed").Secrets(); len(got) != 1 || got[0] != "zed" {
+		t.Fatalf("%v", got)
+	}
+	if a.Secrets()[0] != ChoiceRef {
+		t.Fatal("WithChoice mutated the original")
+	}
+}

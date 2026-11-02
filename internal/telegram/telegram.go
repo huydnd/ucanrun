@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -20,8 +21,9 @@ import (
 
 // Handler is implemented by core. Identity is checked here before it is called.
 type Handler interface {
-	Decide(id, shortHash string, approve bool, actor, totp string) (string, error)
+	Decide(id, shortHash string, approve bool, actor, totp, secret string) (string, error)
 	NeedsTOTP(id string) bool
+	SecretAt(id string, index int) (string, bool)
 	Pair(code string, userID, chatID int64) bool
 }
 
@@ -44,8 +46,8 @@ type Bot struct {
 }
 
 type pendingCode struct {
-	id, short string
-	until     time.Time
+	id, short, secret string
+	until             time.Time
 }
 
 func New(cfg Config, h Handler) *Bot {
@@ -112,21 +114,28 @@ type button struct {
 	Data string `json:"callback_data"`
 }
 
-func keyboard(id, short string) map[string]any {
-	return map[string]any{"inline_keyboard": [][]button{{
-		{Text: "✅ Duyệt", Data: "a:" + id + ":" + short},
-		{Text: "❌ Từ chối", Data: "d:" + id + ":" + short},
-	}}}
+// keyboard shows one approve button per secret when the approver must choose.
+// Callback data carries an index, not a name, so names need not fit in 64 bytes.
+func keyboard(id, short string, choices []string) map[string]any {
+	deny := button{Text: "❌ Từ chối", Data: "d:" + id + ":" + short}
+	if len(choices) == 0 {
+		return map[string]any{"inline_keyboard": [][]button{{{Text: "✅ Duyệt", Data: "a:" + id + ":" + short}, deny}}}
+	}
+	rows := [][]button{}
+	for i, n := range choices {
+		rows = append(rows, []button{{Text: "✅ Dùng " + n, Data: fmt.Sprintf("a:%s:%s:%d", id, short, i)}})
+	}
+	return map[string]any{"inline_keyboard": append(rows, []button{deny})}
 }
 
 // Notify sends a request for approval.
-func (b *Bot) Notify(ctx context.Context, id, short, text string) error {
+func (b *Bot) Notify(ctx context.Context, id, short, text string, choices []string) error {
 	_, chat := b.owner()
 	var m struct {
 		MessageID int64 `json:"message_id"`
 	}
 	err := b.call(ctx, "sendMessage", map[string]any{
-		"chat_id": chat, "text": text, "reply_markup": keyboard(id, short),
+		"chat_id": chat, "text": text, "reply_markup": keyboard(id, short, choices),
 		"disable_web_page_preview": true,
 	}, &m)
 	if err == nil {
@@ -267,7 +276,7 @@ func (b *Bot) handle(ctx context.Context, u update) {
 		b.say(ctx, m.Chat.ID, "Không có yêu cầu nào đang chờ mã.")
 		return
 	}
-	msg, err := b.h.Decide(p.id, p.short, true, fmt.Sprintf("telegram:%d", m.From.ID), text)
+	msg, err := b.h.Decide(p.id, p.short, true, fmt.Sprintf("telegram:%d", m.From.ID), text, p.secret)
 	if err != nil {
 		msg = "Không duyệt được: " + err.Error()
 	}
@@ -286,20 +295,29 @@ func (b *Bot) handleCallback(ctx context.Context, u update) {
 		return
 	}
 	parts := strings.Split(c.Data, ":")
-	if len(parts) != 3 {
+	if len(parts) != 3 && len(parts) != 4 {
 		answer("Dữ liệu sai")
 		return
 	}
-	approve, id, short := parts[0] == "a", parts[1], parts[2]
+	approve, id, short, secret := parts[0] == "a", parts[1], parts[2], ""
+	if len(parts) == 4 {
+		i, err := strconv.Atoi(parts[3])
+		name, ok := b.h.SecretAt(id, i)
+		if err != nil || !ok {
+			answer("Lựa chọn không hợp lệ")
+			return
+		}
+		secret = name
+	}
 	if approve && b.h.NeedsTOTP(id) {
 		b.mu.Lock()
-		b.waiting[c.From.ID] = pendingCode{id: id, short: short, until: time.Now().Add(2 * time.Minute)}
+		b.waiting[c.From.ID] = pendingCode{id: id, short: short, secret: secret, until: time.Now().Add(2 * time.Minute)}
 		b.mu.Unlock()
 		answer("Cần mã TOTP")
 		b.say(ctx, c.Message.Chat.ID, "Yêu cầu rủi ro cao "+id+". Gửi mã TOTP 6 số trong 2 phút.")
 		return
 	}
-	msg, err := b.h.Decide(id, short, approve, fmt.Sprintf("telegram:%d", c.From.ID), "")
+	msg, err := b.h.Decide(id, short, approve, fmt.Sprintf("telegram:%d", c.From.ID), "", secret)
 	if err != nil {
 		answer(err.Error())
 		return

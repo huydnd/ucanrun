@@ -81,7 +81,7 @@ function renderShell() {
   const views = {requests: viewRequests, secrets: viewSecrets, profiles: viewProfiles, tokens: viewTokens, settings: viewSettings, audit: viewAudit};
   const draw = () => views[state.tab](body).catch(e => { if (e.status === 401) boot(); else fill(body, h("div", {class: "err"}, e.message)); });
   draw();
-  if (state.tab === "requests") state.timer = setInterval(() => { if (!body.querySelector("input:focus")) draw(); }, 3000);
+  if (state.tab === "requests") state.timer = setInterval(() => { if (!body.querySelector("input:focus, select:focus")) draw(); }, 3000);
 }
 
 async function viewRequests(body) {
@@ -91,8 +91,11 @@ async function viewRequests(body) {
   const card = r => {
     const code = h("input", {placeholder: "Mã TOTP", inputmode: "numeric", maxlength: 6});
     const err = h("div", {class: "err"});
+    state.picks = state.picks || {};
+    // The list redraws every 3 seconds, so the choice must outlive the element.
+    const pick = r.choices && r.choices.length ? select(state.picks[r.id] || r.choices[0], r.choices.map(n => [n, n]), v => { state.picks[r.id] = v; }, "Chọn secret") : null;
     const act = approve => async () => {
-      try { await api("POST", `/api/requests/${r.id}/decide`, {approve, hash: r.hash, totp: code.value}); viewRequests(body); }
+      try { await api("POST", `/api/requests/${r.id}/decide`, {approve, hash: r.hash, totp: code.value, secret: pick ? pick.value : ""}); viewRequests(body); }
       catch (e) { err.textContent = e.message; }
     };
     return h("div", {class: "card"},
@@ -100,9 +103,9 @@ async function viewRequests(body) {
       h("div", {class: "muted"}, `Agent: ${r.caller} · Mã: ${r.hash.slice(0, 8)} · ${new Date(r.created).toLocaleTimeString()}`),
       h("pre", null, r.display),
       r.reason ? h("div", {class: "muted"}, "Lý do (agent tự khai, chưa kiểm chứng): " + r.reason) : null,
-      r.state === "pending" ? h("div", null, r.risk === "high" ? code : null,
+      r.state === "pending" ? h("div", null, pick ? h("label", null, h("span", null, "Secret dùng cho lần này"), pick) : null, r.risk === "high" ? code : null,
         h("div", {class: "row"}, h("button", {class: "primary", onclick: act(true)}, "Duyệt"), h("button", {class: "danger", onclick: act(false)}, "Từ chối")), err) : null,
-      r.state !== "pending" ? h("div", {class: "muted"}, `Kết quả: ${r.state}` + (r.decided_by ? ` · ${r.decided_by}` : "")) : null,
+      r.state !== "pending" ? h("div", {class: "muted"}, `Kết quả: ${r.state}` + (r.decided_by ? ` · ${r.decided_by}` : "") + (r.secret ? ` · secret ${r.secret}` : "")) : null,
       r.result ? h("pre", null, r.result.output) : null);
   };
   fill(body, h("h2", null, `Đang chờ duyệt (${pending.length})`),
@@ -114,11 +117,14 @@ async function viewSecrets(body) {
   const list = await api("GET", "/api/secrets");
   const n = field("Tên", {autocomplete: "off"});
   const v = field("Giá trị", {type: "password", autocomplete: "off"});
-  fill(body, 
+  const multi = h("textarea", {class: "short", spellcheck: "false", "aria-label": "Giá trị nhiều dòng", hidden: true});
+  const toggle = h("input", {type: "checkbox", onchange: e => { multi.hidden = !e.target.checked; v.el.hidden = e.target.checked; }});
+  fill(body,
     form("Thêm hoặc thay secret", [n, v], "Lưu", async () => {
-      await api("PUT", "/api/secrets/" + encodeURIComponent(n.input.value), {value: v.input.value});
+      await api("PUT", "/api/secrets/" + encodeURIComponent(n.input.value), {value: toggle.checked ? multi.value : v.input.value});
       viewSecrets(body);
-    }, h("p", {class: "muted"}, "Giá trị chỉ ghi, không có cách xem lại trên giao diện. Nhập trùng tên để thay.")),
+    }, h("div", null, h("p", {class: "muted"}, "Giá trị chỉ ghi, không có cách xem lại trên giao diện. Nhập trùng tên để thay."),
+      h("label", {class: "check"}, toggle, h("span", null, "Nhiều dòng, như khoá SSH")), multi)),
     h("div", {class: "card"}, h("h2", null, `Secret (${list.length})`),
       list.length ? list.map(s => h("div", {class: "spread"}, h("span", null, h("code", null, s.name), h("div", {class: "muted"}, new Date(s.updated).toLocaleString())),
         h("button", {class: "danger", onclick: async () => {
@@ -158,6 +164,8 @@ const errorText = [
   [/env "(.+)" is not allowed/, m => `Không dùng được biến ${m[1]}, vì nó đổi cách chương trình chạy.`],
   [/high risk profile cannot auto/, "Mức cần TOTP không thể tự chạy."],
   [/a param may not/, "Giá trị mẫu không hợp lệ ở vị trí này."],
+  [/secret_choices is required/, "Hãy tích ít nhất một secret được phép chọn."],
+  [/secret choice needs a human/, "Chọn secret khi duyệt thì không thể tự chạy."],
 ];
 function viErr(msg) {
   for (const [re, t] of errorText) { const m = msg.match(re); if (m) return typeof t === "function" ? t(m) : t; }
@@ -176,7 +184,7 @@ const templates = {
 
 function newDraft(over) {
   const d = Object.assign({description: "", name: "", nameTouched: false, kind: "http", method: "GET", url: "", auth: "none", authHeader: "", secret: "",
-    bodyMode: "none", jsonRows: [], raw: "", rawType: "text/plain", params: [], approval: "ask", argv: "", envRows: [], extraHeaders: {}, timeout: 0}, JSON.parse(JSON.stringify(over || {})));
+    choices: [], bodyMode: "none", jsonRows: [], raw: "", rawType: "text/plain", params: [], approval: "ask", argv: "", envRows: [], extraHeaders: {}, timeout: 0}, JSON.parse(JSON.stringify(over || {})));
   d.params = d.params.map(p => Object.assign({name: "", type: "slug", pattern: "", choices: "", required: true, description: "", sample: ""}, p));
   return d;
 }
@@ -208,9 +216,13 @@ function toProfile(d) {
     p.exec = {argv: d.argv.split("\n").map(s => s.trim()).filter(Boolean)};
     const rows = d.envRows.filter(r => r.key && r.secret);
     if (rows.length) p.exec.env = Object.fromEntries(rows.map(r => [r.key, `{{secret:${r.secret}}}`]));
+    if (d.stdin) p.exec.stdin = d.stdin;
+    if (d.files) p.exec.files = d.files;
     return p;
   }
   const headers = Object.assign({}, d.extraHeaders);
+  const picking = d.secret === "choice";
+  if (picking) p.secret_choices = d.choices;
   if (d.secret) {
     const ref = `{{secret:${d.secret}}}`;
     if (d.auth === "bearer") headers.Authorization = "Bearer " + ref;
@@ -234,6 +246,8 @@ function fromProfile(p) {
     else if (/^[\w .-]+(\|[\w .-]+)*$/.test(q.pattern)) { base.type = "choice"; base.choices = q.pattern.split("|").join(", "); }
     return base;
   });
+  d.choices = p.secret_choices || [];
+  d.stdin = p.exec ? p.exec.stdin : undefined; d.files = p.exec ? p.exec.files : undefined;
   if (p.exec) {
     d.kind = "exec"; d.argv = p.exec.argv.join("\n");
     d.envRows = Object.entries(p.exec.env || {}).map(([key, v]) => ({key, secret: (v.match(/\{\{secret:(.+?)\}\}/) || [])[1] || ""}));
@@ -275,8 +289,35 @@ function select(value, options, onchange, label) {
 async function viewProfiles(body) {
   const [list, secrets] = await Promise.all([api("GET", "/api/profiles"), api("GET", "/api/secrets")]);
   const openBuilder = d => renderBuilder(body, d, secrets);
-  fill(body, h("div", {class: "card"}, h("h2", null, "Tạo profile mới"),
-    h("p", {class: "muted"}, "Profile là một việc cụ thể bạn cho phép agent xin làm. Chọn mẫu gần nhất rồi chỉnh."),
+  const catalog = await fetch("catalog.json").then(r => r.json()).catch(() => []);
+  const haveSecret = n => secrets.some(s => s.name === n);
+  const haveProfile = n => list.some(p => p.name === n);
+  const catalogCard = c => {
+    const missing = c.secrets.filter(n => !haveSecret(n));
+    const inputs = c.custom ? [] : missing.map(n => h("input", {type: "password", autocomplete: "off", placeholder: "Dán " + n, "aria-label": n}));
+    const err = h("div", {class: "err"});
+    const added = haveProfile(c.profile.name);
+    const direct = !c.custom && !(c.profile.secret_choices || []).length;
+    return h("div", {class: "tile"}, h("b", null, c.title), h("small", {class: "muted"}, c.hint),
+      added ? h("span", {class: "badge"}, "đã thêm") : h("div", null, inputs,
+        h("div", {class: "row"}, direct ? h("button", {class: "primary", onclick: async () => {
+          err.textContent = "";
+          try {
+            for (const [i, n] of missing.entries()) {
+              if (!inputs[i].value) throw new Error("Hãy dán giá trị " + n);
+              await api("PUT", "/api/secrets/" + encodeURIComponent(n), {value: inputs[i].value.trim()});
+            }
+            await api("PUT", "/api/profiles", c.profile);
+            viewProfiles(body);
+          } catch (e) { err.textContent = viErr(e.message); }
+        }}, "Thêm") : null, h("button", {onclick: () => openBuilder(fromProfile(c.profile))}, "Tuỳ chỉnh")), err));
+  };
+  const groups = [...new Set(catalog.map(c => c.group))];
+  fill(body, h("div", {class: "card"}, h("h2", null, "Thêm nhanh"),
+    h("p", {class: "muted"}, "Dán token của dịch vụ rồi bấm Thêm, không cần cấu hình gì khác."),
+    groups.map(g => h("div", null, h("h3", null, g), h("div", {class: "tiles"}, catalog.filter(c => c.group === g).map(catalogCard))))),
+  h("div", {class: "card"}, h("h2", null, "Tự tạo profile"),
+    h("p", {class: "muted"}, "Profile là một việc cụ thể bạn cho phép agent xin làm."),
     h("div", {class: "row"}, Object.values(templates).map(t => h("button", {onclick: () => openBuilder(newDraft(t.d))}, t.label)))),
   h("div", {class: "card"}, h("h2", null, `Profile (${list.length})`),
     list.length ? list.map(p => h("div", {class: "spread"}, h("span", null, h("b", null, p.description || p.name), " ",
@@ -332,8 +373,8 @@ function renderBuilder(body, d, secrets) {
 
   // 3. Credentials
   const authBox = h("div");
-  const secretSelect = (value, on) => secrets.length
-    ? select(value, [["", "Chọn secret…"]].concat(secrets.map(s => [s.name, s.name])), on, "Secret")
+  const secretSelect = (value, on, withChoice) => secrets.length
+    ? select(value, [["", "Chọn secret…"]].concat(withChoice ? [["choice", "Chọn khi duyệt trên Telegram"]] : [], secrets.map(s => [s.name, s.name])), on, "Secret")
     : h("p", {class: "note"}, "Kho chưa có secret. Hãy thêm ở tab Secret trước.");
   const drawAuth = () => {
     if (d.kind === "exec") {
@@ -350,7 +391,9 @@ function renderBuilder(body, d, secrets) {
     const kids = [select(d.auth, [["none", "Không cần đăng nhập"], ["bearer", "Bearer token (phổ biến nhất)"], ["token", "Token kiểu Gitea, GitHub"], ["header", "Header riêng, như X-Api-Key"]],
       v => { d.auth = v; drawAuth(); refresh(); }, "Cách đăng nhập")];
     if (d.auth === "header") kids.push(text("Tên header", () => d.authHeader, v => { d.authHeader = v; }, {placeholder: "X-Api-Key"}));
-    if (d.auth !== "none") kids.push(h("label", null, h("span", null, "Secret dùng"), secretSelect(d.secret, v => { d.secret = v; refresh(); })));
+    if (d.auth !== "none") kids.push(h("label", null, h("span", null, "Secret dùng"), secretSelect(d.secret, v => { d.secret = v; if (v === "choice" && d.approval === "auto") { d.approval = "ask"; drawApproval(); } drawAuth(); refresh(); }, true)));
+    if (d.secret === "choice") kids.push(h("div", {class: "picklist"}, h("span", {class: "muted"}, "Các secret được phép chọn:"), secrets.map(s => h("label", {class: "check"},
+      h("input", {type: "checkbox", checked: d.choices.includes(s.name), onchange: e => { d.choices = e.target.checked ? d.choices.concat(s.name) : d.choices.filter(n => n !== s.name); refresh(); }}), h("span", null, s.name)))));
     fill(authBox, ...kids);
   };
   const step3 = h("section", {class: "card"}, h("h3", null, "3. Đăng nhập bằng gì"), authBox,

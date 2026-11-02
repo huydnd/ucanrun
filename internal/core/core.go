@@ -76,6 +76,8 @@ type Request struct {
 	Created   time.Time         `json:"created"`
 	Expires   time.Time         `json:"expires"`
 	DecidedBy string            `json:"decided_by,omitempty"`
+	Choices   []string          `json:"choices,omitempty"`
+	Secret    string            `json:"secret,omitempty"`
 	Result    *policy.Result    `json:"result,omitempty"`
 
 	action *policy.Action
@@ -626,7 +628,7 @@ func (c *Core) Submit(t Token, profile string, params map[string]string, reason 
 	c.recent[t.Name] = append(kept, now)
 	r := &Request{ID: randHex(6), Profile: profile, Params: params, Caller: t.Name,
 		Reason: cleanReason(reason), Risk: p.Risk, Hash: policy.Hash(&p, a, t.Name), Display: a.Display(),
-		State: Pending, Created: now, Expires: now.Add(c.opt.ApprovalTTL), action: a, done: make(chan struct{})}
+		Choices: p.SecretChoices, State: Pending, Created: now, Expires: now.Add(c.opt.ApprovalTTL), action: a, done: make(chan struct{})}
 	c.reqs[r.ID] = r
 	c.order = append(c.order, r.ID)
 	c.trimLocked()
@@ -641,9 +643,9 @@ func (c *Core) Submit(t Token, profile string, params map[string]string, reason 
 		return r.public(), nil
 	}
 	if bot := c.bot; bot != nil && c.st.Telegram.UserID != 0 {
-		id, short, text := r.ID, r.Hash[:16], approvalText(r)
+		id, short, text, choices := r.ID, r.Hash[:16], approvalText(r), r.Choices
 		go func() {
-			if err := bot.Notify(c.baseCtx, id, short, text); err != nil {
+			if err := bot.Notify(c.baseCtx, id, short, text, choices); err != nil {
 				slog.Warn("telegram notify", "err", err)
 				c.log("notify_failed", "telegram", map[string]any{"id": id})
 			}
@@ -668,6 +670,9 @@ func approvalText(r *Request) string {
 	if r.Reason != "" {
 		fmt.Fprintf(&b, "\nLý do (agent tự khai, chưa kiểm chứng): %s\n", r.Reason)
 	}
+	if len(r.Choices) > 0 {
+		b.WriteString("\nBấm tên secret muốn dùng cho lần này.\n")
+	}
 	fmt.Fprintf(&b, "\nMã: %s", r.Hash[:8])
 	return b.String()
 }
@@ -688,7 +693,11 @@ func (c *Core) finishLocked(r *Request, s ReqState, by string) {
 	close(r.done)
 	c.log("request_"+string(s), by, map[string]any{"id": r.ID, "hash": r.Hash})
 	if bot := c.bot; bot != nil {
-		id, text := r.ID, fmt.Sprintf("Kết thúc: %s (%s)\nProfile: %s\nMã: %s", s, by, r.Profile, r.Hash[:8])
+		used := ""
+		if r.Secret != "" {
+			used = "\nSecret đã dùng: " + r.Secret
+		}
+		id, text := r.ID, fmt.Sprintf("Kết thúc: %s (%s)\nProfile: %s%s\nMã: %s", s, by, r.Profile, used, r.Hash[:8])
 		go bot.Finish(c.baseCtx, id, text)
 	}
 }
@@ -700,9 +709,20 @@ func (c *Core) NeedsTOTP(id string) bool {
 	return ok && r.Risk == policy.RiskHigh
 }
 
+// SecretAt maps a Telegram button index to a secret name.
+func (c *Core) SecretAt(id string, i int) (string, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	r, ok := c.reqs[id]
+	if !ok || i < 0 || i >= len(r.Choices) {
+		return "", false
+	}
+	return r.Choices[i], true
+}
+
 // Decide applies one human decision. hash may be a prefix of at least 16 hex
 // characters, because Telegram callback data is limited to 64 bytes.
-func (c *Core) Decide(id, hash string, approve bool, actor, code string) (string, error) {
+func (c *Core) Decide(id, hash string, approve bool, actor, code, secret string) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	r, ok := c.reqs[id]
@@ -720,6 +740,20 @@ func (c *Core) Decide(id, hash string, approve bool, actor, code string) (string
 		c.finishLocked(r, Denied, actor)
 		return "Đã từ chối", nil
 	}
+	if len(r.Choices) > 0 {
+		ok := false
+		for _, n := range r.Choices {
+			ok = ok || n == secret
+		}
+		if !ok {
+			return "", errors.New("hãy chọn một secret trong danh sách")
+		}
+		if v, err := c.Vault.Get(secret); err != nil {
+			return "", fmt.Errorf("kho chưa có secret %q", secret)
+		} else {
+			clear(v)
+		}
+	}
 	if r.Risk == policy.RiskHigh {
 		if !c.st.TOTPEnabled {
 			return "", errors.New("chưa bật TOTP nên chưa duyệt được yêu cầu rủi ro cao")
@@ -728,6 +762,10 @@ func (c *Core) Decide(id, hash string, approve bool, actor, code string) (string
 			c.log("decide_totp_failed", actor, map[string]any{"id": id})
 			return "", err
 		}
+	}
+	if len(r.Choices) > 0 {
+		r.action, r.Secret = r.action.WithChoice(secret), secret
+		c.log("secret_chosen", actor, map[string]any{"id": r.ID, "secret": secret})
 	}
 	c.startLocked(r, actor)
 	return "Đã duyệt", nil
