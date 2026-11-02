@@ -126,6 +126,8 @@ details.hist>summary::before{content:none}
 details.hist[open]>summary{margin-bottom:6px}
 .card.empty{text-align:center;padding:20px}
 .card.empty p{margin:0}
+.field-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr) auto 34px;gap:6px;align-items:center;margin-top:6px}
+.field-row .check{margin:0}
 [hidden]{display:none!important}
 
 /* phone: tabs move to a bottom bar, targets grow */
@@ -145,4 +147,6 @@ details.hist[open]>summary{margin-bottom:6px}
   .spread{flex-wrap:wrap}
   .spread>span:first-child{flex-basis:100%}
   .kv{grid-template-columns:minmax(0,1fr) minmax(0,1fr) 40px}
+  .field-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr) 40px}
+  .field-row .check{grid-column:1/-1;order:3}
 }
