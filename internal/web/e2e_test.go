@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -1044,5 +1045,58 @@ func TestMCP(t *testing.T) {
 	}
 	if strings.Contains(s, secret) || strings.Contains(s, "get_secret") {
 		t.Fatal("mcp leaks")
+	}
+}
+
+func TestHealthEndpoint(t *testing.T) {
+	e := setup(t, time.Minute)
+	if err := e.c.Vault.Put("stray", []byte("stray-secret-value-123")); err != nil {
+		t.Fatal(err)
+	}
+	e.profile("ghost", policy.RiskLow, false)
+	e.req("PUT", "/api/secrets/stray2", map[string]string{"value": "another-hidden-value"})
+
+	code, raw := e.raw("GET", "/api/health", nil, map[string]string{"X-Ucanrun": "1"})
+	if code != 200 {
+		t.Fatalf("health: %d %s", code, raw)
+	}
+	for _, v := range []string{secret, "stray-secret-value-123", "another-hidden-value"} {
+		if strings.Contains(string(raw), v) {
+			t.Fatalf("health leaks a secret value: %s", raw)
+		}
+	}
+	var items []core.HealthItem
+	if err := json.Unmarshal(raw, &items); err != nil {
+		t.Fatal(err)
+	}
+	by := map[string]core.HealthItem{}
+	for _, i := range items {
+		by[i.Key] = i
+	}
+	if by["totp"].Level != "bad" || by["gate"].Level != "bad" || by["https"].Level != "warn" {
+		t.Fatalf("items: %+v", items)
+	}
+	if by["auto_write"].Level != "warn" || !slices.Contains(by["auto_write"].Names, "auto") {
+		t.Fatalf("auto_write: %+v", by["auto_write"])
+	}
+	if !slices.Contains(by["unused_secrets"].Names, "stray") {
+		t.Fatalf("unused: %+v", by["unused_secrets"])
+	}
+	e.enableTOTP()
+	_, raw = e.raw("GET", "/api/health", nil, map[string]string{"X-Ucanrun": "1"})
+	items = nil
+	json.Unmarshal(raw, &items)
+	for _, i := range items {
+		if i.Key == "totp" && i.Level != "ok" {
+			t.Fatalf("totp after enable: %+v", i)
+		}
+	}
+}
+
+func TestHealthNeedsSession(t *testing.T) {
+	e := setup(t, time.Minute)
+	e.hc = &http.Client{}
+	if code, _ := e.raw("GET", "/api/health", nil, map[string]string{"X-Ucanrun": "1"}); code != 401 {
+		t.Fatalf("health without session: %d", code)
 	}
 }
