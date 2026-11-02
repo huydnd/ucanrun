@@ -1205,3 +1205,13 @@ func TestHealthNeedsSession(t *testing.T) {
 		t.Fatalf("health without session: %d", code)
 	}
 }
+
+func TestChoiceOnConnectionExplainsAutoApprove(t *testing.T) {
+	e := setup(t, time.Minute)
+	e.req("PUT", "/api/connections", map[string]any{"name": "g", "base_url": e.target.URL, "auth": map[string]any{"type": "bearer", "secret": "gitea"}})
+	e.req("PUT", "/api/profiles", map[string]any{"name": "who", "risk": "low", "auto_approve": true, "connection": "g", "http": map[string]any{"method": "GET", "url": "/user"}})
+	code, m := e.req("PUT", "/api/connections", map[string]any{"name": "g", "base_url": e.target.URL, "auth": map[string]any{"type": "bearer", "choices": []string{"gitea"}}})
+	if code == 200 || !strings.Contains(fmt.Sprint(m["error"]), `"who" would break: a secret choice needs a human`) {
+		t.Fatalf("%d %v", code, m)
+	}
+}
