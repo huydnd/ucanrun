@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"syscall"
@@ -147,6 +148,18 @@ func runExec(ctx context.Context, e *ExecSpec, get func(string) string) Result {
 	cmd := exec.CommandContext(ctx, e.Argv[0], e.Argv[1:]...)
 	cmd.Dir = home
 	cmd.Env = []string{"PATH=/usr/local/bin:/usr/bin:/bin", "HOME=" + home, "GIT_TERMINAL_PROMPT=0"}
+	for name, v := range e.Files {
+		data := Expand(v, get)
+		if !strings.HasSuffix(data, "\n") {
+			data += "\n" // OpenSSH refuses a key without a final newline
+		}
+		if err := os.WriteFile(filepath.Join(home, name), []byte(data), 0o600); err != nil {
+			return Result{Exit: -1, Output: "could not write a temporary file"}
+		}
+	}
+	if e.Stdin != "" {
+		cmd.Stdin = strings.NewReader(Expand(e.Stdin, get) + "\n")
+	}
 	for k, v := range e.Env {
 		cmd.Env = append(cmd.Env, k+"="+Expand(v, get))
 	}

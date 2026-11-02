@@ -450,11 +450,12 @@ func (s *Server) decide(w http.ResponseWriter, r *http.Request) {
 		Approve bool   `json:"approve"`
 		Hash    string `json:"hash"`
 		TOTP    string `json:"totp"`
+		Secret  string `json:"secret"`
 	}
 	if !read(w, r, &in) {
 		return
 	}
-	msg, err := s.C.Decide(r.PathValue("id"), in.Hash, in.Approve, "web", in.TOTP)
+	msg, err := s.C.Decide(r.PathValue("id"), in.Hash, in.Approve, "web", in.TOTP, in.Secret)
 	if err != nil {
 		fail(w, err)
 		return

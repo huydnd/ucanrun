@@ -27,7 +27,7 @@ func TestLiveBotAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	const req = "000000000000"
-	if err := b.Notify(ctx, req, "0123456789abcdef", "ucanrun: kiểm tra kết nối, không cần bấm gì.\n\nPOST https://example.invalid/repos/a\nAuthorization: token ‹secret:demo›"); err != nil {
+	if err := b.Notify(ctx, req, "0123456789abcdef", "ucanrun: kiểm tra kết nối, không cần bấm gì.\n\nPOST https://example.invalid/repos/a\nAuthorization: token ‹secret:demo›", nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := b.call(ctx, "editMessageText", map[string]any{"chat_id": id, "message_id": b.msgs[req], "text": "ucanrun: kiểm tra kết nối xong, sửa tin nhắn và gỡ nút hoạt động."}, nil); err != nil {

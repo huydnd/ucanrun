@@ -58,3 +58,9 @@ details.card>summary+*{margin-top:12px}
 textarea.short{min-height:90px}
 pre.tg{white-space:pre-wrap;font-size:12.5px;margin-top:0}
 button:disabled{opacity:.5;cursor:not-allowed}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:8px;margin-bottom:14px}
+.tile{border:1px solid var(--line);border-radius:6px;padding:10px;min-width:0}
+.tile input{margin-top:8px}
+.tile .row{margin-top:8px}
+.picklist{margin-top:10px}
+[hidden]{display:none!important}

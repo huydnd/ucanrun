@@ -37,17 +37,27 @@ type HTTPSpec struct {
 type ExecSpec struct {
 	Argv []string          `json:"argv"`
 	Env  map[string]string `json:"env,omitempty"`
+	// Stdin is written to the program, for tools such as `sudo -S`.
+	Stdin string `json:"stdin,omitempty"`
+	// Files are created mode 0600 in the private working directory and removed
+	// after the run, for tools that only read a key from a path.
+	Files map[string]string `json:"files,omitempty"`
 }
 
+// ChoiceRef is the secret placeholder the approver fills in: {{secret:choice}}.
+const ChoiceRef = "choice"
+
 type Profile struct {
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	Risk        string    `json:"risk"`
-	AutoApprove bool      `json:"auto_approve,omitempty"`
-	TimeoutSec  int       `json:"timeout_sec,omitempty"`
-	Params      []Param   `json:"params,omitempty"`
-	HTTP        *HTTPSpec `json:"http,omitempty"`
-	Exec        *ExecSpec `json:"exec,omitempty"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Risk        string `json:"risk"`
+	AutoApprove bool   `json:"auto_approve,omitempty"`
+	TimeoutSec  int    `json:"timeout_sec,omitempty"`
+	// SecretChoices lists what the approver may pick for {{secret:choice}}.
+	SecretChoices []string  `json:"secret_choices,omitempty"`
+	Params        []Param   `json:"params,omitempty"`
+	HTTP          *HTTPSpec `json:"http,omitempty"`
+	Exec          *ExecSpec `json:"exec,omitempty"`
 }
 
 // Action is a fully rendered request except for secret placeholders.
@@ -154,7 +164,17 @@ func (p *Profile) Validate() error {
 			}
 		}
 		texts = append(texts, e.Argv...)
+		texts = append(texts, e.Stdin)
 		for _, v := range e.Env {
+			texts = append(texts, v)
+		}
+		for k, v := range e.Files {
+			if !fileNameRe.MatchString(k) {
+				return fmt.Errorf("file name %q must be a plain name", k)
+			}
+			if ps, _ := refs(v); len(ps) > 0 {
+				return errors.New("a file may only contain secrets")
+			}
 			texts = append(texts, v)
 		}
 	}
@@ -172,6 +192,27 @@ func (p *Profile) Validate() error {
 			}
 		}
 	}
+	picks := false
+	for _, t := range texts {
+		_, ss := refs(t)
+		for _, n := range ss {
+			picks = picks || n == ChoiceRef
+		}
+	}
+	if picks && len(p.SecretChoices) == 0 {
+		return errors.New("secret_choices is required for {{secret:choice}}")
+	}
+	if !picks && len(p.SecretChoices) > 0 {
+		return errors.New("secret_choices needs a {{secret:choice}} placeholder")
+	}
+	if picks && p.AutoApprove {
+		return errors.New("a secret choice needs a human, so it cannot auto-approve")
+	}
+	for _, n := range p.SecretChoices {
+		if strings.HasPrefix(n, "_") || n == ChoiceRef || !secretNameRe.MatchString(n) {
+			return fmt.Errorf("bad secret choice %q", n)
+		}
+	}
 	// An unused param never reaches the approver's screen, so it would be an
 	// unreviewed channel from the agent into the log.
 	for _, q := range p.Params {
@@ -182,7 +223,11 @@ func (p *Profile) Validate() error {
 	return nil
 }
 
-var envNameRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+var (
+	envNameRe    = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	fileNameRe   = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$`)
+	secretNameRe = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$`)
+)
 
 func dangerousEnv(k string) bool {
 	u := strings.ToUpper(k)
@@ -323,6 +368,13 @@ func (p *Profile) Render(params map[string]string) (*Action, error) {
 				out.Env[k] = subst(v, params, raw)
 			}
 		}
+		out.Stdin = subst(e.Stdin, params, raw)
+		if len(e.Files) > 0 {
+			out.Files = map[string]string{}
+			for k, v := range e.Files {
+				out.Files[k] = v
+			}
+		}
 		a.Exec = out
 	}
 	// Defence in depth: rendering must not add a secret the profile never named.
@@ -357,6 +409,10 @@ func (a *Action) Secrets() []string {
 		for _, v := range e.Env {
 			add(v)
 		}
+		add(e.Stdin)
+		for _, v := range e.Files {
+			add(v)
+		}
 	}
 	out := make([]string, 0, len(seen))
 	for n := range seen {
@@ -370,6 +426,7 @@ func (a *Action) Secrets() []string {
 // from anything the agent wrote, and never contains a secret value.
 func (a *Action) Display() string {
 	mask := func(s string) string {
+		s = strings.ReplaceAll(s, "{{secret:"+ChoiceRef+"}}", "‹secret bạn chọn khi duyệt›")
 		return tmplRe.ReplaceAllString(s, "‹secret:$2›")
 	}
 	var b strings.Builder
@@ -401,8 +458,50 @@ func (a *Action) Display() string {
 		for _, k := range keys {
 			fmt.Fprintf(&b, "\nenv %s=%s", k, mask(e.Env[k]))
 		}
+		if e.Stdin != "" {
+			fmt.Fprintf(&b, "\nstdin: %s", mask(e.Stdin))
+		}
+		names := make([]string, 0, len(e.Files))
+		for k := range e.Files {
+			names = append(names, k)
+		}
+		sort.Strings(names)
+		for _, k := range names {
+			fmt.Fprintf(&b, "\nfile %s: %s", k, mask(e.Files[k]))
+		}
 	}
 	return b.String()
+}
+
+// WithChoice returns a copy that uses the secret the approver picked. The agent
+// never influences this: the name comes from the decision, checked against the
+// profile's list.
+func (a *Action) WithChoice(name string) *Action {
+	r := func(s string) string {
+		return strings.ReplaceAll(s, "{{secret:"+ChoiceRef+"}}", "{{secret:"+name+"}}")
+	}
+	m := func(in map[string]string) map[string]string {
+		if in == nil {
+			return nil
+		}
+		out := map[string]string{}
+		for k, v := range in {
+			out[k] = r(v)
+		}
+		return out
+	}
+	c := *a
+	if a.HTTP != nil {
+		h := *a.HTTP
+		h.Headers, h.Body = m(h.Headers), r(h.Body)
+		c.HTTP = &h
+	}
+	if a.Exec != nil {
+		e := *a.Exec
+		e.Env, e.Files, e.Stdin = m(e.Env), m(e.Files), r(e.Stdin)
+		c.Exec = &e
+	}
+	return &c
 }
 
 // Hash binds an approval to this exact action, profile and caller.
