@@ -5,7 +5,7 @@
 mod adhoc;
 mod connection;
 mod exec;
-pub(crate) mod gourl;
+pub mod gourl;
 
 #[cfg(test)]
 mod tests;

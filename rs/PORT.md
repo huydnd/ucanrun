@@ -51,6 +51,8 @@ Tests must load these files and match them exactly.
 | `totp` | `internal/totp` | `generate`, `uri`, `code(secret, unix)`, `verify(secret, input, unix, last) -> u64` |
 | `backup` | `internal/backup` | `create`, `check`, `restore`, same limits and rules, including read-only parent and startup files |
 | `policy` | `internal/policy` | Profile, Param, HTTPSpec, ExecSpec, Action, Connection, Auth, SecretMeta, Call; `validate`, `render`, `display`, `secrets`, `with_choice`, `resolve`, `from_call`, `lint`, `redact`, `run` (async) |
+| `web` | `internal/web` | `Server::new`, `handler` (UI, gate, CSRF, sessions), `agent_handler`, `serve` (hyper with header timeout and graceful shutdown), `load_gate_token`, `read_catalog`, `valid_entry`. Static files are embedded from `../internal/web/static` |
+| `main` | `cmd/ucr` | every command, environment variable and message of the Go CLI; arguments parsed by hand |
 
 Go's `url.PathEscape` and `url.QueryEscape` escape different sets; reproduce
 them exactly (the golden URL cases check this). Go's `regexp` is RE2; the Rust
@@ -70,6 +72,21 @@ other value is a single-value secret, so existing vaults keep working.
   database) are shown to agents with their values and may appear anywhere,
   including argv and URL. Private fields follow the normal secret rules.
 - Redaction covers every private field value.
+
+## Web and CLI differences
+
+- Request bodies are decoded like Go's `DisallowUnknownFields` (`web/strict.rs`):
+  unknown keys at any depth are refused and `null` keeps the zero value. Key
+  matching is case-sensitive, unlike Go.
+- The TOTP QR code is an SVG data URI instead of a PNG.
+- Times in `GET /api/secrets` and `ucr list` are UTC.
+- `UCANRUN_APPROVAL_TTL` takes Go duration syntax but no negative values.
+
+## Docker
+
+`rs/Dockerfile` builds a static musl binary; run it from the repository root,
+because the UI files come from `internal/web`:
+`docker build -f rs/Dockerfile .` (slim, default) or add `--target exec`.
 
 ## Style
 
