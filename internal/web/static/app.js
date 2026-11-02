@@ -105,7 +105,7 @@ async function viewRequests(body) {
       catch (e) { err.textContent = tr(e.message); }
     };
     return h("div", {class: "card"},
-      h("h3", null, r.profile, " ", h("span", {class: "badge " + (r.risk === "high" ? "high" : "")}, r.risk === "high" ? "rủi ro cao" : "rủi ro thấp")),
+      h("h3", null, r.profile === "agent-call" ? tr("Agent tự soạn") : r.profile, " ", h("span", {class: "badge " + (r.risk === "high" ? "high" : "")}, r.risk === "high" ? "rủi ro cao" : "rủi ro thấp")),
       h("div", {class: "muted"}, `Agent: ${r.caller} · Mã: ${r.hash.slice(0, 8)} · ${new Date(r.created).toLocaleTimeString()}`),
       h("pre", null, r.display),
       r.reason ? h("div", {class: "muted"}, "Lý do (agent tự khai, chưa kiểm chứng): " + r.reason) : null,
@@ -114,9 +114,18 @@ async function viewRequests(body) {
       r.state !== "pending" ? h("div", {class: "muted"}, `Kết quả: ${r.state}` + (r.decided_by ? ` · ${r.decided_by}` : "") + (r.secret ? ` · secret ${r.secret}` : "")) : null,
       r.result ? h("pre", null, r.result.output) : null);
   };
+  // History is one line per request; open a row to see the command and output.
+  const tone = {done: "ok", failed: "high", denied: "", expired: ""};
+  const row = r => h("details", {class: "hist"},
+    h("summary", null, h("span", {class: "badge " + (tone[r.state] || "")}, {done: "xong", failed: "lỗi", denied: "đã từ chối", expired: "hết hạn", running: "đang chạy"}[r.state] || r.state), " ",
+      h("b", null, r.profile === "agent-call" ? tr("Agent tự soạn") : r.profile), " ",
+      h("span", {class: "muted"}, `${r.caller} · ${new Date(r.created).toLocaleTimeString()}`)),
+    h("pre", null, r.display), r.reason ? h("div", {class: "muted"}, "Lý do (agent tự khai, chưa kiểm chứng): " + r.reason) : null,
+    h("div", {class: "muted"}, (r.decided_by ? r.decided_by : "") + (r.secret ? ` · secret ${r.secret}` : "")),
+    r.result ? h("pre", null, r.result.output) : null);
   fill(body, h("h2", null, `Đang chờ duyệt (${pending.length})`),
-    pending.length ? pending.map(card) : h("p", {class: "muted"}, "Không có yêu cầu nào đang chờ."),
-    rest.length ? h("h2", null, "Gần đây") : null, rest.slice(0, 30).map(card));
+    pending.length ? pending.map(card) : h("div", {class: "card empty"}, h("p", {class: "muted"}, "Không có yêu cầu nào đang chờ.")),
+    rest.length ? h("div", {class: "card"}, h("h2", null, "Gần đây"), rest.slice(0, 30).map(row)) : null);
 }
 
 async function viewSecrets(body, editing) {
@@ -146,7 +155,9 @@ async function viewSecrets(body, editing) {
     execOn ? h("label", {class: "check"}, cmd, h("span", null, "Cho dùng trong lệnh agent tự soạn (luôn cần TOTP)")) : null,
     h("p", {class: "muted"}, "Giá trị chỉ ghi, không có cách xem lại trên giao diện.")));
   if (cur) save.append(h("div", {class: "row"}, h("button", {onclick: () => viewSecrets(body)}, "Huỷ")));
-  fill(body, save,
+  const addBox = cur ? save : h("details", {class: "card add", open: !list.length}, h("summary", null, tr("Thêm secret")), save);
+  if (!cur) { save.classList.remove("card"); save.querySelector("h2").remove(); }
+  fill(body, cur ? save : null,
     h("div", {class: "card"}, h("h2", null, `Secret (${list.length})`),
       list.length ? list.map(s => h("div", {class: "spread"}, h("span", null, h("code", null, s.name),
           s.description ? h("div", null, s.description) : h("div", {class: "note"}, "Chưa có mô tả, agent sẽ không biết dùng vào việc gì."),
@@ -154,7 +165,7 @@ async function viewSecrets(body, editing) {
         h("span", null, h("button", {onclick: () => { viewSecrets(body, s.name); window.scrollTo(0, 0); }}, "Sửa"), " ",
           h("button", {class: "danger", onclick: async () => {
             if (confirm(tr(`Xoá secret ${s.name}?`))) { await api("DELETE", "/api/secrets/" + encodeURIComponent(s.name)); viewSecrets(body); }
-          }}, "Xoá")))) : h("p", {class: "muted"}, "Chưa có secret.")));
+          }}, "Xoá")))) : h("p", {class: "muted"}, "Chưa có secret.")), cur ? null : addBox);
 }
 
 // --- Profile builder ---
@@ -821,10 +832,13 @@ function agentTokenForm(profiles, onCreated) {
 
 async function viewTokens(body) {
   const [list, profiles] = await Promise.all([api("GET", "/api/tokens"), api("GET", "/api/profiles")]);
-  fill(body, agentTokenForm(profiles, (id, token) => { fill(body, agentGuide(id, token, () => viewTokens(body))); window.scrollTo(0, 0); }),
+  const tf = agentTokenForm(profiles, (id, token) => { fill(body, agentGuide(id, token, () => viewTokens(body))); window.scrollTo(0, 0); });
+  tf.classList.remove("card"); tf.querySelector("h2").remove();
+  const addTok = h("details", {class: "card add", open: !list.length}, h("summary", null, tr("Tạo token cho agent")), tf);
+  fill(body,
     h("div", {class: "card"}, h("h2", null, `Token (${list.length})`),
     list.length ? list.map(t => h("div", {class: "spread"}, h("span", null, h("code", null, t.name), h("div", {class: "muted"}, (t.profiles && t.profiles.length ? t.profiles.join(", ") : tr("mọi profile")) + " · " + new Date(t.created).toLocaleString())),
-      h("button", {class: "danger", onclick: async () => { if (confirm(tr(`Thu hồi token ${t.name}?`))) { await api("DELETE", "/api/tokens/" + t.id); viewTokens(body); } }}, "Thu hồi"))) : h("p", {class: "muted"}, "Chưa có token.")));
+      h("button", {class: "danger", onclick: async () => { if (confirm(tr(`Thu hồi token ${t.name}?`))) { await api("DELETE", "/api/tokens/" + t.id); viewTokens(body); } }}, "Thu hồi"))) : h("p", {class: "muted"}, "Chưa có token.")), addTok);
 }
 
 function showRecovery(box, codes, done) {
