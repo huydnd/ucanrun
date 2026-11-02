@@ -40,4 +40,18 @@
 
 ## Sao lưu
 
-Sao lưu volume `data`. Secret vẫn ở dạng mã hoá, cần mật khẩu chính mới đọc được. Giữ bản gốc của secret quan trọng trong trình quản lý mật khẩu.
+```bash
+docker exec ucanrun ucr backup - > ucanrun-backup.tar.gz
+docker exec -i ucanrun ucr backup-check - < ucanrun-backup.tar.gz
+```
+
+Secret vẫn ở dạng mã hoá, cần mật khẩu chính mới đọc được. `gate.token` không nằm trong bản sao lưu vì là mã truy cập dạng rõ. Giữ bản gốc của secret quan trọng trong trình quản lý mật khẩu.
+
+Khôi phục: chạy một container mới, rồi:
+
+```bash
+docker exec -i ucanrun ucr restore - < ucanrun-backup.tar.gz
+docker restart ucanrun
+```
+
+Lệnh từ chối ghi đè kho đã có dữ liệu. Phải khởi động lại, vì server đang chạy giữ vị trí audit trong bộ nhớ.

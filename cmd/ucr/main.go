@@ -24,6 +24,7 @@ import (
 	"golang.org/x/term"
 
 	"ucanrun/internal/audit"
+	"ucanrun/internal/backup"
 	"ucanrun/internal/client"
 	"ucanrun/internal/core"
 	"ucanrun/internal/mcp"
@@ -40,6 +41,9 @@ Server, on the machine that holds the data directory:
   ucr add NAME              add or replace a secret (stdin, or a hidden prompt)
   ucr list                  list secret names
   ucr rm NAME               delete a secret
+  ucr backup FILE           write a tar.gz backup of the data directory (- for stdout)
+  ucr restore FILE          restore a backup into an empty data directory (- for stdin)
+  ucr backup-check FILE     verify a backup archive
   ucr audit-verify          check the audit log chain
   ucr gate                  print the web access code
   ucr health                exit 0 if the server answers
@@ -47,6 +51,7 @@ Server, on the machine that holds the data directory:
 Agent:
   ucr profiles              list permitted actions
   ucr run PROFILE [k=v...]  request an action (--reason "text")
+  ucr doctor                check agent configuration and server connection
   ucr mcp                   stdio MCP server
 
 Environment: UCANRUN_PUBLIC_URL, UCANRUN_GATE_TOKEN, UCANRUN_GATE=off,
@@ -108,10 +113,18 @@ func main() {
 		if err == nil {
 			fmt.Printf("OK: %d entries\n", n)
 		}
+	case "backup":
+		err = doBackup(args)
+	case "restore":
+		err = doRestore(args)
+	case "backup-check":
+		err = doBackupCheck(args)
 	case "profiles":
 		err = profiles()
 	case "run":
 		err = run(args)
+	case "doctor":
+		err = doctor()
 	case "mcp":
 		var c *client.Client
 		if c, err = client.FromEnv(); err == nil {
@@ -331,6 +344,87 @@ func run(args []string) error {
 	}
 	printJSON(r)
 	if r["state"] != "done" {
+		os.Exit(1)
+	}
+	return nil
+}
+
+func doBackup(args []string) error {
+	if len(args) != 1 {
+		return errors.New("usage: ucr backup FILE")
+	}
+	if args[0] == "-" {
+		return backup.Create(os.Stdout, dataDir())
+	}
+	f, err := os.OpenFile(args[0], os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	if err := backup.Create(f, dataDir()); err != nil {
+		f.Close()
+		os.Remove(args[0])
+		return err
+	}
+	return f.Close()
+}
+
+func doRestore(args []string) error {
+	if len(args) != 1 {
+		return errors.New("usage: ucr restore FILE")
+	}
+	if args[0] == "-" {
+		return backup.Restore(os.Stdin, dataDir())
+	}
+	f, err := os.Open(args[0])
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return backup.Restore(f, dataDir())
+}
+
+func doBackupCheck(args []string) error {
+	if len(args) != 1 {
+		return errors.New("usage: ucr backup-check FILE")
+	}
+	var n int
+	var err error
+	if args[0] == "-" {
+		n, err = backup.Check(os.Stdin)
+	} else {
+		f, ferr := os.Open(args[0])
+		if ferr != nil {
+			return ferr
+		}
+		defer f.Close()
+		n, err = backup.Check(f)
+	}
+	if err != nil {
+		return err
+	}
+	fmt.Printf("OK: %d entries\n", n)
+	return nil
+}
+
+func doctor() error {
+	c, err := client.FromEnv()
+	if err != nil {
+		c = &client.Client{URL: os.Getenv("UCANRUN_URL")}
+	}
+	failed := false
+	for _, ch := range c.Doctor(context.Background()) {
+		if ch.OK {
+			if ch.Detail != "" {
+				fmt.Printf("OK  %s: %s\n", ch.Name, ch.Detail)
+			} else {
+				fmt.Printf("OK  %s\n", ch.Name)
+			}
+		} else {
+			fmt.Printf("FAIL %s: %s\n", ch.Name, ch.Detail)
+			failed = true
+		}
+	}
+	if failed {
 		os.Exit(1)
 	}
 	return nil

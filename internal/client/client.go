@@ -1,4 +1,4 @@
-// Package client is the agent side of the API, used by `ucr run` and `ucr mcp`.
+// Package client is the agent side of the API, used by `ucr run`, `ucr doctor`, and `ucr mcp`.
 package client
 
 import (
@@ -20,9 +20,15 @@ type Client struct {
 	HTTP       *http.Client
 }
 
+type Check struct {
+	Name   string
+	OK     bool
+	Detail string
+}
+
 // FromEnv reads UCANRUN_URL and UCANRUN_TOKEN, then ~/.config/ucanrun/token.
 func FromEnv() (*Client, error) {
-	c := &Client{URL: os.Getenv("UCANRUN_URL"), Token: os.Getenv("UCANRUN_TOKEN"), HTTP: &http.Client{Timeout: 130 * time.Second}}
+	c := &Client{URL: os.Getenv("UCANRUN_URL"), Token: strings.TrimSpace(os.Getenv("UCANRUN_TOKEN")), HTTP: &http.Client{Timeout: 130 * time.Second}}
 	if c.URL == "" {
 		c.URL = "http://127.0.0.1:8781"
 	}
@@ -33,8 +39,88 @@ func FromEnv() (*Client, error) {
 			return nil, errors.New("no agent token: set UCANRUN_TOKEN or ~/.config/ucanrun/token")
 		}
 		c.Token = strings.TrimSpace(string(b))
+		if c.Token == "" {
+			return nil, errors.New("no agent token: set UCANRUN_TOKEN or ~/.config/ucanrun/token")
+		}
 	}
 	return c, nil
+}
+
+// Doctor checks the agent token, server health, and profile access.
+func (c *Client) Doctor(ctx context.Context) []Check {
+	var checks []Check
+	tok := ""
+	base := "http://127.0.0.1:8781"
+	var hc *http.Client
+	if c != nil {
+		tok = strings.TrimSpace(c.Token)
+		if u := strings.TrimRight(c.URL, "/"); u != "" {
+			base = u
+		}
+		hc = c.HTTP
+	}
+	if hc == nil {
+		hc = &http.Client{Timeout: 10 * time.Second}
+	}
+
+	if tok == "" {
+		checks = append(checks, Check{Name: "token", OK: false, Detail: "no agent token: set UCANRUN_TOKEN or ~/.config/ucanrun/token"})
+	} else {
+		checks = append(checks, Check{Name: "token", OK: true, Detail: "token found"})
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/healthz", nil)
+	if err != nil {
+		checks = append(checks, Check{Name: "healthz", OK: false, Detail: err.Error()})
+	} else if resp, err := hc.Do(req); err != nil {
+		checks = append(checks, Check{Name: "healthz", OK: false, Detail: err.Error()})
+	} else {
+		io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			checks = append(checks, Check{Name: "healthz", OK: false, Detail: fmt.Sprintf("HTTP %d", resp.StatusCode)})
+		} else {
+			checks = append(checks, Check{Name: "healthz", OK: true, Detail: "200 OK"})
+		}
+	}
+
+	if tok == "" {
+		checks = append(checks, Check{Name: "profiles", OK: false, Detail: "no agent token"})
+		return checks
+	}
+	req, err = http.NewRequestWithContext(ctx, http.MethodGet, base+"/v1/profiles", nil)
+	if err != nil {
+		checks = append(checks, Check{Name: "profiles", OK: false, Detail: err.Error()})
+		return checks
+	}
+	req.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := hc.Do(req)
+	if err != nil {
+		checks = append(checks, Check{Name: "profiles", OK: false, Detail: err.Error()})
+		return checks
+	}
+	raw, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<21))
+	resp.Body.Close()
+	if readErr != nil {
+		checks = append(checks, Check{Name: "profiles", OK: false, Detail: readErr.Error()})
+		return checks
+	}
+	switch resp.StatusCode {
+	case http.StatusOK:
+		var list []any
+		if err := json.Unmarshal(raw, &list); err != nil {
+			checks = append(checks, Check{Name: "profiles", OK: false, Detail: err.Error()})
+		} else {
+			checks = append(checks, Check{Name: "profiles", OK: true, Detail: fmt.Sprintf("%d profiles", len(list))})
+		}
+	case http.StatusLocked:
+		checks = append(checks, Check{Name: "profiles", OK: false, Detail: "vault locked, sign in on the web"})
+	case http.StatusForbidden:
+		checks = append(checks, Check{Name: "profiles", OK: false, Detail: "token rejected"})
+	default:
+		checks = append(checks, Check{Name: "profiles", OK: false, Detail: fmt.Sprintf("HTTP %d", resp.StatusCode)})
+	}
+	return checks
 }
 
 func (c *Client) do(ctx context.Context, method, path string, in, out any) error {
