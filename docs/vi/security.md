@@ -31,6 +31,12 @@
 | Container | Không root, rootfs chỉ đọc, bỏ mọi capability. |
 | Audit | Chuỗi băm phát hiện sửa dòng; trạng thái có chữ ký lưu vị trí cuối khi lưu và khi khoá để phát hiện cắt bớt cuối file (các mục ghi sau lần lưu cuối chưa được phủ). |
 
+## Tự mở khoá khi khởi động
+
+Mặc định, khởi động lại thì kho khoá tới khi bạn đăng nhập, và agent nhận lỗi 423. `UCANRUN_UNLOCK_FILE` đọc mật khẩu chính từ file lúc khởi động. Web vẫn cần mật khẩu và TOTP.
+
+Đánh đổi: ai đọc được file đó thì giải mã được mọi secret. Chỉ dùng với Docker secret, trên máy mà agent không có quyền Docker hay root.
+
 ## Khi token bị lộ
 
 - **Token bot:** `/revoke` với @BotFather, dán token mới vào **Cài đặt**, ghép nối lại.

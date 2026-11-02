@@ -55,7 +55,7 @@ Agent:
   ucr mcp                   stdio MCP server
 
 Environment: UCANRUN_PUBLIC_URL, UCANRUN_GATE_TOKEN, UCANRUN_GATE=off,
-UCANRUN_ENABLE_EXEC=1, UCANRUN_LANG=vi|en, UCANRUN_DATA, UCANRUN_WEB_ADDR, UCANRUN_AGENT_ADDR,
+UCANRUN_ENABLE_EXEC=1, UCANRUN_LANG=vi|en, UCANRUN_UNLOCK_FILE, UCANRUN_DATA, UCANRUN_WEB_ADDR, UCANRUN_AGENT_ADDR,
 UCANRUN_APPROVAL_TTL, UCANRUN_URL, UCANRUN_TOKEN
 `
 
@@ -158,6 +158,13 @@ func serve() error {
 		return err
 	}
 	defer c.Close()
+	if f := os.Getenv("UCANRUN_UNLOCK_FILE"); f != "" {
+		if err := unlockFromFile(c, f); err != nil {
+			slog.Error("UCANRUN_UNLOCK_FILE: vault stays locked", "err", err)
+		} else {
+			slog.Warn("vault unlocked from UCANRUN_UNLOCK_FILE")
+		}
+	}
 	setup := ""
 	if !c.Vault.Initialized() {
 		b := make([]byte, 16)
@@ -224,6 +231,23 @@ func harden() {
 		slog.Warn("could not disable dumps", "err", e)
 	}
 	syscall.Setrlimit(syscall.RLIMIT_CORE, &syscall.Rlimit{})
+}
+
+func unlockFromFile(c *core.Core, path string) error {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if fi.Mode().Perm()&0o077 != 0 {
+		// Docker secrets mount read-only and owner-only.
+		slog.Warn("UCANRUN_UNLOCK_FILE is readable by group or others", "mode", fi.Mode().Perm())
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	defer clear(b)
+	return c.UnlockAtStart([]byte(strings.TrimRight(string(b), "\r\n")))
 }
 
 // publicURL returns the address people use, which also decides cookie security.

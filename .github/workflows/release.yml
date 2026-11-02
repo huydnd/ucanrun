@@ -4,8 +4,9 @@ on:
   push:
     tags: ["v*"]
 permissions:
-  contents: read
+  contents: write
   packages: write
+  id-token: write # keyless cosign signing
 jobs:
   image:
     runs-on: ubuntu-latest
@@ -25,12 +26,35 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
+      - id: build
+        uses: docker/build-push-action@v6
         with:
           context: .
           target: ${{ matrix.target }}
           platforms: linux/amd64,linux/arm64
           push: true
+          sbom: true
+          provenance: mode=max
           tags: |
             ghcr.io/${{ github.repository }}:${{ github.ref_name }}${{ matrix.suffix }}
             ghcr.io/${{ github.repository }}:latest${{ matrix.suffix }}
+      - uses: sigstore/cosign-installer@v3
+      - run: cosign sign --yes "ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}"
+  binaries:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.3"
+      - name: Build
+        run: |
+          mkdir dist
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
+            os=${target%/*}; arch=${target#*/}; ext=""; [ "$os" = windows ] && ext=".exe"
+            CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath -ldflags="-s -w" -o "dist/ucr-$os-$arch$ext" ./cmd/ucr
+          done
+          cd dist && sha256sum * > SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*

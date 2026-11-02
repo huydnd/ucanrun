@@ -385,6 +385,34 @@ func (c *Core) checkTOTPLocked(code string) error {
 	return c.saveLocked()
 }
 
+// UnlockAtStart opens the vault from a file at startup, so a restart does not
+// leave agents locked out. It skips TOTP by design: whoever can read that file
+// on the host already controls the server. Off unless UCANRUN_UNLOCK_FILE is set.
+func (c *Core) UnlockAtStart(pass []byte) error {
+	id, err := c.Vault.Open(pass)
+	if err != nil {
+		return err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.st != nil {
+		return nil
+	}
+	c.Vault.Adopt(id)
+	k, err := c.Vault.MACKey()
+	if err == nil {
+		c.st, err = loadState(c.statePath(), k)
+	}
+	if err != nil {
+		c.st = nil
+		c.Vault.Lock()
+		return err
+	}
+	c.startBotLocked()
+	c.log("auto_unlock", "file", nil)
+	return nil
+}
+
 // Lock wipes the key from memory and denies everything in flight.
 func (c *Core) Lock(actor string) {
 	c.mu.Lock()
@@ -740,6 +768,33 @@ func (r Request) public() Request {
 func (c *Core) Submit(t Token, profile string, params map[string]string, reason string) (Request, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.submitLocked(t, profile, params, reason, true)
+}
+
+// TestRun lets the signed-in owner run a profile at once from the web. The owner
+// is the approver, so there is no Telegram message; high risk still needs TOTP.
+func (c *Core) TestRun(ctx context.Context, profile string, params map[string]string, code, secret string) (Request, error) {
+	c.mu.Lock()
+	r, err := c.submitLocked(Token{Name: "web"}, profile, params, "chạy thử từ web", false)
+	c.mu.Unlock()
+	if err != nil {
+		return Request{}, err
+	}
+	if r.State == Pending {
+		if _, err := c.Decide(r.ID, r.Hash, true, "web", code, secret); err != nil {
+			c.mu.Lock()
+			if q, ok := c.reqs[r.ID]; ok && q.State == Pending {
+				c.finishLocked(q, Denied, "web")
+			}
+			c.mu.Unlock()
+			return Request{}, err
+		}
+	}
+	q, _ := c.Wait(ctx, r.ID)
+	return q, nil
+}
+
+func (c *Core) submitLocked(t Token, profile string, params map[string]string, reason string, notify bool) (Request, error) {
 	if c.st == nil {
 		return Request{}, ErrLocked
 	}
@@ -795,7 +850,7 @@ func (c *Core) Submit(t Token, profile string, params map[string]string, reason 
 		c.startLocked(r, "auto")
 		return r.public(), nil
 	}
-	if bot := c.bot; bot != nil && c.st.Telegram.UserID != 0 {
+	if bot := c.bot; notify && bot != nil && c.st.Telegram.UserID != 0 {
 		id, short, text, choices := r.ID, r.Hash[:16], approvalText(r, c.opt.Lang == "vi"), r.Choices
 		go func() {
 			if err := bot.Notify(c.baseCtx, id, short, text, choices); err != nil {

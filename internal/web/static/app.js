@@ -301,6 +301,23 @@ function select(value, options, onchange, label) {
 async function viewProfiles(body) {
   const [list, secrets] = await Promise.all([api("GET", "/api/profiles"), api("GET", "/api/secrets")]);
   const openBuilder = d => renderBuilder(body, d, secrets);
+  // Run now as the owner, to check a profile before an agent relies on it.
+  const openTest = p => {
+    const inputs = (p.params || []).map(q => { const f = field(q.name, {autocomplete: "off", spellcheck: "false"}); return [q.name, f]; });
+    const pick = (p.secret_choices || []).length ? select(p.secret_choices[0], p.secret_choices.map(n => [n, n]), () => {}, "Chọn secret") : null;
+    const code = p.risk === "high" ? field("Mã TOTP", {inputmode: "numeric", maxlength: 6, autocomplete: "one-time-code"}) : null;
+    const out = h("div");
+    const card = form("Chạy thử: " + (p.description || p.name), inputs.map(x => x[1]).concat(code ? [code] : []), "Chạy ngay", async () => {
+      out.replaceChildren(h("p", {class: "muted"}, tr("Đang chạy…")));
+      const params = Object.fromEntries(inputs.filter(([, f]) => f.input.value !== "").map(([n, f]) => [n, f.input.value]));
+      const r = await api("POST", `/api/profiles/${encodeURIComponent(p.name)}/test`, {params, totp: code ? code.input.value : "", secret: pick ? pick.value : ""});
+      const res = r.result || {};
+      out.replaceChildren(h("p", {class: res.ok ? "muted" : "note"}, tr(`Kết quả: ${r.state}`) + (res.exit ? ` · exit ${res.exit}` : "")), h("pre", null, res.output || ""));
+    }, h("div", null, h("p", {class: "muted"}, "Chạy ngay với quyền của bạn, không gửi Telegram. Có ghi vào nhật ký."), pick ? h("label", null, h("span", null, "Secret dùng cho lần này"), pick) : null));
+    card.append(out, h("div", {class: "row"}, h("button", {onclick: () => viewProfiles(body)}, "Đóng")));
+    fill(body, card);
+    window.scrollTo(0, 0);
+  };
   const catalog = await fetch("catalog.json").then(r => r.json()).catch(() => []);
   const haveSecret = n => secrets.some(s => s.name === n);
   const haveProfile = n => list.some(p => p.name === n);
@@ -337,7 +354,7 @@ async function viewProfiles(body) {
     list.length ? list.map(p => h("div", {class: "spread"}, h("span", null, h("b", null, p.description || p.name), " ",
       h("span", {class: "badge " + (p.risk === "high" ? "high" : "")}, p.risk === "high" ? "cần TOTP" : p.auto_approve ? "tự chạy" : "hỏi duyệt"),
       h("div", {class: "muted"}, h("code", null, "ucr run " + p.name + (p.params || []).map(q => ` ${q.name}=…`).join("")))),
-    h("span", null, h("button", {onclick: () => openBuilder(fromProfile(p))}, "Sửa"), " ",
+    h("span", null, h("button", {onclick: () => openTest(p)}, "Chạy thử"), " ", h("button", {onclick: () => openBuilder(fromProfile(p))}, "Sửa"), " ",
       h("button", {class: "danger", onclick: async () => { if (confirm(tr(`Xoá profile ${p.name}?`))) { await api("DELETE", "/api/profiles/" + encodeURIComponent(p.name)); viewProfiles(body); } }}, "Xoá")))) : h("p", {class: "muted"}, "Chưa có profile.")));
 }
 
