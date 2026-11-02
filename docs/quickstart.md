@@ -1,8 +1,8 @@
-# Bắt đầu nhanh
+# Quick start
 
-Hướng dẫn này dành cho người dùng mới. Khoảng 10 phút.
+About 10 minutes.
 
-## 0. Cài đặt
+## 0. Install
 
 ```bash
 git clone <repo> && cd ucanrun
@@ -10,52 +10,53 @@ docker compose up -d
 docker logs ucanrun
 ```
 
-Log in ra **mã truy cập** và **setup token**. Không cần tạo file cấu hình. Mở `http://127.0.0.1:8780`, nhập mã truy cập. Lưu mã vào trình quản lý mật khẩu; xem lại bằng `docker exec ucanrun ucr gate`.
+The log prints an **Access code** and a **Setup token**. No config file is needed. Open `http://127.0.0.1:8780` and enter the access code. Save it in a password manager; `docker exec ucanrun ucr gate` shows it again.
 
-Đổi cổng khi bị trùng: `UCANRUN_PORT=9000 docker compose up -d`.
+If the port is taken: `UCANRUN_PORT=9000 docker compose up -d`.
 
-### Dùng qua domain
-
-Đặt địa chỉ công khai rồi chạy lại, xem [cấu hình](configuration.md):
+To serve from a domain, see [configuration](configuration.md):
 
 ```bash
 UCANRUN_PUBLIC_URL=https://ucanrun.example.com docker compose up -d
 ```
 
-## 1. Khởi tạo kho
+## 1. Create the vault
 
-1. Nhập setup token từ log.
-2. Đặt **mật khẩu chính**, lưu vào trình quản lý mật khẩu. Mất mật khẩu này thì không khôi phục được.
+1. Enter the setup token from the log.
+2. Choose a **master password** and save it in a password manager. It cannot be recovered.
 
-## 2. Làm theo mục Bắt đầu
+## 2. Follow the Start tab
 
-Sau khi khởi tạo, tab **Bắt đầu** dẫn bạn qua bốn bước. Bước nào chưa làm được thì bỏ qua và quay lại sau.
+The Start tab walks through four steps. Skip any step and return to it later with **Do this step**.
 
-1. **Nối Telegram:** tạo bot bằng @BotFather, dán token, gửi `/pair <mã>` cho bot. Mã có 6 ký tự, hạn 3 phút, sai 3 lần là huỷ.
-2. **Bật TOTP:** quét mã QR, rồi lưu 8 mã khôi phục. Các mã này chỉ hiện một lần.
-3. **Thêm dịch vụ:** chọn mẫu, dán token, xem [danh mục mẫu](catalog.md). Việc khác thì dùng [form tạo profile](profiles.md).
-4. **Tạo token cho agent:** chạy các lệnh hiện trên màn hình ở máy agent. Không dán token vào chat với AI.
+1. **Connect Telegram:** create a bot with @BotFather, paste its token, and send `/pair <code>` to the bot. The code has 6 characters, lasts 3 minutes and is cancelled after 3 wrong tries.
+2. **Enable TOTP:** scan the QR code and save the 8 recovery codes. They are shown once.
+3. **Add a service:** pick a template and paste a token, see the [catalog](catalog.md). For anything else use the [profile form](profiles.md).
+4. **Create an agent token:** choose your agent and the profiles it may use, then follow the instructions shown. The token goes into that agent's own MCP settings.
 
-Kiểm tra agent: `ucr profiles`.
+The agent machine needs the `ucr` command: `docker cp ucanrun:/usr/local/bin/ucr ~/.local/bin/ucr`.
 
-## Mất điện thoại
+Check it: `ucr profiles` with `UCANRUN_URL` and `UCANRUN_TOKEN` set, or call `list_profiles` from the agent.
 
-Đăng nhập bằng mật khẩu chính và một mã khôi phục, nhập vào ô mã TOTP. Mỗi mã dùng một lần. Sau đó vào **Cài đặt** → **TOTP** → **Đổi điện thoại** để đăng ký thiết bị mới.
+## Lost your phone
 
-Mã khôi phục không duyệt được yêu cầu rủi ro cao.
+Sign in with the master password and a recovery code in the TOTP field. Each code works once. Then open **Settings**, **TOTP**, **Move to a new phone**.
 
-## Cài lên điện thoại
+Recovery codes cannot approve high risk requests.
 
-Mở trang bằng trình duyệt, nhập mã truy cập, rồi:
+## Install on a phone
 
-- **Android, Chrome:** menu ⋮ → **Thêm vào Màn hình chính**.
-- **iPhone, Safari:** nút Chia sẻ → **Thêm vào MH chính**.
+Open the site in a browser and enter the access code.
 
-App mở toàn màn hình như ứng dụng thường. iPhone giữ dữ liệu riêng cho app cài trên màn hình chính, nên phải nhập mã truy cập thêm một lần. App không lưu dữ liệu kho để dùng offline, nên cần có mạng.
+- **Android, Chrome:** menu, then **Add to Home screen**.
+- **iPhone, Safari:** Share, then **Add to Home Screen**.
 
-## Dùng hằng ngày
+iPhone keeps separate storage for home screen apps, so you enter the access code once more. There is no offline cache, so vault data stays off the device and the app needs a network.
 
-- Agent xin làm việc, bạn nhận tin trên Telegram và bấm **Duyệt** hoặc **Từ chối**. Không bấm trong 2 phút thì coi như từ chối.
-- Khi container khởi động lại, kho tự khoá. Bạn đăng nhập web để mở, trong lúc đó agent nhận lỗi 423.
+## Daily use
 
-Gặp lỗi: xem [xử lý sự cố](troubleshooting.md).
+An agent asks, you get a Telegram message, you tap **Approve** or **Deny**. No answer within 2 minutes counts as denied.
+
+After a restart the vault is locked until you sign in. Agents get error 423 until then.
+
+Problems: see [troubleshooting](troubleshooting.md).

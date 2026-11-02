@@ -1,25 +1,25 @@
-# Xử lý sự cố
+# Troubleshooting
 
-| Triệu chứng | Nguyên nhân | Cách xử lý |
+| Symptom | Cause | Fix |
 |---|---|---|
-| Chỉ thấy ô "Mã truy cập" | Trình duyệt chưa nhập mã cổng | Chạy `docker exec ucanrun ucr gate` |
-| Agent nhận lỗi 423 | Kho đang khoá | Đăng nhập web |
-| Không có tin Telegram | Kho khoá, hoặc chưa ghép nối | Đăng nhập, xem **Cài đặt** |
-| `/pair` không phản hồi | Mã sai, hết 3 phút, hoặc sai 3 lần | Tạo mã mới trong **Cài đặt** |
-| Trang báo 502 | Container không chạy hoặc URL tunnel sai | `docker ps`, kiểm tra địa chỉ reverse proxy |
-| Setup token đổi liên tục | Container khởi động lại, thường do thiếu RAM | `docker inspect ucanrun`, cần `mem_limit` từ 768m |
-| `secret "x" unavailable` | Kho chưa có secret này | Thêm ở tab **Secret** |
-| Không có nút Chạy lệnh | Đang dùng image mặc định | Xem [cấu hình](configuration.md) |
-| Lỗi 429 | Quá 5 yêu cầu chờ, hoặc 30 yêu cầu trong 10 phút | Chờ, hoặc xử lý các yêu cầu đang chờ |
-| Không đăng nhập được | Sai nhiều lần | Chờ tới 60 giây rồi thử lại |
-| Không lưu được profile | Lỗi hiện dưới ô xem trước | Sửa theo thông báo |
+| Only an "Access code" field shows | This browser has not entered the code | `docker exec ucanrun ucr gate` |
+| Agent gets error 423 | The vault is locked | Sign in on the web |
+| No Telegram message | Vault locked, or not paired | Sign in, check Settings |
+| `/pair` gets no reply | Wrong code, 3 minutes passed, or 3 wrong tries | Create a new code in Settings |
+| Site shows 502 | Container down, or wrong proxy address | `docker ps`, check the proxy target |
+| Setup token keeps changing | The container restarts, usually out of memory | `docker inspect ucanrun`, `mem_limit` must be 768m or more |
+| `secret "x" unavailable` | The vault lacks that secret | Add it on the Secrets tab |
+| No Run a command option | Using the default image | See [configuration](configuration.md) |
+| Error 429 | 5 waiting requests, or 30 in 10 minutes | Wait, or handle the waiting requests |
+| Cannot sign in | Too many wrong tries | Wait up to 60 seconds |
+| Cannot save a profile | The reason shows under the preview | Fix what it says |
 
-## Lệnh hữu ích
+## Useful commands
 
 ```bash
 docker logs --tail 50 ucanrun
 docker exec ucanrun ucr audit-verify
-ucr profiles
+docker exec ucanrun ucr gate
 ```
 
-Log không chứa secret. Setup token chỉ hiện trong log khi kho chưa khởi tạo.
+Logs contain no secrets. The setup token and access code are printed only until setup is finished.

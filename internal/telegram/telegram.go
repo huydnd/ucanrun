@@ -32,6 +32,8 @@ type Config struct {
 	Token   string
 	UserID  int64
 	ChatID  int64
+	// Translate localizes user-facing text. Nil keeps the source text.
+	Translate func(string) string
 }
 
 type Bot struct {
@@ -59,6 +61,13 @@ func New(cfg Config, h Handler) *Bot {
 	tr := &http.Transport{Proxy: http.ProxyFromEnvironment, DisableKeepAlives: true, TLSHandshakeTimeout: 10 * time.Second}
 	return &Bot{cfg: cfg, h: h, http: &http.Client{Timeout: 40 * time.Second, Transport: tr},
 		waiting: map[int64]pendingCode{}, msgs: map[string]int64{}}
+}
+
+func (b *Bot) t(s string) string {
+	if b.cfg.Translate != nil {
+		return b.cfg.Translate(s)
+	}
+	return s
 }
 
 // call never lets the token reach a returned error, because http errors embed
@@ -119,14 +128,14 @@ type button struct {
 
 // keyboard shows one approve button per secret when the approver must choose.
 // Callback data carries an index, not a name, so names need not fit in 64 bytes.
-func keyboard(id, short string, choices []string) map[string]any {
-	deny := button{Text: "❌ Từ chối", Data: "d:" + id + ":" + short}
+func (b *Bot) keyboard(id, short string, choices []string) map[string]any {
+	deny := button{Text: "❌ " + b.t("Từ chối"), Data: "d:" + id + ":" + short}
 	if len(choices) == 0 {
-		return map[string]any{"inline_keyboard": [][]button{{{Text: "✅ Duyệt", Data: "a:" + id + ":" + short}, deny}}}
+		return map[string]any{"inline_keyboard": [][]button{{{Text: "✅ " + b.t("Duyệt"), Data: "a:" + id + ":" + short}, deny}}}
 	}
 	rows := [][]button{}
 	for i, n := range choices {
-		rows = append(rows, []button{{Text: "✅ Dùng " + n, Data: fmt.Sprintf("a:%s:%s:%d", id, short, i)}})
+		rows = append(rows, []button{{Text: "✅ " + b.t("Dùng") + " " + n, Data: fmt.Sprintf("a:%s:%s:%d", id, short, i)}})
 	}
 	return map[string]any{"inline_keyboard": append(rows, []button{deny})}
 }
@@ -143,7 +152,7 @@ func (b *Bot) Notify(ctx context.Context, id, short, text string, choices []stri
 	for try := 0; try < 2; try++ {
 		c, cancel := context.WithTimeout(ctx, 15*time.Second)
 		err = b.call(c, "sendMessage", map[string]any{
-			"chat_id": chat, "text": text, "reply_markup": keyboard(id, short, choices),
+			"chat_id": chat, "text": text, "reply_markup": b.keyboard(id, short, choices),
 			"disable_web_page_preview": true,
 		}, &m)
 		cancel()
@@ -271,7 +280,7 @@ func (b *Bot) handle(ctx context.Context, u update) {
 			b.cfgMu.Lock()
 			b.cfg.UserID, b.cfg.ChatID = m.From.ID, m.Chat.ID
 			b.cfgMu.Unlock()
-			b.say(ctx, m.Chat.ID, "Đã ghép nối. Từ giờ chỉ tài khoản này được duyệt yêu cầu.")
+			b.say(ctx, m.Chat.ID, b.t("Đã ghép nối. Từ giờ chỉ tài khoản này được duyệt yêu cầu."))
 		}
 		return
 	}
@@ -286,20 +295,20 @@ func (b *Bot) handle(ctx context.Context, u update) {
 	delete(b.waiting, m.From.ID)
 	b.mu.Unlock()
 	if !ok || time.Now().After(p.until) {
-		b.say(ctx, m.Chat.ID, "Không có yêu cầu nào đang chờ mã.")
+		b.say(ctx, m.Chat.ID, b.t("Không có yêu cầu nào đang chờ mã."))
 		return
 	}
 	msg, err := b.h.Decide(p.id, p.short, true, fmt.Sprintf("telegram:%d", m.From.ID), text, p.secret)
 	if err != nil {
-		msg = "Không duyệt được: " + err.Error()
+		msg = b.t("Không duyệt được:") + " " + b.t(err.Error())
 	}
-	b.say(ctx, m.Chat.ID, msg)
+	b.say(ctx, m.Chat.ID, b.t(msg))
 }
 
 func (b *Bot) handleCallback(ctx context.Context, u update) {
 	c := u.Callback
 	answer := func(t string) {
-		if err := b.call(ctx, "answerCallbackQuery", map[string]any{"callback_query_id": c.ID, "text": t}, nil); err != nil {
+		if err := b.call(ctx, "answerCallbackQuery", map[string]any{"callback_query_id": c.ID, "text": b.t(t)}, nil); err != nil {
 			slog.Warn("telegram answer", "err", err)
 		}
 	}
@@ -327,7 +336,7 @@ func (b *Bot) handleCallback(ctx context.Context, u update) {
 		b.waiting[c.From.ID] = pendingCode{id: id, short: short, secret: secret, until: time.Now().Add(2 * time.Minute)}
 		b.mu.Unlock()
 		answer("Cần mã TOTP")
-		b.say(ctx, c.Message.Chat.ID, "Yêu cầu rủi ro cao "+id+". Gửi mã TOTP 6 số trong 2 phút.")
+		b.say(ctx, c.Message.Chat.ID, b.t("Yêu cầu rủi ro cao")+" "+id+". "+b.t("Gửi mã TOTP 6 số trong 2 phút."))
 		return
 	}
 	msg, err := b.h.Decide(id, short, approve, fmt.Sprintf("telegram:%d", c.From.ID), "", secret)

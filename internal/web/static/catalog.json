@@ -18,7 +18,9 @@
      "Accept": "application/vnd.github+json"
     }
    }
-  }
+  },
+  "title_en": "List my repos",
+  "hint_en": "Fine-grained token with Metadata read access."
  },
  {
   "group": "GitHub",
@@ -58,7 +60,9 @@
     },
     "body": "{\"title\":\"{{title}}\"}"
    }
-  }
+  },
+  "title_en": "Create an issue",
+  "hint_en": "Needs Issues write access."
  },
  {
   "group": "Gitea",
@@ -79,7 +83,9 @@
     }
    }
   },
-  "custom": true
+  "custom": true,
+  "title_en": "List repos",
+  "hint_en": "Gitea token with repository read access. Edit the server URL."
  },
  {
   "group": "Gitea",
@@ -109,7 +115,9 @@
     "body": "{\"name\":\"{{repo}}\",\"private\":true}"
    }
   },
-  "custom": true
+  "custom": true,
+  "title_en": "Create a private repo",
+  "hint_en": "Needs repository write access. Edit the server URL."
  },
  {
   "group": "Cloudflare",
@@ -129,7 +137,9 @@
      "Authorization": "Bearer {{secret:cloudflare_token}}"
     }
    }
-  }
+  },
+  "title_en": "List domains",
+  "hint_en": "API token with Zone Read."
  },
  {
   "group": "Cloudflare",
@@ -158,7 +168,9 @@
     },
     "body": "{\"purge_everything\":true}"
    }
-  }
+  },
+  "title_en": "Purge a domain cache",
+  "hint_en": "Needs Cache Purge. Requires TOTP."
  },
  {
   "group": "AI",
@@ -179,7 +191,9 @@
      "Authorization": "Bearer {{secret:deepseek_key}}"
     }
    }
-  }
+  },
+  "title_en": "DeepSeek: check balance",
+  "hint_en": "DeepSeek API key."
  },
  {
   "group": "AI",
@@ -200,7 +214,9 @@
      "x-goog-api-key": "{{secret:google_ai_key}}"
     }
    }
-  }
+  },
+  "title_en": "Google AI: list models",
+  "hint_en": "API key from Google AI Studio."
  },
  {
   "group": "Notion",
@@ -230,7 +246,9 @@
     },
     "body": "{\"query\":\"{{query}}\"}"
    }
-  }
+  },
+  "title_en": "Search pages",
+  "hint_en": "Internal integration token."
  },
  {
   "group": "Chọn secret khi duyệt",
@@ -253,7 +271,10 @@
      "Accept": "application/vnd.github+json"
     }
    }
-  }
+  },
+  "title_en": "GitHub: choose an account",
+  "hint_en": "Edit the list to match your secrets, then choose on Telegram.",
+  "group_en": "Choose a secret when approving"
  },
  {
   "group": "Máy chủ",
@@ -297,6 +318,9 @@
      "id_key": "{{secret:ssh_key}}"
     }
    }
-  }
+  },
+  "title_en": "Restart a service over SSH",
+  "hint_en": "Needs the exec image. Edit the server and services. See docs/ssh-sudo.md.",
+  "group_en": "Servers"
  }
 ]

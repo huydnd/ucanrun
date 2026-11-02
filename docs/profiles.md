@@ -1,51 +1,52 @@
-# Tạo profile
+# Creating profiles
 
-Profile là một việc cụ thể bạn cho phép agent xin làm. Agent chỉ điền được các giá trị bạn khai báo, còn nơi gửi và secret do bạn cố định.
+A profile is one specific action an agent may request. The agent only fills the values you declare. The destination and the secret are fixed by you.
 
-## Các bước trên form
+## The form
 
-1. **Việc cần làm:** viết một câu. Tên lệnh tự sinh từ câu này.
-2. **Gọi tới đâu:** chọn **Gọi API** nếu được. **Chạy lệnh** chạy chương trình trong container nên rủi ro hơn.
-3. **Đăng nhập bằng gì:** chọn kiểu, rồi chọn secret, hoặc **Chọn khi duyệt trên Telegram**.
-4. **Agent được điền gì:** thêm giá trị và chọn kiểu dữ liệu. Bấm nút tên giá trị để chèn vào ô đang chọn.
-5. **Nội dung gửi đi:** chỉ cần với POST, PUT, PATCH.
-6. **Ai duyệt:** chọn mức phù hợp.
+1. **What to do:** write one sentence. The command name is generated from it.
+2. **Where to call:** prefer **Call an API**. **Run a command** needs the `exec` image.
+3. **How to authenticate:** pick a style and a secret, or **Choose when approving on Telegram**.
+4. **What the agent may fill in:** add values and pick a type. Tap a value name to insert it into the focused field.
+5. **Request body:** only for POST, PUT and PATCH.
+6. **Who approves:** pick a level.
 
-Ô **Telegram sẽ hiện** bên cạnh là đúng nội dung bạn sẽ thấy khi duyệt. Nút Lưu chỉ bật khi profile hợp lệ.
+**Telegram will show** displays exactly what you will see when approving. Save is enabled only when the profile is valid.
 
-## Chọn mức duyệt
+## Approval levels
 
-| Mức | Dùng khi |
+| Level | Use for |
 |---|---|
-| Luôn hỏi tôi | Mặc định, cho mọi việc có ghi dữ liệu |
-| Hỏi và cần TOTP | Xoá dữ liệu, thay đổi quan trọng, lệnh trên máy chủ |
-| Tự chạy, không hỏi | Chỉ đọc và vô hại, như xem số dư |
+| Always ask me | The default, for anything that writes |
+| Ask and require a TOTP code | Deletions, important changes, server commands |
+| Run automatically | Harmless reads, such as a balance |
 
-## Chọn secret khi duyệt
+## Choosing a secret when approving
 
-Dùng khi một việc có nhiều tài khoản, như GitHub cá nhân và công việc.
+For several accounts on one service, such as personal and work GitHub.
 
-1. Ở bước 3, chọn **Chọn khi duyệt trên Telegram**.
-2. Tích các secret được phép chọn.
+1. In step 3, choose **Choose when approving on Telegram**.
+2. Tick the secrets that may be chosen.
 
-Telegram sẽ hiện mỗi secret một nút **✅ Dùng tên_secret**. Tin kết thúc ghi rõ secret đã dùng, audit log cũng ghi lại. Agent không chọn được secret, chỉ bạn chọn. Danh sách phải khai báo trước, vì mọi secret trong danh sách đều được gửi tới cùng một địa chỉ. Không đưa vào danh sách secret của dịch vụ khác.
+Telegram shows one **Use name** button per secret. The final message and the audit log name the secret used. Only you choose, never the agent. Every listed secret goes to the same address, so never list a secret from another service.
 
-## Luật hệ thống tự chặn
+## Rules enforced for you
 
-- Agent không đổi được tên máy đích.
-- Không đặt secret trong URL hay đối số lệnh, vì sẽ lộ ở log và `/proc`.
-- Không chạy shell hay trình thông dịch.
-- Không dùng biến như `LD_PRELOAD`, `PATH`.
-- Giá trị khai báo mà không dùng sẽ bị từ chối khi lưu.
+- Agents cannot change the host.
+- Secrets cannot go in a URL or in arguments, where logs and `/proc` would show them.
+- No shells or interpreters.
+- No variables such as `LD_PRELOAD` or `PATH`.
+- A declared value that is never used is refused.
+- Values are escaped by position, and cannot add path segments, query fields or command options.
 
-## Định dạng JSON
+## JSON
 
-Mục **Nâng cao** trên form cho xem và dán JSON. Chạy lệnh có thêm hai trường: `stdin` đưa secret vào đầu vào chương trình, `files` tạo file tạm quyền 600 trong thư mục chạy và xoá sau khi xong.
+**Advanced** on the form shows and accepts JSON. Command profiles also have `stdin`, which feeds a secret to the program, and `files`, which creates temporary 0600 files in the run directory.
 
 ```json
 {
   "name": "gitea-create-repo",
-  "description": "Tạo repo private trên Gitea",
+  "description": "Create a private Gitea repo",
   "risk": "low",
   "params": [{"name": "repo", "pattern": "[a-z0-9._-]{1,64}", "required": true}],
   "http": {

@@ -9,9 +9,9 @@ function h(tag, attrs, ...kids) {
   for (const [k, v] of Object.entries(attrs || {})) {
     if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
     else if (k === "class") e.className = v;
-    else if (v !== false && v != null) e.setAttribute(k, v === true ? "" : v);
+    else if (v !== false && v != null) e.setAttribute(k, v === true ? "" : ["placeholder", "aria-label", "alt"].includes(k) ? tr(v) : v);
   }
-  for (const c of kids.flat()) if (c != null) e.append(c);
+  for (const c of kids.flat()) if (c != null) e.append(typeof c === "string" ? tr(c) : c);
   return e;
 }
 
@@ -34,7 +34,7 @@ function form(title, fields, submit, onsubmit, extra) {
   const err = h("div", {class: "err", role: "alert"});
   const btn = h("button", {class: "primary", type: "button", onclick: async () => {
     err.textContent = ""; btn.disabled = true;
-    try { await onsubmit(); } catch (e) { err.textContent = e.message; } finally { btn.disabled = false; }
+    try { await onsubmit(); } catch (e) { err.textContent = tr(e.message); } finally { btn.disabled = false; }
   }}, submit);
   fields.forEach(f => f.input.addEventListener("keydown", e => { if (e.key === "Enter") btn.click(); }));
   return h("div", {class: "card"}, h("h2", null, title), extra, fields.map(f => f.el), h("div", {class: "row"}, btn), err);
@@ -102,7 +102,7 @@ async function viewRequests(body) {
     const pick = r.choices && r.choices.length ? select(state.picks[r.id] || r.choices[0], r.choices.map(n => [n, n]), v => { state.picks[r.id] = v; }, "Chọn secret") : null;
     const act = approve => async () => {
       try { await api("POST", `/api/requests/${r.id}/decide`, {approve, hash: r.hash, totp: code.value, secret: pick ? pick.value : ""}); viewRequests(body); }
-      catch (e) { err.textContent = e.message; }
+      catch (e) { err.textContent = tr(e.message); }
     };
     return h("div", {class: "card"},
       h("h3", null, r.profile, " ", h("span", {class: "badge " + (r.risk === "high" ? "high" : "")}, r.risk === "high" ? "rủi ro cao" : "rủi ro thấp")),
@@ -134,7 +134,7 @@ async function viewSecrets(body) {
     h("div", {class: "card"}, h("h2", null, `Secret (${list.length})`),
       list.length ? list.map(s => h("div", {class: "spread"}, h("span", null, h("code", null, s.name), h("div", {class: "muted"}, new Date(s.updated).toLocaleString())),
         h("button", {class: "danger", onclick: async () => {
-          if (confirm(`Xoá secret ${s.name}?`)) { await api("DELETE", "/api/secrets/" + encodeURIComponent(s.name)); viewSecrets(body); }
+          if (confirm(tr(`Xoá secret ${s.name}?`))) { await api("DELETE", "/api/secrets/" + encodeURIComponent(s.name)); viewSecrets(body); }
         }}, "Xoá"))) : h("p", {class: "muted"}, "Chưa có secret.")));
 }
 
@@ -174,8 +174,8 @@ const errorText = [
   [/secret choice needs a human/, "Chọn secret khi duyệt thì không thể tự chạy."],
 ];
 function viErr(msg) {
-  for (const [re, t] of errorText) { const m = msg.match(re); if (m) return typeof t === "function" ? t(m) : t; }
-  return msg;
+  for (const [re, t] of errorText) { const m = msg.match(re); if (m) return tr(typeof t === "function" ? t(m) : t); }
+  return tr(msg);
 }
 
 const templates = {
@@ -310,7 +310,7 @@ async function viewProfiles(body) {
     const err = h("div", {class: "err"});
     const added = haveProfile(c.profile.name);
     const direct = !c.custom && !(c.profile.secret_choices || []).length;
-    return h("div", {class: "tile"}, h("b", null, c.title), h("small", {class: "muted"}, c.hint),
+    return h("div", {class: "tile"}, h("b", null, lang === "en" && c.title_en || c.title), h("small", {class: "muted"}, lang === "en" && c.hint_en || c.hint),
       added ? h("span", {class: "badge"}, "đã thêm") : h("div", null, inputs,
         h("div", {class: "row"}, direct ? h("button", {class: "primary", onclick: async () => {
           err.textContent = "";
@@ -319,7 +319,7 @@ async function viewProfiles(body) {
               if (!inputs[i].value) throw new Error("Hãy dán giá trị " + n);
               await api("PUT", "/api/secrets/" + encodeURIComponent(n), {value: inputs[i].value.trim()});
             }
-            await api("PUT", "/api/profiles", c.profile);
+            await api("PUT", "/api/profiles", Object.assign({}, c.profile, lang === "en" && c.title_en ? {description: c.title_en} : {}));
             viewProfiles(body);
           } catch (e) { err.textContent = viErr(e.message); }
         }}, "Thêm") : null, h("button", {onclick: () => openBuilder(fromProfile(c.profile))}, "Tuỳ chỉnh")), err));
@@ -329,7 +329,7 @@ async function viewProfiles(body) {
   const groups = [...new Set(usable.map(c => c.group))];
   fill(body, h("div", {class: "card"}, h("h2", null, "Thêm nhanh"),
     h("p", {class: "muted"}, "Dán token của dịch vụ rồi bấm Thêm, không cần cấu hình gì khác."),
-    groups.map(g => h("div", null, h("h3", null, g), h("div", {class: "tiles"}, usable.filter(c => c.group === g).map(catalogCard))))),
+    groups.map(g => h("div", null, h("h3", null, lang === "en" && (usable.find(c => c.group === g).group_en) || g), h("div", {class: "tiles"}, usable.filter(c => c.group === g).map(catalogCard))))),
   h("div", {class: "card"}, h("h2", null, "Tự tạo profile"),
     h("p", {class: "muted"}, "Profile là một việc cụ thể bạn cho phép agent xin làm."),
     h("div", {class: "row"}, Object.values(templates).map(t => h("button", {onclick: () => openBuilder(newDraft(t.d))}, t.label)))),
@@ -338,7 +338,7 @@ async function viewProfiles(body) {
       h("span", {class: "badge " + (p.risk === "high" ? "high" : "")}, p.risk === "high" ? "cần TOTP" : p.auto_approve ? "tự chạy" : "hỏi duyệt"),
       h("div", {class: "muted"}, h("code", null, "ucr run " + p.name + (p.params || []).map(q => ` ${q.name}=…`).join("")))),
     h("span", null, h("button", {onclick: () => openBuilder(fromProfile(p))}, "Sửa"), " ",
-      h("button", {class: "danger", onclick: async () => { if (confirm(`Xoá profile ${p.name}?`)) { await api("DELETE", "/api/profiles/" + encodeURIComponent(p.name)); viewProfiles(body); } }}, "Xoá")))) : h("p", {class: "muted"}, "Chưa có profile.")));
+      h("button", {class: "danger", onclick: async () => { if (confirm(tr(`Xoá profile ${p.name}?`))) { await api("DELETE", "/api/profiles/" + encodeURIComponent(p.name)); viewProfiles(body); } }}, "Xoá")))) : h("p", {class: "muted"}, "Chưa có profile.")));
 }
 
 function renderBuilder(body, d, secrets) {
@@ -510,8 +510,9 @@ function renderBuilder(body, d, secrets) {
     try { r = await api("POST", "/api/profiles/preview", {profile: toProfile(d), sample}); } catch (e) { r = {error: e.message, warnings: []}; }
     valid = !r.error;
     saveBtn.disabled = !valid;
-    const head = d.approval === "totp" ? "⚠️ RỦI RO CAO, cần TOTP\n\n" : "";
-    pvText.textContent = r.display ? head + `Agent xin chạy: ${d.description || d.name}\n\nLệnh sẽ chạy:\n${r.display}` : "Điền đủ thông tin để xem trước.";
+    const en = lang === "en";
+    const head = d.approval === "totp" ? (en ? "⚠️ HIGH RISK, needs TOTP\n\n" : "⚠️ RỦI RO CAO, cần TOTP\n\n") : "";
+    pvText.textContent = r.display ? head + (en ? `Agent requests: ${d.description || d.name}\n\nCommand to run:\n${r.display}` : `Agent xin chạy: ${d.description || d.name}\n\nLệnh sẽ chạy:\n${r.display}`) : tr("Điền đủ thông tin để xem trước.");
     fill(pvMsgs, r.error ? h("p", {class: "err"}, viErr(r.error)) : null, (r.warnings || []).map(w => h("p", {class: "note"}, w)));
   }
 
@@ -523,22 +524,88 @@ function renderBuilder(body, d, secrets) {
   runPreview();
 }
 
+// Each agent keeps MCP servers in its own settings, so the token goes there
+// instead of a separate file.
+const jsonCfg = (u, t, key = "mcpServers", extra = {}) => JSON.stringify({[key]: {ucanrun: Object.assign(extra, {command: "ucr", args: ["mcp"], env: {UCANRUN_URL: u, UCANRUN_TOKEN: t}})}}, null, 2);
+const agents = [
+  {id: "claude", name: "Claude Code", how: "Chạy trong terminal", make: (u, t) => `claude mcp add ucanrun -s user -e UCANRUN_URL=${u} -e UCANRUN_TOKEN=${t} -- ucr mcp`},
+  {id: "antigravity", name: "Antigravity CLI", how: "Thêm vào file", file: "~/.gemini/config/mcp_config.json", make: jsonCfg},
+  {id: "cursor", name: "Cursor", how: "Thêm vào file", file: "~/.cursor/mcp.json", make: jsonCfg},
+  {id: "claude-desktop", name: "Claude Desktop", how: "Thêm vào file", file: "claude_desktop_config.json", make: jsonCfg},
+  {id: "codex", name: "Codex CLI", how: "Thêm vào file", file: "~/.codex/config.toml", make: (u, t) => `[mcp_servers.ucanrun]\ncommand = "ucr"\nargs = ["mcp"]\nenv = { UCANRUN_URL = "${u}", UCANRUN_TOKEN = "${t}" }`},
+  {id: "gemini", name: "Gemini CLI", how: "Thêm vào file", file: "~/.gemini/settings.json", make: jsonCfg},
+  {id: "vscode", name: "VS Code", how: "Thêm vào file", file: "MCP: Open User Configuration", make: (u, t) => jsonCfg(u, t, "servers", {type: "stdio"})},
+  {id: "windsurf", name: "Windsurf", how: "Thêm vào file", file: "~/.codeium/windsurf/mcp_config.json", make: jsonCfg},
+  {id: "other", name: "Khác", how: "Đặt biến môi trường rồi chạy", make: (u, t) => `export UCANRUN_URL=${u}\nexport UCANRUN_TOKEN=${t}\nucr mcp`},
+];
+
+function agentPicker(cur, on) {
+  return h("div", {class: "choices", role: "radiogroup", "aria-label": "Agent bạn dùng"}, agents.map(a =>
+    h("label", {class: "choice"}, h("input", {type: "radio", name: "agent", value: a.id, checked: a.id === cur, onchange: () => on(a.id)}), h("span", null, h("b", null, a.name)))));
+}
+
+function agentGuide(id, token, done) {
+  const box = h("div");
+  let url = "http://127.0.0.1:8781";
+  const draw = () => {
+    const a = agents.find(x => x.id === id);
+    const text = a.make(url, token), copied = h("span", {class: "muted"});
+    const u = h("input", {autocomplete: "off", spellcheck: "false", "aria-label": "Địa chỉ agent API"}); u.value = url;
+    u.addEventListener("change", () => { url = u.value.trim(); draw(); });
+    fill(box, h("div", {class: "card"}, h("h2", null, "Nối agent"),
+      agentPicker(id, v => { id = v; draw(); }),
+      h("label", null, h("span", null, "Địa chỉ agent API"), u),
+      h("h3", {class: "gap"}, a.how), a.file ? h("p", null, h("code", null, a.file)) : null,
+      h("pre", {class: "cfg"}, text),
+      h("div", {class: "row"}, h("button", {onclick: async () => {
+        try { await navigator.clipboard.writeText(text); copied.textContent = tr("Đã sao chép"); } catch (_) { copied.textContent = tr("Không sao chép được, hãy chép tay."); }
+      }}, "Sao chép"), copied),
+      h("p", {class: "note"}, "Token chỉ hiện một lần. ", "Token nằm trong cài đặt của agent. Không commit file này và không dán token vào chat với AI."),
+      h("p", {class: "muted"}, "Máy chạy agent cần lệnh ucr:"), h("pre", null, "docker cp ucanrun:/usr/local/bin/ucr ~/.local/bin/ucr"),
+      h("div", {class: "row"}, h("button", {class: "primary", onclick: done}, "Xong, về danh sách"))));
+  };
+  draw();
+  return box;
+}
+
+function agentTokenForm(profiles, onCreated) {
+  let id = "claude", touched = false, mode = "all", picked = [];
+  const name = h("input", {autocomplete: "off", spellcheck: "false", "aria-label": "Tên agent"}); name.value = id;
+  name.addEventListener("input", () => { touched = true; });
+  const scope = h("div"), err = h("div", {class: "err", role: "alert"});
+  const drawScope = () => {
+    if (!profiles.length) { fill(scope, h("p", {class: "muted"}, "Chưa có profile. Token này sẽ dùng được mọi profile thêm sau.")); return; }
+    fill(scope, choiceGroup("scope", mode, [{value: "all", title: "Mọi profile, kể cả profile thêm sau"}, {value: "some", title: "Chỉ các profile đã chọn"}], v => { mode = v; drawScope(); }),
+      mode === "some" ? h("div", {class: "picklist"}, profiles.map(p => h("label", {class: "check"},
+        h("input", {type: "checkbox", checked: picked.includes(p.name), onchange: e => { picked = e.target.checked ? picked.concat(p.name) : picked.filter(n => n !== p.name); }}),
+        h("span", null, h("span", null, p.description || p.name), " ", h("code", null, p.name))))) : null);
+  };
+  drawScope();
+  return h("div", {class: "card"}, h("h2", null, "Tạo token cho agent"),
+    h("h3", null, "Agent bạn dùng"), agentPicker(id, v => { id = v; if (!touched) name.value = v; }),
+    h("label", null, h("span", null, "Tên agent"), name),
+    h("h3", {class: "gap"}, "Giới hạn profile"), scope,
+    h("div", {class: "row"}, h("button", {class: "primary", onclick: async () => {
+      err.textContent = "";
+      if (mode === "some" && !picked.length) { err.textContent = tr("Hãy chọn ít nhất một profile."); return; }
+      try {
+        const r = await api("POST", "/api/tokens", {name: name.value, profiles: mode === "some" ? picked : []});
+        onCreated(id, r.token);
+      } catch (e) { err.textContent = tr(e.message); }
+    }}, "Tạo")), err);
+}
+
 async function viewTokens(body) {
-  const list = await api("GET", "/api/tokens");
-  const n = field("Tên agent", {autocomplete: "off"});
-  const p = field("Giới hạn profile, cách nhau bằng dấu phẩy (trống là tất cả)", {autocomplete: "off"});
-  const shown = h("div");
-  fill(body, form("Tạo token cho agent", [n, p], "Tạo", async () => {
-    const profiles = p.input.value.split(",").map(s => s.trim()).filter(Boolean);
-    const r = await api("POST", "/api/tokens", {name: n.input.value, profiles});
-    await viewTokens(body);
-    body.prepend(h("div", {class: "note"}, "Token chỉ hiện một lần, lưu vào ~/.config/ucanrun/token:", h("pre", null, r.token)));
-  }), shown, h("div", {class: "card"}, h("h2", null, `Token (${list.length})`),
-    list.length ? list.map(t => h("div", {class: "spread"}, h("span", null, h("code", null, t.name), h("div", {class: "muted"}, (t.profiles && t.profiles.length ? t.profiles.join(", ") : "mọi profile") + " · " + new Date(t.created).toLocaleString())),
-      h("button", {class: "danger", onclick: async () => { if (confirm(`Thu hồi token ${t.name}?`)) { await api("DELETE", "/api/tokens/" + t.id); viewTokens(body); } }}, "Thu hồi"))) : h("p", {class: "muted"}, "Chưa có token.")));
+  const [list, profiles] = await Promise.all([api("GET", "/api/tokens"), api("GET", "/api/profiles")]);
+  fill(body, agentTokenForm(profiles, (id, token) => { fill(body, agentGuide(id, token, () => viewTokens(body))); window.scrollTo(0, 0); }),
+    h("div", {class: "card"}, h("h2", null, `Token (${list.length})`),
+    list.length ? list.map(t => h("div", {class: "spread"}, h("span", null, h("code", null, t.name), h("div", {class: "muted"}, (t.profiles && t.profiles.length ? t.profiles.join(", ") : tr("mọi profile")) + " · " + new Date(t.created).toLocaleString())),
+      h("button", {class: "danger", onclick: async () => { if (confirm(tr(`Thu hồi token ${t.name}?`))) { await api("DELETE", "/api/tokens/" + t.id); viewTokens(body); } }}, "Thu hồi"))) : h("p", {class: "muted"}, "Chưa có token.")));
 }
 
 function showRecovery(box, codes, done) {
+  // Leaving now would lose the codes for good.
+  document.querySelectorAll(".skip-row").forEach(e => { e.hidden = true; });
   const go = h("button", {class: "primary", disabled: true, onclick: done}, "Tiếp tục");
   const seen = h("input", {type: "checkbox", onchange: e => { go.disabled = !e.target.checked; }});
   const list = h("pre", {class: "codes"}, codes.join("\n"));
@@ -546,8 +613,8 @@ function showRecovery(box, codes, done) {
   box.replaceChildren(h("div", {class: "note"}, h("b", null, "Lưu các mã khôi phục này ngay."),
     h("div", null, "Mỗi mã dùng được một lần khi mất điện thoại, và chỉ hiện lần này."), list,
     h("div", {class: "row"}, h("button", {onclick: async () => {
-      try { await navigator.clipboard.writeText(codes.join("\n")); copied.textContent = "Đã sao chép"; }
-      catch (_) { copied.textContent = "Không sao chép được, hãy chép tay."; }
+      try { await navigator.clipboard.writeText(codes.join("\n")); copied.textContent = tr("Đã sao chép"); }
+      catch (_) { copied.textContent = tr("Không sao chép được, hãy chép tay."); }
     }}, "Sao chép"), copied),
     h("label", {class: "check"}, seen, h("span", null, "Tôi đã lưu các mã này")), h("div", {class: "row"}, go)));
 }
@@ -590,7 +657,7 @@ function totpCard(s, after) {
     code.el, h("div", {class: "row"}, h("button", {class: s.recovery_left ? "" : "primary", onclick: async () => {
       err.textContent = "";
       try { const d = await api("POST", "/api/totp/recovery", {code: code.input.value}); showRecovery(box, d.recovery_codes, after); }
-      catch (e) { err.textContent = e.message; }
+      catch (e) { err.textContent = tr(e.message); }
     }}, s.recovery_left ? "Tạo bộ mã mới" : "Tạo mã khôi phục")), err);
   if (after) return card;
   const p = field("Mật khẩu chính", {type: "password", autocomplete: "current-password"});
@@ -607,12 +674,14 @@ async function viewSettings(body) {
   const s = await api("GET", "/api/status");
   const o = field("Mật khẩu hiện tại", {type: "password", autocomplete: "current-password"});
   const n = field("Mật khẩu mới", {type: "password", autocomplete: "new-password"});
-  fill(body, telegramCard(s), totpCard(s), form("Đổi mật khẩu chính", [o, n], "Đổi", async () => {
+  const langSel = select(lang, [["vi", "Tiếng Việt"], ["en", "English"]], v => { try { localStorage.setItem("ucr_lang", v); } catch (_) {} location.reload(); }, "Ngôn ngữ");
+  fill(body, h("div", {class: "card"}, h("h2", null, "Ngôn ngữ"), langSel), telegramCard(s), totpCard(s), form("Đổi mật khẩu chính", [o, n], "Đổi", async () => {
     await api("POST", "/api/passphrase", {old: o.input.value, new: n.input.value}); o.input.value = n.input.value = "";
   }));
 }
 
 function skipped() { try { return JSON.parse(localStorage.getItem("ucr_skip") || "[]"); } catch (_) { return []; } }
+function unskip(k) { try { localStorage.setItem("ucr_skip", JSON.stringify(skipped().filter(x => x !== k))); } catch (_) {} }
 function skip(k) { try { localStorage.setItem("ucr_skip", JSON.stringify([...new Set(skipped().concat(k))])); } catch (_) {} }
 
 async function loadSteps() {
@@ -628,49 +697,39 @@ async function loadSteps() {
 
 async function viewStart(body) {
   const {s, steps} = await loadSteps();
-  const skips = skipped();
-  const cur = steps.find(x => !x.done && !skips.includes(x.key));
   const redraw = () => viewStart(body);
-  const list = h("ol", {class: "steps"}, steps.map(x => h("li", {class: x.done ? "ok" : x === cur ? "on" : ""}, h("b", null, x.title), h("small", {class: "muted"}, x.done ? "Xong" : x.why))));
+  const skips = skipped();
+  const cur = steps.find(x => !x.done && x.key === state.startStep) || steps.find(x => !x.done && !skips.includes(x.key));
+  const open = k => { state.startStep = k; unskip(k); redraw(); };
+  const list = h("ol", {class: "steps"}, steps.map(x => h("li", {class: x.done ? "ok" : x === cur ? "on" : ""}, h("b", null, x.title), h("small", {class: "muted"}, x.done ? "Xong" : x.why),
+    !x.done && x !== cur ? h("button", {class: "stepgo", onclick: () => open(x.key)}, "Làm bước này") : null)));
   const head = h("div", {class: "card"}, h("h2", null, "Bắt đầu"), list);
+  clearInterval(state.timer);
   if (!cur) {
-    head.append(h("p", null, steps.every(x => x.done) ? "Đã thiết lập xong." : "Các bước còn lại có thể làm sau trong Cài đặt."),
+    head.append(h("p", null, tr(steps.every(x => x.done) ? "Đã thiết lập xong." : "Các bước còn lại có thể làm sau trong Cài đặt.")),
       h("div", {class: "row"}, h("button", {class: "primary", onclick: () => { state.tab = "requests"; renderShell(); }}, "Vào trang yêu cầu")));
-    fill(body, head); return;
+    fill(body, head); window.scrollTo(0, 0); return;
   }
-  const skipBtn = h("div", {class: "row"}, h("button", {onclick: () => { skip(cur.key); redraw(); }}, "Bỏ qua, làm sau"));
+  const skipBtn = h("div", {class: "row skip-row"}, h("button", {onclick: () => { skip(cur.key); state.startStep = null; redraw(); }}, "Bỏ qua, làm sau"));
+  const watchPairing = () => { clearInterval(state.timer); state.timer = setInterval(async () => {
+    const n = await api("GET", "/api/status").catch(() => null);
+    if (n && n.telegram && n.telegram.paired) { clearInterval(state.timer); state.startStep = null; redraw(); }
+  }, 3000); };
   let panel;
   if (cur.key === "telegram") {
-    panel = telegramCard(s, null);
-    if (s.telegram && s.telegram.configured) {
-      clearInterval(state.timer);
-      state.timer = setInterval(async () => {
-        const n = await api("GET", "/api/status").catch(() => null);
-        if (n && n.telegram && n.telegram.paired) { clearInterval(state.timer); redraw(); }
-      }, 3000);
-    }
-    const save = panel.querySelector("button.primary");
-    save.addEventListener("click", () => setTimeout(() => { clearInterval(state.timer); state.timer = setInterval(async () => {
-      const n = await api("GET", "/api/status").catch(() => null);
-      if (n && n.telegram && n.telegram.paired) { clearInterval(state.timer); redraw(); }
-    }, 3000); }, 1500));
+    panel = telegramCard(s, watchPairing);
+    if (s.telegram && s.telegram.configured) watchPairing();
   } else if (cur.key === "totp") {
-    panel = totpCard(s, redraw);
+    panel = totpCard(s, () => { state.startStep = null; redraw(); });
   } else if (cur.key === "service") {
     panel = h("div", {class: "card"}, h("h2", null, "Thêm dịch vụ"), h("p", {class: "muted"}, "Tab Profile có sẵn các mẫu như GitHub, Cloudflare. Dán token rồi bấm Thêm."),
       h("div", {class: "row"}, h("button", {class: "primary", onclick: () => { state.tab = "profiles"; renderShell(); }}, "Mở danh sách mẫu")));
   } else {
-    const n = field("Tên agent", {autocomplete: "off", value: "claude"});
-    n.input.value = "claude";
-    panel = form("Tạo token", [n], "Tạo", async () => {
-      const r = await api("POST", "/api/tokens", {name: n.input.value, profiles: []});
-      const go = h("button", {class: "primary", onclick: redraw}, "Tiếp tục");
-      fill(body, head, h("div", {class: "card"}, h("h2", null, "Nối agent"),
-        h("p", {class: "note"}, "Token chỉ hiện một lần. Chạy trên máy agent, không dán vào chat với AI:"),
-        h("pre", null, `mkdir -p ~/.config/ucanrun\n(umask 077; printf '%s\\n' '${r.token}' > ~/.config/ucanrun/token)\nclaude mcp add --scope user ucanrun -- ucr mcp`), h("div", {class: "row"}, go)));
-    });
+    const profiles = await api("GET", "/api/profiles");
+    panel = agentTokenForm(profiles, (id, token) => { fill(body, head, agentGuide(id, token, () => { state.startStep = null; redraw(); })); window.scrollTo(0, 0); });
   }
   fill(body, head, panel, skipBtn);
+  window.scrollTo(0, 0);
 }
 
 async function viewAudit(body) {

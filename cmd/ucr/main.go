@@ -50,7 +50,7 @@ Agent:
   ucr mcp                   stdio MCP server
 
 Environment: UCANRUN_PUBLIC_URL, UCANRUN_GATE_TOKEN, UCANRUN_GATE=off,
-UCANRUN_ENABLE_EXEC=1, UCANRUN_DATA, UCANRUN_WEB_ADDR, UCANRUN_AGENT_ADDR,
+UCANRUN_ENABLE_EXEC=1, UCANRUN_LANG=vi|en, UCANRUN_DATA, UCANRUN_WEB_ADDR, UCANRUN_AGENT_ADDR,
 UCANRUN_APPROVAL_TTL, UCANRUN_URL, UCANRUN_TOKEN
 `
 
@@ -140,7 +140,7 @@ func serve() error {
 		return err
 	}
 	c, err := core.New(core.Options{DataDir: dir, ApprovalTTL: ttl, TelegramAPI: os.Getenv("UCANRUN_TELEGRAM_API"),
-		AllowExec: os.Getenv("UCANRUN_ENABLE_EXEC") == "1"})
+		AllowExec: os.Getenv("UCANRUN_ENABLE_EXEC") == "1", Lang: os.Getenv("UCANRUN_LANG")})
 	if err != nil {
 		return err
 	}
@@ -151,7 +151,7 @@ func serve() error {
 		rand.Read(b)
 		setup = hex.EncodeToString(b)
 		// Goes to stdout, not the audit log, and stops working after setup.
-		fmt.Printf("ucanrun chưa khởi tạo. Setup token: %s\n", setup)
+		fmt.Printf("ucanrun is not set up yet. Setup token: %s\n", setup)
 	}
 	public, err := publicURL()
 	if err != nil {
@@ -168,11 +168,11 @@ func serve() error {
 		s.GateToken = tok
 		// Shown until setup finishes, so a restart mid-setup does not lose it.
 		if created || setup != "" {
-			fmt.Printf("Mã truy cập: %s\n", tok)
+			fmt.Printf("Access code: %s\n", tok)
 		}
 	}
 	if setup != "" {
-		fmt.Printf("Mở %s để khởi tạo. Xem lại mã bằng: ucr gate\n", public)
+		fmt.Printf("Open %s to finish setup. Show the access code again with: ucr gate\n", public)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -257,7 +257,7 @@ func add(args []string) error {
 	}
 	var val []byte
 	if term.IsTerminal(int(os.Stdin.Fd())) {
-		fmt.Fprint(os.Stderr, "Giá trị (ẩn): ")
+		fmt.Fprint(os.Stderr, "Value (hidden): ")
 		b, err := term.ReadPassword(int(os.Stdin.Fd()))
 		fmt.Fprintln(os.Stderr)
 		if err != nil {

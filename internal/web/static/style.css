@@ -89,3 +89,9 @@ input,select,textarea{font-size:16px}
 .steps li.ok::before{content:"✓";background:var(--code);color:var(--accent)}
 .steps b{display:block;font-weight:600}
 details>summary{min-height:32px}
+html{scroll-padding-top:72px}
+.stepgo{display:block;margin-top:6px;padding:4px 10px;font-size:13px;min-height:0}
+.steps li{padding-bottom:10px}
+pre.cfg{user-select:all}
+.picklist .check{margin-top:10px;color:var(--text)}
+.picklist .check code{color:var(--muted)}
