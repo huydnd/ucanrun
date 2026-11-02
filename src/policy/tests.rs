@@ -346,25 +346,35 @@ async fn run_missing_secret_and_missing_program() {
     assert!(!r.ok && r.exit == -1 && r.output.starts_with("could not start: "));
 }
 
+/// Alpine keeps core tools in /bin, most other systems in /usr/bin.
+fn bin(name: &str) -> &'static str {
+    ["/usr/bin/", "/bin/"]
+        .iter()
+        .map(|d| format!("{d}{name}"))
+        .find(|p| std::path::Path::new(p).exists())
+        .map(|p| &*p.leak())
+        .unwrap_or_else(|| panic!("{name} not found"))
+}
+
 #[tokio::test]
 async fn run_exec_stdin_cwd_and_timeout() {
     let r = run(
-        &exec_action(&["/usr/bin/cat"], &[], "{{secret:tok}}", 10),
+        &exec_action(&[bin("cat")], &[], "{{secret:tok}}", 10),
         getter,
     )
     .await;
     assert_eq!(r.output, "[REDACTED]\n");
-    let r = run(&exec_action(&["/usr/bin/pwd"], &[], "", 10), getter).await;
+    let r = run(&exec_action(&[bin("pwd")], &[], "", 10), getter).await;
     assert!(r.output.contains("ucr-run-"), "{}", r.output);
     let t = std::time::Instant::now();
-    let r = run(&exec_action(&["/usr/bin/sleep", "30"], &[], "", 1), getter).await;
+    let r = run(&exec_action(&[bin("sleep"), "30"], &[], "", 1), getter).await;
     assert!(!r.ok && r.output.ends_with("[timed out]"), "{r:?}");
     assert!(t.elapsed() < Duration::from_secs(10));
 }
 
 #[tokio::test]
 async fn run_exec_files_are_private_and_end_with_newline() {
-    let mut a = exec_action(&["/usr/bin/stat", "-c", "%a", "key"], &[], "", 10);
+    let mut a = exec_action(&[bin("stat"), "-c", "%a", "key"], &[], "", 10);
     a.exec
         .as_mut()
         .unwrap()
@@ -372,7 +382,7 @@ async fn run_exec_files_are_private_and_end_with_newline() {
         .insert("key".into(), "{{secret:tok}}".into());
     let r = run(&a, getter).await;
     assert_eq!(r.output.trim(), "600", "{r:?}");
-    let mut a = exec_action(&["/usr/bin/cat", "key"], &[], "", 10);
+    let mut a = exec_action(&[bin("cat"), "key"], &[], "", 10);
     a.exec
         .as_mut()
         .unwrap()
