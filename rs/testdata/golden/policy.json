@@ -1,0 +1,2855 @@
+{
+ "calls": [
+  {
+   "name": "ok",
+   "call": {
+    "http": {
+     "method": "GET",
+     "url": "https://api.github.com/user",
+     "headers": {
+      "Authorization": "Bearer {{secret:gh}}"
+     }
+    }
+   },
+   "meta": {
+    "cmd": {
+     "allow_commands": true
+    },
+    "gh": {
+     "description": "GitHub",
+     "hosts": [
+      "api.github.com"
+     ]
+    },
+    "none": {
+     "description": "no hosts"
+    },
+    "port": {
+     "hosts": [
+      "localhost:8080"
+     ]
+    },
+    "wild": {
+     "hosts": [
+      "*.example.com"
+     ]
+    }
+   },
+   "want": {
+    "ok": true,
+    "url": "https://api.github.com/user",
+    "method": "GET",
+    "headers": {
+     "Authorization": "Bearer {{secret:gh}}"
+    },
+    "display": "GET https://api.github.com/user\nAuthorization: Bearer ‹secret:gh›",
+    "secrets": [
+     "gh"
+    ],
+    "risk": "low"
+   }
+  },
+  {
+   "name": "wildcard",
+   "call": {
+    "http": {
+     "method": "GET",
+     "url": "https://a.b.example.com/x",
+     "headers": {
+      "X": "{{secret:wild}}"
+     }
+    }
+   },
+   "meta": {
+    "cmd": {
+     "allow_commands": true
+    },
+    "gh": {
+     "description": "GitHub",
+     "hosts": [
+      "api.github.com"
+     ]
+    },
+    "none": {
+     "description": "no hosts"
+    },
+    "port": {
+     "hosts": [
+      "localhost:8080"
+     ]
+    },
+    "wild": {
+     "hosts": [
+      "*.example.com"
+     ]
+    }
+   },
+   "want": {
+    "ok": true,
+    "url": "https://a.b.example.com/x",
+    "method": "GET",
+    "headers": {
+     "X": "{{secret:wild}}"
+    },
+    "display": "GET https://a.b.example.com/x\nX: ‹secret:wild›",
+    "secrets": [
+     "wild"
+    ],
+    "risk": "low"
+   }
+  },
+  {
+   "name": "port ok",
+   "call": {
+    "http": {
+     "method": "GET",
+     "url": "http://localhost:8080/x",
+     "headers": {
+      "X": "{{secret:port}}"
+     }
+    }
+   },
+   "meta": {
+    "cmd": {
+     "allow_commands": true
+    },
+    "gh": {
+     "description": "GitHub",
+     "hosts": [
+      "api.github.com"
+     ]
+    },
+    "none": {
+     "description": "no hosts"
+    },
+    "port": {
+     "hosts": [
+      "localhost:8080"
+     ]
+    },
+    "wild": {
+     "hosts": [
+      "*.example.com"
+     ]
+    }
+   },
+   "want": {
+    "ok": true,
+    "url": "http://localhost:8080/x",
+    "method": "GET",
+    "headers": {
+     "X": "{{secret:port}}"
+    },
+    "display": "GET http://localhost:8080/x\nX: ‹secret:port›",
+    "secrets": [
+     "port"
+    ],
+    "risk": "low"
+   }
+  },
+  {
+   "name": "other host",
+   "call": {
+    "http": {
+     "method": "GET",
+     "url": "https://evil.example/x",
+     "headers": {
+      "Authorization": "Bearer {{secret:gh}}"
+     }
+    }
+   },
+   "meta": {
+    "cmd": {
+     "allow_commands": true
+    },
+    "gh": {
+     "description": "GitHub",
+     "hosts": [
+      "api.github.com"
+     ]
+    },
+    "none": {
+     "description": "no hosts"
+    },
+    "port": {
+     "hosts": [
+      "localhost:8080"
+     ]
+    },
+    "wild": {
+     "hosts": [
+      "*.example.com"
+     ]
+    }
+   },
+   "want": {
+    "ok": false,
+    "error": "secret \"gh\" may not be sent to evil.example"
+   }
+  },
+  {
+   "name": "no hosts",
+   "call": {
+    "http": {
+     "method": "GET",
+     "url": "https://api.github.com/x",
+     "headers": {
+      "A": "{{secret:none}}"
+     }
+    }
+   },
+   "meta": {
+    "cmd": {
+     "allow_commands": true
+    },
+    "gh": {
+     "description": "GitHub",
+     "hosts": [
+      "api.github.com"
+     ]
+    },
+    "none": {
+     "description": "no hosts"
+    },
+    "port": {
+     "hosts": [
+      "localhost:8080"
+     ]
+    },
+    "wild": {
+     "hosts": [
+      "*.example.com"
+     ]
+    }
+   },
+   "want": {
+    "ok": false,
+    "error": "secret \"none\" may not be sent to api.github.com"
+   }
+  },
+  {
+   "name": "suffix",
+   "call": {
+    "http": {
+     "method": "GET",
+     "url": "https://evilapi.github.com/x",
+     "headers": {
+      "Authorization": "Bearer {{secret:gh}}"
+     }
+    }
+   },
+   "meta": {
+    "cmd": {
+     "allow_commands": true
+    },
+    "gh": {
+     "description": "GitHub",
+     "hosts": [
+      "api.github.com"
+     ]
+    },
+    "none": {
+     "description": "no hosts"
+    },
+    "port": {
+     "hosts": [
+      "localhost:8080"
+     ]
+    },
+    "wild": {
+     "hosts": [
+      "*.example.com"
+     ]
+    }
+   },
+   "want": {
+    "ok": false,
+    "error": "secret \"gh\" may not be sent to evilapi.github.com"
+   }
+  },
+  {
+   "name": "userinfo",
+   "call": {
+    "http": {
+     "method": "GET",
+     "url": "https://api.github.com@evil.example/x",
+     "headers": {
+      "Authorization": "Bearer {{secret:gh}}"
+     }
+    }
+   },
+   "meta": {
+    "cmd": {
+     "allow_commands": true
+    },
+    "gh": {
+     "description": "GitHub",
+     "hosts": [
+      "api.github.com"
+     ]
+    },
+    "none": {
+     "description": "no hosts"
+    },
+    "port": {
+     "hosts": [
+      "localhost:8080"
+     ]
+    },
+    "wild": {
+     "hosts": [
+      "*.example.com"
+     ]
+    }
+   },
+   "want": {
+    "ok": false,
+    "error": "url must be absolute http(s) without user info"
+   }
+  },
+  {
+   "name": "param",
+   "call": {
+    "http": {
+     "method": "GET",
+     "url": "https://api.github.com/x",
+     "headers": {
+      "A": "{{x}}"
+     }
+    }
+   },
+   "meta": {
+    "cmd": {
+     "allow_commands": true
+    },
+    "gh": {
+     "description": "GitHub",
+     "hosts": [
+      "api.github.com"
+     ]
+    },
+    "none": {
+     "description": "no hosts"
+    },
+    "port": {
+     "hosts": [
+      "localhost:8080"
+     ]
+    },
+    "wild": {
+     "hosts": [
+      "*.example.com"
+     ]
+    }
+   },
+   "want": {
+    "ok": false,
+    "error": "only {{secret:name}} templates are allowed"
+   }
+  },
+  {
+   "name": "no secret",
+   "call": {
+    "http": {
+     "method": "GET",
+     "url": "https://api.github.com/x"
+    }
+   },
+   "meta": {
+    "cmd": {
+     "allow_commands": true
+    },
+    "gh": {
+     "description": "GitHub",
+     "hosts": [
+      "api.github.com"
+     ]
+    },
+    "none": {
+     "description": "no hosts"
+    },
+    "port": {
+     "hosts": [
+      "localhost:8080"
+     ]
+    },
+    "wild": {
+     "hosts": [
+      "*.example.com"
+     ]
+    }
+   },
+   "want": {
+    "ok": false,
+    "error": "the call uses no secret, so run it yourself"
+   }
+  },
+  {
+   "name": "relative",
+   "call": {
+    "http": {
+     "method": "GET",
+     "url": "/x",
+     "headers": {
+      "Authorization": "Bearer {{secret:gh}}"
+     }
+    }
+   },
+   "meta": {
+    "cmd": {
+     "allow_commands": true
+    },
+    "gh": {
+     "description": "GitHub",
+     "hosts": [
+      "api.github.com"
+     ]
+    },
+    "none": {
+     "description": "no hosts"
+    },
+    "port": {
+     "hosts": [
+      "localhost:8080"
+     ]
+    },
+    "wild": {
+     "hosts": [
+      "*.example.com"
+     ]
+    }
+   },
+   "want": {
+    "ok": false,
+    "error": "url must be absolute http(s) without user info"
+   }
+  },
+  {
+   "name": "exec denied",
+   "call": {
+    "exec": {
+     "argv": [
+      "/usr/bin/git"
+     ],
+     "env": {
+      "T": "{{secret:gh}}"
+     }
+    }
+   },
+   "meta": {
+    "cmd": {
+     "allow_commands": true
+    },
+    "gh": {
+     "description": "GitHub",
+     "hosts": [
+      "api.github.com"
+     ]
+    },
+    "none": {
+     "description": "no hosts"
+    },
+    "port": {
+     "hosts": [
+      "localhost:8080"
+     ]
+    },
+    "wild": {
+     "hosts": [
+      "*.example.com"
+     ]
+    }
+   },
+   "want": {
+    "ok": false,
+    "error": "secret \"gh\" is not allowed in commands"
+   }
+  },
+  {
+   "name": "both",
+   "call": {
+    "http": {
+     "method": "GET",
+     "url": "https://api.github.com/"
+    },
+    "exec": {
+     "argv": [
+      "/bin/true"
+     ]
+    }
+   },
+   "meta": {
+    "cmd": {
+     "allow_commands": true
+    },
+    "gh": {
+     "description": "GitHub",
+     "hosts": [
+      "api.github.com"
+     ]
+    },
+    "none": {
+     "description": "no hosts"
+    },
+    "port": {
+     "hosts": [
+      "localhost:8080"
+     ]
+    },
+    "wild": {
+     "hosts": [
+      "*.example.com"
+     ]
+    }
+   },
+   "want": {
+    "ok": false,
+    "error": "a call is either http or exec"
+   }
+  },
+  {
+   "name": "in url",
+   "call": {
+    "http": {
+     "method": "GET",
+     "url": "https://api.github.com/x?t={{secret:gh}}"
+    }
+   },
+   "meta": {
+    "cmd": {
+     "allow_commands": true
+    },
+    "gh": {
+     "description": "GitHub",
+     "hosts": [
+      "api.github.com"
+     ]
+    },
+    "none": {
+     "description": "no hosts"
+    },
+    "port": {
+     "hosts": [
+      "localhost:8080"
+     ]
+    },
+    "wild": {
+     "hosts": [
+      "*.example.com"
+     ]
+    }
+   },
+   "want": {
+    "ok": false,
+    "error": "secrets go in headers only, never in the url or body"
+   }
+  },
+  {
+   "name": "in body",
+   "call": {
+    "http": {
+     "method": "GET",
+     "url": "https://api.github.com/gists",
+     "body": "{\"t\":\"{{secret:gh}}\"}"
+    }
+   },
+   "meta": {
+    "cmd": {
+     "allow_commands": true
+    },
+    "gh": {
+     "description": "GitHub",
+     "hosts": [
+      "api.github.com"
+     ]
+    },
+    "none": {
+     "description": "no hosts"
+    },
+    "port": {
+     "hosts": [
+      "localhost:8080"
+     ]
+    },
+    "wild": {
+     "hosts": [
+      "*.example.com"
+     ]
+    }
+   },
+   "want": {
+    "ok": false,
+    "error": "secrets go in headers only, never in the url or body"
+   }
+  },
+  {
+   "name": "lookalike",
+   "call": {
+    "http": {
+     "method": "GET",
+     "url": "https://api.github.com.evil.example/x",
+     "headers": {
+      "Authorization": "Bearer {{secret:gh}}"
+     }
+    }
+   },
+   "meta": {
+    "cmd": {
+     "allow_commands": true
+    },
+    "gh": {
+     "description": "GitHub",
+     "hosts": [
+      "api.github.com"
+     ]
+    },
+    "none": {
+     "description": "no hosts"
+    },
+    "port": {
+     "hosts": [
+      "localhost:8080"
+     ]
+    },
+    "wild": {
+     "hosts": [
+      "*.example.com"
+     ]
+    }
+   },
+   "want": {
+    "ok": false,
+    "error": "secret \"gh\" may not be sent to api.github.com.evil.example"
+   }
+  },
+  {
+   "name": "other port",
+   "call": {
+    "http": {
+     "method": "GET",
+     "url": "https://api.github.com:8443/x",
+     "headers": {
+      "Authorization": "Bearer {{secret:gh}}"
+     }
+    }
+   },
+   "meta": {
+    "cmd": {
+     "allow_commands": true
+    },
+    "gh": {
+     "description": "GitHub",
+     "hosts": [
+      "api.github.com"
+     ]
+    },
+    "none": {
+     "description": "no hosts"
+    },
+    "port": {
+     "hosts": [
+      "localhost:8080"
+     ]
+    },
+    "wild": {
+     "hosts": [
+      "*.example.com"
+     ]
+    }
+   },
+   "want": {
+    "ok": false,
+    "error": "secret \"gh\" may not be sent to api.github.com:8443"
+   }
+  },
+  {
+   "name": "body with header",
+   "call": {
+    "http": {
+     "method": "GET",
+     "url": "https://api.github.com/gists",
+     "headers": {
+      "Authorization": "Bearer {{secret:gh}}"
+     },
+     "body": "{\"c\":\"{{secret:gh}}\"}"
+    }
+   },
+   "meta": {
+    "cmd": {
+     "allow_commands": true
+    },
+    "gh": {
+     "description": "GitHub",
+     "hosts": [
+      "api.github.com"
+     ]
+    },
+    "none": {
+     "description": "no hosts"
+    },
+    "port": {
+     "hosts": [
+      "localhost:8080"
+     ]
+    },
+    "wild": {
+     "hosts": [
+      "*.example.com"
+     ]
+    }
+   },
+   "want": {
+    "ok": false,
+    "error": "secrets go in headers only, never in the url or body"
+   }
+  },
+  {
+   "name": "unknown",
+   "call": {
+    "http": {
+     "method": "GET",
+     "url": "https://api.github.com/x",
+     "headers": {
+      "A": "{{secret:nope}}"
+     }
+    }
+   },
+   "meta": {
+    "cmd": {
+     "allow_commands": true
+    },
+    "gh": {
+     "description": "GitHub",
+     "hosts": [
+      "api.github.com"
+     ]
+    },
+    "none": {
+     "description": "no hosts"
+    },
+    "port": {
+     "hosts": [
+      "localhost:8080"
+     ]
+    },
+    "wild": {
+     "hosts": [
+      "*.example.com"
+     ]
+    }
+   },
+   "want": {
+    "ok": false,
+    "error": "unknown secret \"nope\""
+   }
+  },
+  {
+   "name": "apex",
+   "call": {
+    "http": {
+     "method": "GET",
+     "url": "https://example.com/x",
+     "headers": {
+      "X": "{{secret:wild}}"
+     }
+    }
+   },
+   "meta": {
+    "cmd": {
+     "allow_commands": true
+    },
+    "gh": {
+     "description": "GitHub",
+     "hosts": [
+      "api.github.com"
+     ]
+    },
+    "none": {
+     "description": "no hosts"
+    },
+    "port": {
+     "hosts": [
+      "localhost:8080"
+     ]
+    },
+    "wild": {
+     "hosts": [
+      "*.example.com"
+     ]
+    }
+   },
+   "want": {
+    "ok": false,
+    "error": "secret \"wild\" may not be sent to example.com"
+   }
+  },
+  {
+   "name": "upper host",
+   "call": {
+    "http": {
+     "method": "GET",
+     "url": "https://API.GITHUB.COM/x",
+     "headers": {
+      "Authorization": "Bearer {{secret:gh}}"
+     }
+    }
+   },
+   "meta": {
+    "cmd": {
+     "allow_commands": true
+    },
+    "gh": {
+     "description": "GitHub",
+     "hosts": [
+      "api.github.com"
+     ]
+    },
+    "none": {
+     "description": "no hosts"
+    },
+    "port": {
+     "hosts": [
+      "localhost:8080"
+     ]
+    },
+    "wild": {
+     "hosts": [
+      "*.example.com"
+     ]
+    }
+   },
+   "want": {
+    "ok": true,
+    "url": "https://API.GITHUB.COM/x",
+    "method": "GET",
+    "headers": {
+     "Authorization": "Bearer {{secret:gh}}"
+    },
+    "display": "GET https://API.GITHUB.COM/x\nAuthorization: Bearer ‹secret:gh›",
+    "secrets": [
+     "gh"
+    ],
+    "risk": "low"
+   }
+  },
+  {
+   "name": "exec ok",
+   "call": {
+    "exec": {
+     "argv": [
+      "/usr/bin/git",
+      "ls-remote"
+     ],
+     "env": {
+      "T": "{{secret:cmd}}"
+     }
+    }
+   },
+   "meta": {
+    "cmd": {
+     "allow_commands": true
+    },
+    "gh": {
+     "description": "GitHub",
+     "hosts": [
+      "api.github.com"
+     ]
+    },
+    "none": {
+     "description": "no hosts"
+    },
+    "port": {
+     "hosts": [
+      "localhost:8080"
+     ]
+    },
+    "wild": {
+     "hosts": [
+      "*.example.com"
+     ]
+    }
+   },
+   "want": {
+    "ok": true,
+    "argv": [
+     "/usr/bin/git",
+     "ls-remote"
+    ],
+    "env": {
+     "T": "{{secret:cmd}}"
+    },
+    "display": "\"/usr/bin/git\" \"ls-remote\"\nenv T=‹secret:cmd›",
+    "secrets": [
+     "cmd"
+    ],
+    "risk": "high"
+   }
+  },
+  {
+   "name": "exec argv",
+   "call": {
+    "exec": {
+     "argv": [
+      "/usr/bin/git",
+      "{{secret:cmd}}"
+     ]
+    }
+   },
+   "meta": {
+    "cmd": {
+     "allow_commands": true
+    },
+    "gh": {
+     "description": "GitHub",
+     "hosts": [
+      "api.github.com"
+     ]
+    },
+    "none": {
+     "description": "no hosts"
+    },
+    "port": {
+     "hosts": [
+      "localhost:8080"
+     ]
+    },
+    "wild": {
+     "hosts": [
+      "*.example.com"
+     ]
+    }
+   },
+   "want": {
+    "ok": false,
+    "error": "secrets are only allowed in exec env, argv is visible in /proc"
+   }
+  }
+ ],
+ "connections": [
+  {
+   "name": "ok",
+   "conn": {
+    "name": "a",
+    "base_url": "https://a.example/v1",
+    "auth": {
+     "type": "bearer",
+     "secret": "s"
+    }
+   }
+  },
+  {
+   "name": "template",
+   "conn": {
+    "name": "a",
+    "base_url": "https://{{x}}.example",
+    "auth": {
+     "type": "none"
+    }
+   },
+   "error": "the base url of a connection is fixed and takes no values"
+  },
+  {
+   "name": "query",
+   "conn": {
+    "name": "a",
+    "base_url": "https://a.example/?k=v",
+    "auth": {
+     "type": "none"
+    }
+   },
+   "error": "base url must not have a query or fragment"
+  },
+  {
+   "name": "header name",
+   "conn": {
+    "name": "a",
+    "base_url": "https://a.example",
+    "auth": {
+     "type": "header",
+     "header": "Bad Header",
+     "secret": "s"
+    }
+   },
+   "error": "auth header needs a header name"
+  },
+  {
+   "name": "name",
+   "conn": {
+    "name": "Bad",
+    "base_url": "https://a.example",
+    "auth": {
+     "type": "none"
+    }
+   },
+   "error": "connection name must match [a-z0-9][a-z0-9_-]*"
+  },
+  {
+   "name": "both",
+   "conn": {
+    "name": "a",
+    "base_url": "https://a.example",
+    "auth": {
+     "type": "bearer",
+     "secret": "s",
+     "choices": [
+      "t"
+     ]
+    }
+   },
+   "error": "auth needs either one secret or a list of choices"
+  },
+  {
+   "name": "header value",
+   "conn": {
+    "name": "a",
+    "base_url": "https://a.example",
+    "auth": {
+     "type": "none"
+    },
+    "headers": {
+     "X": "{{secret:s}}"
+    }
+   },
+   "error": "header \"X\" must be a plain name with a fixed value"
+  },
+  {
+   "name": "userinfo",
+   "conn": {
+    "name": "a",
+    "base_url": "https://u:p@a.example",
+    "auth": {
+     "type": "none"
+    }
+   },
+   "error": "base url must look like https://api.example.com"
+  },
+  {
+   "name": "no secret",
+   "conn": {
+    "name": "a",
+    "base_url": "https://a.example",
+    "auth": {
+     "type": "bearer"
+    }
+   },
+   "error": "auth needs either one secret or a list of choices"
+  },
+  {
+   "name": "internal",
+   "conn": {
+    "name": "a",
+    "base_url": "https://a.example",
+    "auth": {
+     "type": "bearer",
+     "secret": "_totp_secret"
+    }
+   },
+   "error": "bad secret name \"_totp_secret\""
+  },
+  {
+   "name": "bad type",
+   "conn": {
+    "name": "a",
+    "base_url": "https://a.example",
+    "auth": {
+     "type": "basic",
+     "secret": "s"
+    }
+   },
+   "error": "auth type must be none, bearer, token or header"
+  }
+ ],
+ "redact": [
+  {
+   "input": "tok ghp_abcdef123 b64 Z2hwX2FiY2RlZjEyMw== hex 6768705f616263646566313233 q ghp_abcdef123",
+   "secrets": [
+    "ghp_abcdef123"
+   ],
+   "want": "tok [REDACTED] b64 [REDACTED] hex [REDACTED] q [REDACTED]"
+  },
+  {
+   "input": "short abc stays",
+   "secrets": [
+    "abc"
+   ],
+   "want": "short abc stays"
+  },
+  {
+   "input": "url a%2Fb%3Dc and a/b=c and json \"a\\\"b\"",
+   "secrets": [
+    "a/b=c",
+    "a\"b"
+   ],
+   "want": "url [REDACTED] and [REDACTED] and json \"a\\\"b\""
+  },
+  {
+   "input": "upper 6768705F616263646566313233",
+   "secrets": [
+    "ghp_abcdef123"
+   ],
+   "want": "upper [REDACTED]"
+  }
+ ],
+ "render": [
+  {
+   "name": "ok",
+   "profile": {
+    "name": "create-repo",
+    "description": "",
+    "risk": "low",
+    "params": [
+     {
+      "name": "name",
+      "pattern": "[a-z0-9-]+",
+      "required": true
+     },
+     {
+      "name": "note",
+      "pattern": ".*",
+      "required": false
+     }
+    ],
+    "http": {
+     "method": "POST",
+     "url": "https://git.example/api/repos/{{name}}",
+     "headers": {
+      "Authorization": "token {{secret:gitea}}",
+      "Content-Type": "application/json"
+     },
+     "body": "{\"note\":\"{{note}}\"}"
+    }
+   },
+   "params": {
+    "name": "foo",
+    "note": "x\",\"admin\":\"true"
+   },
+   "want": {
+    "ok": true,
+    "url": "https://git.example/api/repos/foo",
+    "method": "POST",
+    "headers": {
+     "Authorization": "token {{secret:gitea}}",
+     "Content-Type": "application/json"
+    },
+    "body": "{\"note\":\"x\\\",\\\"admin\\\":\\\"true\"}",
+    "display": "POST https://git.example/api/repos/foo\nAuthorization: token ‹secret:gitea›\nContent-Type: application/json\n\n{\"note\":\"x\\\",\\\"admin\\\":\\\"true\"}",
+    "secrets": [
+     "gitea"
+    ],
+    "risk": "low"
+   }
+  },
+  {
+   "name": "missing",
+   "profile": {
+    "name": "create-repo",
+    "description": "",
+    "risk": "low",
+    "params": [
+     {
+      "name": "name",
+      "pattern": "[a-z0-9-]+",
+      "required": true
+     },
+     {
+      "name": "note",
+      "pattern": ".*",
+      "required": false
+     }
+    ],
+    "http": {
+     "method": "POST",
+     "url": "https://git.example/api/repos/{{name}}",
+     "headers": {
+      "Authorization": "token {{secret:gitea}}",
+      "Content-Type": "application/json"
+     },
+     "body": "{\"note\":\"{{note}}\"}"
+    }
+   },
+   "params": {},
+   "want": {
+    "ok": false,
+    "error": "missing param \"name\""
+   }
+  },
+  {
+   "name": "bad pattern",
+   "profile": {
+    "name": "create-repo",
+    "description": "",
+    "risk": "low",
+    "params": [
+     {
+      "name": "name",
+      "pattern": "[a-z0-9-]+",
+      "required": true
+     },
+     {
+      "name": "note",
+      "pattern": ".*",
+      "required": false
+     }
+    ],
+    "http": {
+     "method": "POST",
+     "url": "https://git.example/api/repos/{{name}}",
+     "headers": {
+      "Authorization": "token {{secret:gitea}}",
+      "Content-Type": "application/json"
+     },
+     "body": "{\"note\":\"{{note}}\"}"
+    }
+   },
+   "params": {
+    "name": "../admin"
+   },
+   "want": {
+    "ok": false,
+    "error": "param \"name\" does not match its pattern"
+   }
+  },
+  {
+   "name": "unknown param",
+   "profile": {
+    "name": "create-repo",
+    "description": "",
+    "risk": "low",
+    "params": [
+     {
+      "name": "name",
+      "pattern": "[a-z0-9-]+",
+      "required": true
+     },
+     {
+      "name": "note",
+      "pattern": ".*",
+      "required": false
+     }
+    ],
+    "http": {
+     "method": "POST",
+     "url": "https://git.example/api/repos/{{name}}",
+     "headers": {
+      "Authorization": "token {{secret:gitea}}",
+      "Content-Type": "application/json"
+     },
+     "body": "{\"note\":\"{{note}}\"}"
+    }
+   },
+   "params": {
+    "name": "a",
+    "x": "y"
+   },
+   "want": {
+    "ok": false,
+    "error": "unknown param \"x\""
+   }
+  },
+  {
+   "name": "template in value",
+   "profile": {
+    "name": "create-repo",
+    "description": "",
+    "risk": "low",
+    "params": [
+     {
+      "name": "name",
+      "pattern": "[a-z0-9-]+",
+      "required": true
+     },
+     {
+      "name": "note",
+      "pattern": ".*",
+      "required": false
+     }
+    ],
+    "http": {
+     "method": "POST",
+     "url": "https://git.example/api/repos/{{name}}",
+     "headers": {
+      "Authorization": "token {{secret:gitea}}",
+      "Content-Type": "application/json"
+     },
+     "body": "{\"note\":\"{{note}}\"}"
+    }
+   },
+   "params": {
+    "name": "a",
+    "note": "{{secret:other}}"
+   },
+   "want": {
+    "ok": false,
+    "error": "param \"note\" must not contain template braces"
+   }
+  },
+  {
+   "name": "bidi",
+   "profile": {
+    "name": "create-repo",
+    "description": "",
+    "risk": "low",
+    "params": [
+     {
+      "name": "name",
+      "pattern": "[a-z0-9-]+",
+      "required": true
+     },
+     {
+      "name": "note",
+      "pattern": ".*",
+      "required": false
+     }
+    ],
+    "http": {
+     "method": "POST",
+     "url": "https://git.example/api/repos/{{name}}",
+     "headers": {
+      "Authorization": "token {{secret:gitea}}",
+      "Content-Type": "application/json"
+     },
+     "body": "{\"note\":\"{{note}}\"}"
+    }
+   },
+   "params": {
+    "name": "a",
+    "note": "a‮b"
+   },
+   "want": {
+    "ok": false,
+    "error": "param \"note\" contains a control character"
+   }
+  },
+  {
+   "name": "newline",
+   "profile": {
+    "name": "create-repo",
+    "description": "",
+    "risk": "low",
+    "params": [
+     {
+      "name": "name",
+      "pattern": "[a-z0-9-]+",
+      "required": true
+     },
+     {
+      "name": "note",
+      "pattern": ".*",
+      "required": false
+     }
+    ],
+    "http": {
+     "method": "POST",
+     "url": "https://git.example/api/repos/{{name}}",
+     "headers": {
+      "Authorization": "token {{secret:gitea}}",
+      "Content-Type": "application/json"
+     },
+     "body": "{\"note\":\"{{note}}\"}"
+    }
+   },
+   "params": {
+    "name": "a",
+    "note": "a\nb"
+   },
+   "want": {
+    "ok": false,
+    "error": "param \"note\" does not match its pattern"
+   }
+  },
+  {
+   "name": "host template",
+   "profile": {
+    "name": "create-repo",
+    "description": "",
+    "risk": "low",
+    "params": [
+     {
+      "name": "name",
+      "pattern": "[a-z0-9-]+",
+      "required": true
+     },
+     {
+      "name": "note",
+      "pattern": ".*",
+      "required": false
+     }
+    ],
+    "http": {
+     "method": "POST",
+     "url": "https://{{name}}/x",
+     "headers": {
+      "Authorization": "token {{secret:gitea}}",
+      "Content-Type": "application/json"
+     },
+     "body": "{\"note\":\"{{note}}\"}"
+    }
+   },
+   "params": {
+    "name": "a"
+   },
+   "want": {
+    "ok": false,
+    "error": "url must start with a literal http(s)://host"
+   }
+  },
+  {
+   "name": "undeclared",
+   "profile": {
+    "name": "create-repo",
+    "description": "",
+    "risk": "low",
+    "params": [
+     {
+      "name": "name",
+      "pattern": "[a-z0-9-]+",
+      "required": true
+     },
+     {
+      "name": "note",
+      "pattern": ".*",
+      "required": false
+     }
+    ],
+    "http": {
+     "method": "POST",
+     "url": "https://git.example/api/repos/{{name}}",
+     "headers": {
+      "Authorization": "token {{secret:gitea}}",
+      "Content-Type": "application/json"
+     },
+     "body": "{{ghost}}"
+    }
+   },
+   "params": {
+    "name": "a"
+   },
+   "want": {
+    "ok": false,
+    "error": "undeclared param \"ghost\""
+   }
+  },
+  {
+   "name": "high auto",
+   "profile": {
+    "name": "create-repo",
+    "description": "",
+    "risk": "high",
+    "auto_approve": true,
+    "params": [
+     {
+      "name": "name",
+      "pattern": "[a-z0-9-]+",
+      "required": true
+     },
+     {
+      "name": "note",
+      "pattern": ".*",
+      "required": false
+     }
+    ],
+    "http": {
+     "method": "POST",
+     "url": "https://git.example/api/repos/{{name}}",
+     "headers": {
+      "Authorization": "token {{secret:gitea}}",
+      "Content-Type": "application/json"
+     },
+     "body": "{\"note\":\"{{note}}\"}"
+    }
+   },
+   "params": {
+    "name": "a"
+   },
+   "want": {
+    "ok": false,
+    "error": "a high risk profile cannot auto-approve"
+   }
+  },
+  {
+   "name": "no pattern",
+   "profile": {
+    "name": "create-repo",
+    "description": "",
+    "risk": "low",
+    "params": [
+     {
+      "name": "name",
+      "pattern": "",
+      "required": true
+     },
+     {
+      "name": "note",
+      "pattern": ".*",
+      "required": false
+     }
+    ],
+    "http": {
+     "method": "POST",
+     "url": "https://git.example/api/repos/{{name}}",
+     "headers": {
+      "Authorization": "token {{secret:gitea}}",
+      "Content-Type": "application/json"
+     },
+     "body": "{\"note\":\"{{note}}\"}"
+    }
+   },
+   "params": {
+    "name": "a"
+   },
+   "want": {
+    "ok": false,
+    "error": "param \"name\" needs a pattern"
+   }
+  },
+  {
+   "name": "unused param",
+   "profile": {
+    "name": "create-repo",
+    "description": "",
+    "risk": "low",
+    "params": [
+     {
+      "name": "name",
+      "pattern": "[a-z0-9-]+",
+      "required": true
+     },
+     {
+      "name": "note",
+      "pattern": ".*",
+      "required": false
+     }
+    ],
+    "http": {
+     "method": "POST",
+     "url": "https://git.example/api/repos/{{name}}",
+     "headers": {
+      "Authorization": "token {{secret:gitea}}",
+      "Content-Type": "application/json"
+     }
+    }
+   },
+   "params": {
+    "name": "a"
+   },
+   "want": {
+    "ok": false,
+    "error": "param \"note\" is declared but never used"
+   }
+  },
+  {
+   "name": "bad name",
+   "profile": {
+    "name": "Bad Name",
+    "description": "",
+    "risk": "low",
+    "params": [
+     {
+      "name": "name",
+      "pattern": "[a-z0-9-]+",
+      "required": true
+     },
+     {
+      "name": "note",
+      "pattern": ".*",
+      "required": false
+     }
+    ],
+    "http": {
+     "method": "POST",
+     "url": "https://git.example/api/repos/{{name}}",
+     "headers": {
+      "Authorization": "token {{secret:gitea}}",
+      "Content-Type": "application/json"
+     },
+     "body": "{\"note\":\"{{note}}\"}"
+    }
+   },
+   "params": {
+    "name": "a"
+   },
+   "want": {
+    "ok": false,
+    "error": "profile name must match [a-z0-9][a-z0-9_-]*"
+   }
+  },
+  {
+   "name": "host suffix",
+   "profile": {
+    "name": "create-repo",
+    "description": "",
+    "risk": "low",
+    "params": [
+     {
+      "name": "name",
+      "pattern": "[a-z0-9-]+",
+      "required": true
+     },
+     {
+      "name": "note",
+      "pattern": ".*",
+      "required": false
+     }
+    ],
+    "http": {
+     "method": "POST",
+     "url": "https://git.example{{name}}/x",
+     "headers": {
+      "Authorization": "token {{secret:gitea}}",
+      "Content-Type": "application/json"
+     },
+     "body": "{\"note\":\"{{note}}\"}"
+    }
+   },
+   "params": {
+    "name": "a"
+   },
+   "want": {
+    "ok": false,
+    "error": "template is not allowed in the url host"
+   }
+  },
+  {
+   "name": "secret in url",
+   "profile": {
+    "name": "create-repo",
+    "description": "",
+    "risk": "low",
+    "params": [
+     {
+      "name": "name",
+      "pattern": "[a-z0-9-]+",
+      "required": true
+     },
+     {
+      "name": "note",
+      "pattern": ".*",
+      "required": false
+     }
+    ],
+    "http": {
+     "method": "POST",
+     "url": "https://git.example/?t={{secret:gitea}}",
+     "headers": {
+      "Authorization": "token {{secret:gitea}}",
+      "Content-Type": "application/json"
+     },
+     "body": "{\"note\":\"{{note}}\"}"
+    }
+   },
+   "params": {
+    "name": "a"
+   },
+   "want": {
+    "ok": false,
+    "error": "secrets are not allowed in the url"
+   }
+  },
+  {
+   "name": "internal secret",
+   "profile": {
+    "name": "create-repo",
+    "description": "",
+    "risk": "low",
+    "params": [
+     {
+      "name": "name",
+      "pattern": "[a-z0-9-]+",
+      "required": true
+     },
+     {
+      "name": "note",
+      "pattern": ".*",
+      "required": false
+     }
+    ],
+    "http": {
+     "method": "POST",
+     "url": "https://git.example/api/repos/{{name}}",
+     "headers": {
+      "Authorization": "token {{secret:gitea}}",
+      "Content-Type": "application/json",
+      "X": "{{secret:_telegram_token}}"
+     },
+     "body": "{\"note\":\"{{note}}\"}"
+    }
+   },
+   "params": {
+    "name": "a"
+   },
+   "want": {
+    "ok": false,
+    "error": "internal secret \"_telegram_token\" cannot be used"
+   }
+  },
+  {
+   "name": "bad method",
+   "profile": {
+    "name": "create-repo",
+    "description": "",
+    "risk": "low",
+    "params": [
+     {
+      "name": "name",
+      "pattern": "[a-z0-9-]+",
+      "required": true
+     },
+     {
+      "name": "note",
+      "pattern": ".*",
+      "required": false
+     }
+    ],
+    "http": {
+     "method": "TRACE",
+     "url": "https://git.example/api/repos/{{name}}",
+     "headers": {
+      "Authorization": "token {{secret:gitea}}",
+      "Content-Type": "application/json"
+     },
+     "body": "{\"note\":\"{{note}}\"}"
+    }
+   },
+   "params": {
+    "name": "a"
+   },
+   "want": {
+    "ok": false,
+    "error": "unsupported http method"
+   }
+  },
+  {
+   "name": "url escape ..",
+   "profile": {
+    "name": "q",
+    "description": "",
+    "risk": "low",
+    "params": [
+     {
+      "name": "a",
+      "pattern": ".+",
+      "required": true
+     }
+    ],
+    "http": {
+     "method": "GET",
+     "url": "https://api.example/v1/repos/{{a}}/info?owner={{a}}\u0026x=1"
+    }
+   },
+   "params": {
+    "a": ".."
+   },
+   "want": {
+    "ok": false,
+    "error": "a param may not create a . or .. path segment"
+   }
+  },
+  {
+   "name": "url escape .",
+   "profile": {
+    "name": "q",
+    "description": "",
+    "risk": "low",
+    "params": [
+     {
+      "name": "a",
+      "pattern": ".+",
+      "required": true
+     }
+    ],
+    "http": {
+     "method": "GET",
+     "url": "https://api.example/v1/repos/{{a}}/info?owner={{a}}\u0026x=1"
+    }
+   },
+   "params": {
+    "a": "."
+   },
+   "want": {
+    "ok": false,
+    "error": "a param may not create a . or .. path segment"
+   }
+  },
+  {
+   "name": "url escape x\u0026admin=true",
+   "profile": {
+    "name": "q",
+    "description": "",
+    "risk": "low",
+    "params": [
+     {
+      "name": "a",
+      "pattern": ".+",
+      "required": true
+     }
+    ],
+    "http": {
+     "method": "GET",
+     "url": "https://api.example/v1/repos/{{a}}/info?owner={{a}}\u0026x=1"
+    }
+   },
+   "params": {
+    "a": "x\u0026admin=true"
+   },
+   "want": {
+    "ok": true,
+    "url": "https://api.example/v1/repos/x\u0026admin=true/info?owner=x%26admin%3Dtrue\u0026x=1",
+    "method": "GET",
+    "display": "GET https://api.example/v1/repos/x\u0026admin=true/info?owner=x%26admin%3Dtrue\u0026x=1",
+    "risk": "low"
+   }
+  },
+  {
+   "name": "url escape x#frag",
+   "profile": {
+    "name": "q",
+    "description": "",
+    "risk": "low",
+    "params": [
+     {
+      "name": "a",
+      "pattern": ".+",
+      "required": true
+     }
+    ],
+    "http": {
+     "method": "GET",
+     "url": "https://api.example/v1/repos/{{a}}/info?owner={{a}}\u0026x=1"
+    }
+   },
+   "params": {
+    "a": "x#frag"
+   },
+   "want": {
+    "ok": true,
+    "url": "https://api.example/v1/repos/x%23frag/info?owner=x%23frag\u0026x=1",
+    "method": "GET",
+    "display": "GET https://api.example/v1/repos/x%23frag/info?owner=x%23frag\u0026x=1",
+    "risk": "low"
+   }
+  },
+  {
+   "name": "url escape a b/c",
+   "profile": {
+    "name": "q",
+    "description": "",
+    "risk": "low",
+    "params": [
+     {
+      "name": "a",
+      "pattern": ".+",
+      "required": true
+     }
+    ],
+    "http": {
+     "method": "GET",
+     "url": "https://api.example/v1/repos/{{a}}/info?owner={{a}}\u0026x=1"
+    }
+   },
+   "params": {
+    "a": "a b/c"
+   },
+   "want": {
+    "ok": true,
+    "url": "https://api.example/v1/repos/a%20b%2Fc/info?owner=a+b%2Fc\u0026x=1",
+    "method": "GET",
+    "display": "GET https://api.example/v1/repos/a%20b%2Fc/info?owner=a+b%2Fc\u0026x=1",
+    "risk": "low"
+   }
+  },
+  {
+   "name": "url escape ü%20",
+   "profile": {
+    "name": "q",
+    "description": "",
+    "risk": "low",
+    "params": [
+     {
+      "name": "a",
+      "pattern": ".+",
+      "required": true
+     }
+    ],
+    "http": {
+     "method": "GET",
+     "url": "https://api.example/v1/repos/{{a}}/info?owner={{a}}\u0026x=1"
+    }
+   },
+   "params": {
+    "a": "ü%20"
+   },
+   "want": {
+    "ok": true,
+    "url": "https://api.example/v1/repos/%C3%BC%2520/info?owner=%C3%BC%2520\u0026x=1",
+    "method": "GET",
+    "display": "GET https://api.example/v1/repos/%C3%BC%2520/info?owner=%C3%BC%2520\u0026x=1",
+    "risk": "low"
+   }
+  },
+  {
+   "name": "url escape @evil.example",
+   "profile": {
+    "name": "q",
+    "description": "",
+    "risk": "low",
+    "params": [
+     {
+      "name": "a",
+      "pattern": ".+",
+      "required": true
+     }
+    ],
+    "http": {
+     "method": "GET",
+     "url": "https://api.example/v1/repos/{{a}}/info?owner={{a}}\u0026x=1"
+    }
+   },
+   "params": {
+    "a": "@evil.example"
+   },
+   "want": {
+    "ok": true,
+    "url": "https://api.example/v1/repos/@evil.example/info?owner=%40evil.example\u0026x=1",
+    "method": "GET",
+    "display": "GET https://api.example/v1/repos/@evil.example/info?owner=%40evil.example\u0026x=1",
+    "risk": "low"
+   }
+  },
+  {
+   "name": "form escape",
+   "profile": {
+    "name": "f",
+    "description": "",
+    "risk": "low",
+    "params": [
+     {
+      "name": "n",
+      "pattern": ".*",
+      "required": false
+     }
+    ],
+    "http": {
+     "method": "POST",
+     "url": "https://a.example/x",
+     "headers": {
+      "Content-Type": "application/x-www-form-urlencoded"
+     },
+     "body": "x={{n}}"
+    }
+   },
+   "params": {
+    "n": "1\u0026role=admin é"
+   },
+   "want": {
+    "ok": true,
+    "url": "https://a.example/x",
+    "method": "POST",
+    "headers": {
+     "Content-Type": "application/x-www-form-urlencoded"
+    },
+    "body": "x=1%26role%3Dadmin+%C3%A9",
+    "display": "POST https://a.example/x\nContent-Type: application/x-www-form-urlencoded\n\nx=1%26role%3Dadmin+%C3%A9",
+    "risk": "low"
+   }
+  },
+  {
+   "name": "exec ok",
+   "profile": {
+    "name": "e",
+    "description": "",
+    "risk": "high",
+    "params": [
+     {
+      "name": "u",
+      "pattern": ".+",
+      "required": true
+     }
+    ],
+    "exec": {
+     "argv": [
+      "/usr/bin/git",
+      "clone",
+      "{{u}}",
+      "--depth={{u}}"
+     ],
+     "env": {
+      "TOKEN": "{{secret:s}}"
+     },
+     "stdin": "{{secret:p}}",
+     "files": {
+      "id_key": "{{secret:k}}"
+     }
+    }
+   },
+   "params": {
+    "u": "https://x.example/r"
+   },
+   "want": {
+    "ok": true,
+    "argv": [
+     "/usr/bin/git",
+     "clone",
+     "https://x.example/r",
+     "--depth=https://x.example/r"
+    ],
+    "env": {
+     "TOKEN": "{{secret:s}}"
+    },
+    "display": "\"/usr/bin/git\" \"clone\" \"https://x.example/r\" \"--depth=https://x.example/r\"\nenv TOKEN=‹secret:s›\nstdin: ‹secret:p›\nfile id_key: ‹secret:k›",
+    "secrets": [
+     "k",
+     "p",
+     "s"
+    ],
+    "risk": "high"
+   }
+  },
+  {
+   "name": "exec option injection",
+   "profile": {
+    "name": "e",
+    "description": "",
+    "risk": "high",
+    "params": [
+     {
+      "name": "u",
+      "pattern": ".+",
+      "required": true
+     }
+    ],
+    "exec": {
+     "argv": [
+      "/usr/bin/git",
+      "clone",
+      "{{u}}",
+      "--depth={{u}}"
+     ],
+     "env": {
+      "TOKEN": "{{secret:s}}"
+     },
+     "stdin": "{{secret:p}}",
+     "files": {
+      "id_key": "{{secret:k}}"
+     }
+    }
+   },
+   "params": {
+    "u": "--upload-pack=x"
+   },
+   "want": {
+    "ok": false,
+    "error": "a param may not start a command line option"
+   }
+  },
+  {
+   "name": "exec ld preload",
+   "profile": {
+    "name": "e",
+    "description": "",
+    "risk": "high",
+    "params": [
+     {
+      "name": "u",
+      "pattern": ".+",
+      "required": true
+     }
+    ],
+    "exec": {
+     "argv": [
+      "/usr/bin/git",
+      "clone",
+      "{{u}}",
+      "--depth={{u}}"
+     ],
+     "env": {
+      "LD_PRELOAD": "x"
+     },
+     "stdin": "{{secret:p}}",
+     "files": {
+      "id_key": "{{secret:k}}"
+     }
+    }
+   },
+   "params": {
+    "u": "x"
+   },
+   "want": {
+    "ok": false,
+    "error": "env \"LD_PRELOAD\" is not allowed, it changes how the program runs"
+   }
+  },
+  {
+   "name": "exec path env",
+   "profile": {
+    "name": "e",
+    "description": "",
+    "risk": "high",
+    "params": [
+     {
+      "name": "u",
+      "pattern": ".+",
+      "required": true
+     }
+    ],
+    "exec": {
+     "argv": [
+      "/usr/bin/git",
+      "clone",
+      "{{u}}",
+      "--depth={{u}}"
+     ],
+     "env": {
+      "PATH": "x"
+     },
+     "stdin": "{{secret:p}}",
+     "files": {
+      "id_key": "{{secret:k}}"
+     }
+    }
+   },
+   "params": {
+    "u": "x"
+   },
+   "want": {
+    "ok": false,
+    "error": "env \"PATH\" is not allowed, it changes how the program runs"
+   }
+  },
+  {
+   "name": "exec file escape",
+   "profile": {
+    "name": "e",
+    "description": "",
+    "risk": "high",
+    "params": [
+     {
+      "name": "u",
+      "pattern": ".+",
+      "required": true
+     }
+    ],
+    "exec": {
+     "argv": [
+      "/usr/bin/git",
+      "clone",
+      "{{u}}",
+      "--depth={{u}}"
+     ],
+     "env": {
+      "TOKEN": "{{secret:s}}"
+     },
+     "stdin": "{{secret:p}}",
+     "files": {
+      "../x": "{{secret:k}}"
+     }
+    }
+   },
+   "params": {
+    "u": "x"
+   },
+   "want": {
+    "ok": false,
+    "error": "file name \"../x\" must be a plain name"
+   }
+  },
+  {
+   "name": "exec param file",
+   "profile": {
+    "name": "e",
+    "description": "",
+    "risk": "high",
+    "params": [
+     {
+      "name": "u",
+      "pattern": ".+",
+      "required": true
+     }
+    ],
+    "exec": {
+     "argv": [
+      "/usr/bin/git",
+      "clone",
+      "{{u}}",
+      "--depth={{u}}"
+     ],
+     "env": {
+      "TOKEN": "{{secret:s}}"
+     },
+     "stdin": "{{secret:p}}",
+     "files": {
+      "k": "{{u}}"
+     }
+    }
+   },
+   "params": {
+    "u": "x"
+   },
+   "want": {
+    "ok": false,
+    "error": "a file may only contain secrets"
+   }
+  },
+  {
+   "name": "exec shell",
+   "profile": {
+    "name": "e",
+    "description": "",
+    "risk": "high",
+    "params": [
+     {
+      "name": "u",
+      "pattern": ".+",
+      "required": true
+     }
+    ],
+    "exec": {
+     "argv": [
+      "/bin/sh",
+      "-c",
+      "{{u}}"
+     ],
+     "env": {
+      "TOKEN": "{{secret:s}}"
+     },
+     "stdin": "{{secret:p}}",
+     "files": {
+      "id_key": "{{secret:k}}"
+     }
+    }
+   },
+   "params": {
+    "u": "x"
+   },
+   "want": {
+    "ok": false,
+    "error": "interpreters are not allowed, they turn params into code"
+   }
+  },
+  {
+   "name": "exec busybox",
+   "profile": {
+    "name": "e",
+    "description": "",
+    "risk": "high",
+    "params": [
+     {
+      "name": "u",
+      "pattern": ".+",
+      "required": true
+     }
+    ],
+    "exec": {
+     "argv": [
+      "/bin/busybox",
+      "clone",
+      "{{u}}",
+      "--depth={{u}}"
+     ],
+     "env": {
+      "TOKEN": "{{secret:s}}"
+     },
+     "stdin": "{{secret:p}}",
+     "files": {
+      "id_key": "{{secret:k}}"
+     }
+    }
+   },
+   "params": {
+    "u": "x"
+   },
+   "want": {
+    "ok": false,
+    "error": "interpreters are not allowed, they turn params into code"
+   }
+  },
+  {
+   "name": "exec relative",
+   "profile": {
+    "name": "e",
+    "description": "",
+    "risk": "high",
+    "params": [
+     {
+      "name": "u",
+      "pattern": ".+",
+      "required": true
+     }
+    ],
+    "exec": {
+     "argv": [
+      "git",
+      "clone",
+      "{{u}}",
+      "--depth={{u}}"
+     ],
+     "env": {
+      "TOKEN": "{{secret:s}}"
+     },
+     "stdin": "{{secret:p}}",
+     "files": {
+      "id_key": "{{secret:k}}"
+     }
+    }
+   },
+   "params": {
+    "u": "x"
+   },
+   "want": {
+    "ok": false,
+    "error": "argv[0] must be a literal absolute path"
+   }
+  },
+  {
+   "name": "exec secret argv",
+   "profile": {
+    "name": "e",
+    "description": "",
+    "risk": "high",
+    "params": [
+     {
+      "name": "u",
+      "pattern": ".+",
+      "required": true
+     }
+    ],
+    "exec": {
+     "argv": [
+      "/usr/bin/git",
+      "clone",
+      "{{u}}",
+      "--depth={{u}}",
+      "{{secret:s}}"
+     ],
+     "env": {
+      "TOKEN": "{{secret:s}}"
+     },
+     "stdin": "{{secret:p}}",
+     "files": {
+      "id_key": "{{secret:k}}"
+     }
+    }
+   },
+   "params": {
+    "u": "x"
+   },
+   "want": {
+    "ok": false,
+    "error": "secrets are only allowed in exec env, argv is visible in /proc"
+   }
+  },
+  {
+   "name": "choice ok",
+   "profile": {
+    "name": "c",
+    "description": "",
+    "risk": "low",
+    "secret_choices": [
+     "a",
+     "b"
+    ],
+    "http": {
+     "method": "GET",
+     "url": "https://x.example/",
+     "headers": {
+      "A": "{{secret:choice}}"
+     }
+    }
+   },
+   "params": null,
+   "want": {
+    "ok": true,
+    "url": "https://x.example/",
+    "method": "GET",
+    "headers": {
+     "A": "{{secret:choice}}"
+    },
+    "display": "GET https://x.example/\nA: ‹secret bạn chọn khi duyệt›",
+    "secrets": [
+     "choice"
+    ],
+    "risk": "low",
+    "choices": [
+     "a",
+     "b"
+    ]
+   }
+  },
+  {
+   "name": "choice auto",
+   "profile": {
+    "name": "c",
+    "description": "",
+    "risk": "low",
+    "auto_approve": true,
+    "secret_choices": [
+     "a",
+     "b"
+    ],
+    "http": {
+     "method": "GET",
+     "url": "https://x.example/",
+     "headers": {
+      "A": "{{secret:choice}}"
+     }
+    }
+   },
+   "params": null,
+   "want": {
+    "ok": false,
+    "error": "a secret choice needs a human, so it cannot auto-approve"
+   }
+  }
+ ],
+ "resolve": [
+  {
+   "name": "ok",
+   "profile": {
+    "name": "p",
+    "description": "",
+    "risk": "low",
+    "connection": "gh",
+    "params": [
+     {
+      "name": "a",
+      "pattern": ".+",
+      "required": true
+     }
+    ],
+    "http": {
+     "method": "GET",
+     "url": "/repos/{{a}}"
+    }
+   },
+   "connections": {
+    "gh": {
+     "name": "gh",
+     "base_url": "https://api.github.com/",
+     "auth": {
+      "type": "bearer",
+      "secret": "github_token"
+     },
+     "headers": {
+      "Accept": "application/json"
+     }
+    },
+    "pick": {
+     "name": "pick",
+     "base_url": "https://a.example/v1",
+     "auth": {
+      "type": "header",
+      "header": "X-Api-Key",
+      "choices": [
+       "x",
+       "y"
+      ]
+     }
+    }
+   },
+   "params": {
+    "a": "x"
+   },
+   "want": {
+    "ok": true,
+    "url": "https://api.github.com/repos/x",
+    "method": "GET",
+    "headers": {
+     "Accept": "application/json",
+     "Authorization": "Bearer {{secret:github_token}}"
+    },
+    "display": "GET https://api.github.com/repos/x\nAccept: application/json\nAuthorization: Bearer ‹secret:github_token›",
+    "secrets": [
+     "github_token"
+    ],
+    "risk": "low"
+   }
+  },
+  {
+   "name": "protocol relative",
+   "profile": {
+    "name": "p",
+    "description": "",
+    "risk": "low",
+    "connection": "gh",
+    "params": [
+     {
+      "name": "a",
+      "pattern": ".+",
+      "required": true
+     }
+    ],
+    "http": {
+     "method": "GET",
+     "url": "//evil.example/{{a}}"
+    }
+   },
+   "connections": {
+    "gh": {
+     "name": "gh",
+     "base_url": "https://api.github.com/",
+     "auth": {
+      "type": "bearer",
+      "secret": "github_token"
+     },
+     "headers": {
+      "Accept": "application/json"
+     }
+    },
+    "pick": {
+     "name": "pick",
+     "base_url": "https://a.example/v1",
+     "auth": {
+      "type": "header",
+      "header": "X-Api-Key",
+      "choices": [
+       "x",
+       "y"
+      ]
+     }
+    }
+   },
+   "params": {
+    "a": "x"
+   },
+   "want": {
+    "ok": false,
+    "error": "with a connection the url is a path that starts with /"
+   }
+  },
+  {
+   "name": "absolute",
+   "profile": {
+    "name": "p",
+    "description": "",
+    "risk": "low",
+    "connection": "gh",
+    "params": [
+     {
+      "name": "a",
+      "pattern": ".+",
+      "required": true
+     }
+    ],
+    "http": {
+     "method": "GET",
+     "url": "https://evil.example/{{a}}"
+    }
+   },
+   "connections": {
+    "gh": {
+     "name": "gh",
+     "base_url": "https://api.github.com/",
+     "auth": {
+      "type": "bearer",
+      "secret": "github_token"
+     },
+     "headers": {
+      "Accept": "application/json"
+     }
+    },
+    "pick": {
+     "name": "pick",
+     "base_url": "https://a.example/v1",
+     "auth": {
+      "type": "header",
+      "header": "X-Api-Key",
+      "choices": [
+       "x",
+       "y"
+      ]
+     }
+    }
+   },
+   "params": {
+    "a": "x"
+   },
+   "want": {
+    "ok": false,
+    "error": "with a connection the url is a path that starts with /"
+   }
+  },
+  {
+   "name": "auth override",
+   "profile": {
+    "name": "p",
+    "description": "",
+    "risk": "low",
+    "connection": "gh",
+    "params": [
+     {
+      "name": "a",
+      "pattern": ".+",
+      "required": true
+     }
+    ],
+    "http": {
+     "method": "GET",
+     "url": "/x/{{a}}",
+     "headers": {
+      "authorization": "Bearer {{secret:other}}"
+     }
+    }
+   },
+   "connections": {
+    "gh": {
+     "name": "gh",
+     "base_url": "https://api.github.com/",
+     "auth": {
+      "type": "bearer",
+      "secret": "github_token"
+     },
+     "headers": {
+      "Accept": "application/json"
+     }
+    },
+    "pick": {
+     "name": "pick",
+     "base_url": "https://a.example/v1",
+     "auth": {
+      "type": "header",
+      "header": "X-Api-Key",
+      "choices": [
+       "x",
+       "y"
+      ]
+     }
+    }
+   },
+   "params": {
+    "a": "x"
+   },
+   "want": {
+    "ok": false,
+    "error": "header \"authorization\" is set by the connection"
+   }
+  },
+  {
+   "name": "at sign",
+   "profile": {
+    "name": "p",
+    "description": "",
+    "risk": "low",
+    "connection": "gh",
+    "params": [
+     {
+      "name": "a",
+      "pattern": ".+",
+      "required": true
+     }
+    ],
+    "http": {
+     "method": "GET",
+     "url": "/{{a}}"
+    }
+   },
+   "connections": {
+    "gh": {
+     "name": "gh",
+     "base_url": "https://api.github.com/",
+     "auth": {
+      "type": "bearer",
+      "secret": "github_token"
+     },
+     "headers": {
+      "Accept": "application/json"
+     }
+    },
+    "pick": {
+     "name": "pick",
+     "base_url": "https://a.example/v1",
+     "auth": {
+      "type": "header",
+      "header": "X-Api-Key",
+      "choices": [
+       "x",
+       "y"
+      ]
+     }
+    }
+   },
+   "params": {
+    "a": "@evil.example"
+   },
+   "want": {
+    "ok": true,
+    "url": "https://api.github.com/@evil.example",
+    "method": "GET",
+    "headers": {
+     "Accept": "application/json",
+     "Authorization": "Bearer {{secret:github_token}}"
+    },
+    "display": "GET https://api.github.com/@evil.example\nAccept: application/json\nAuthorization: Bearer ‹secret:github_token›",
+    "secrets": [
+     "github_token"
+    ],
+    "risk": "low"
+   }
+  },
+  {
+   "name": "choices",
+   "profile": {
+    "name": "p",
+    "description": "",
+    "risk": "low",
+    "connection": "pick",
+    "params": [
+     {
+      "name": "a",
+      "pattern": ".+",
+      "required": true
+     }
+    ],
+    "http": {
+     "method": "GET",
+     "url": "/me/{{a}}"
+    }
+   },
+   "connections": {
+    "gh": {
+     "name": "gh",
+     "base_url": "https://api.github.com/",
+     "auth": {
+      "type": "bearer",
+      "secret": "github_token"
+     },
+     "headers": {
+      "Accept": "application/json"
+     }
+    },
+    "pick": {
+     "name": "pick",
+     "base_url": "https://a.example/v1",
+     "auth": {
+      "type": "header",
+      "header": "X-Api-Key",
+      "choices": [
+       "x",
+       "y"
+      ]
+     }
+    }
+   },
+   "params": {
+    "a": "x"
+   },
+   "want": {
+    "ok": true,
+    "url": "https://a.example/v1/me/x",
+    "method": "GET",
+    "headers": {
+     "X-Api-Key": "{{secret:choice}}"
+    },
+    "display": "GET https://a.example/v1/me/x\nX-Api-Key: ‹secret bạn chọn khi duyệt›",
+    "secrets": [
+     "choice"
+    ],
+    "risk": "low",
+    "choices": [
+     "x",
+     "y"
+    ]
+   }
+  },
+  {
+   "name": "unknown connection",
+   "profile": {
+    "name": "p",
+    "description": "",
+    "risk": "low",
+    "connection": "ghost",
+    "params": [
+     {
+      "name": "a",
+      "pattern": ".+",
+      "required": true
+     }
+    ],
+    "http": {
+     "method": "GET",
+     "url": "/x/{{a}}"
+    }
+   },
+   "connections": {
+    "gh": {
+     "name": "gh",
+     "base_url": "https://api.github.com/",
+     "auth": {
+      "type": "bearer",
+      "secret": "github_token"
+     },
+     "headers": {
+      "Accept": "application/json"
+     }
+    },
+    "pick": {
+     "name": "pick",
+     "base_url": "https://a.example/v1",
+     "auth": {
+      "type": "header",
+      "header": "X-Api-Key",
+      "choices": [
+       "x",
+       "y"
+      ]
+     }
+    }
+   },
+   "params": {
+    "a": "x"
+   },
+   "want": {
+    "ok": false,
+    "error": "unknown connection \"ghost\""
+   }
+  }
+ ],
+ "secret_meta": [
+  {
+   "meta": {
+    "hosts": [
+     "https://a.com"
+    ]
+   },
+   "error": "bad host \"https://a.com\", use a name such as api.example.com"
+  },
+  {
+   "meta": {
+    "hosts": [
+     "*"
+    ]
+   },
+   "error": "bad host \"*\", use a name such as api.example.com"
+  },
+  {
+   "meta": {
+    "hosts": [
+     "A.COM"
+    ]
+   },
+   "error": "bad host \"A.COM\", use a name such as api.example.com"
+  },
+  {
+   "meta": {
+    "hosts": [
+     "a b.com"
+    ]
+   },
+   "error": "bad host \"a b.com\", use a name such as api.example.com"
+  },
+  {
+   "meta": {
+    "description": "a‮b"
+   },
+   "error": "description contains a control character"
+  },
+  {
+   "meta": {
+    "description": "GitHub",
+    "hosts": [
+     "api.github.com",
+     "*.example.com",
+     "localhost:8080"
+    ]
+   }
+  }
+ ]
+}
