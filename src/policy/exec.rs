@@ -126,11 +126,16 @@ where
     r
 }
 
+pub const USER_AGENT: &str = concat!("ucanrun/", env!("CARGO_PKG_VERSION"));
+
 fn client() -> &'static reqwest::Client {
     static C: OnceLock<reqwest::Client> = OnceLock::new();
     // A redirect could carry the Authorization header somewhere unapproved.
     C.get_or_init(|| {
+        // Some APIs, GitHub among them, refuse requests without a User-Agent.
+        // A profile header still takes precedence.
         reqwest::Client::builder()
+            .user_agent(USER_AGENT)
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .expect("http client")

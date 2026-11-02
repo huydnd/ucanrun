@@ -439,3 +439,48 @@ async fn run_http_does_not_follow_redirects_and_caps_output() {
     assert!(r.output.ends_with("\n[output truncated]"));
     assert!(r.output.len() < 65_536 + 40);
 }
+
+/// GitHub answers 403 to requests without a User-Agent.
+#[tokio::test]
+async fn run_http_sends_a_user_agent() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = l.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        loop {
+            let (mut s, _) = l.accept().await.unwrap();
+            tokio::spawn(async move {
+                let mut buf = vec![0u8; 4096];
+                let n = s.read(&mut buf).await.unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_lowercase();
+                let body: Vec<&str> = req
+                    .lines()
+                    .filter_map(|l| l.strip_prefix("user-agent: "))
+                    .collect();
+                let body = body.join("|");
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = s.write_all(resp.as_bytes()).await;
+            });
+        }
+    });
+    let mk = |headers: Vec<(&str, &str)>| Action {
+        http: Some(HttpSpec {
+            method: "GET".into(),
+            url: format!("http://127.0.0.1:{port}/"),
+            headers: headers
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            ..Default::default()
+        }),
+        timeout_sec: 10,
+        ..Default::default()
+    };
+    let r = run(&mk(vec![]), getter).await;
+    assert_eq!(r.output, format!("HTTP 200\n{}", super::exec::USER_AGENT));
+    let r = run(&mk(vec![("User-Agent", "Custom/1")]), getter).await;
+    assert_eq!(r.output, "HTTP 200\ncustom/1");
+}
