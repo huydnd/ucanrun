@@ -409,6 +409,10 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		s.recordLogin(false)
+		if errors.Is(err, core.ErrStateTooNew) {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "dữ liệu tạo bởi bản mới hơn, hãy nâng cấp ucanrun"})
+			return
+		}
 		if errors.Is(err, core.ErrTampered) {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "file trạng thái không qua được kiểm tra toàn vẹn"})
 			return
@@ -510,7 +514,7 @@ func (s *Server) auditLog(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	n, verr := audit.Verify(s.AuditPath)
-	writeJSON(w, 200, map[string]any{"entries": es, "valid_entries": n, "chain_ok": verr == nil})
+	writeJSON(w, 200, map[string]any{"entries": es, "valid_entries": n, "chain_ok": verr == nil, "truncated": s.C.AuditTruncated()})
 }
 
 func (s *Server) setTelegram(w http.ResponseWriter, r *http.Request) {

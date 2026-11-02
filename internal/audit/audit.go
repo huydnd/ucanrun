@@ -24,9 +24,10 @@ type Entry struct {
 }
 
 type Log struct {
-	path string
-	mu   sync.Mutex
-	last string
+	path  string
+	mu    sync.Mutex
+	count int
+	last  string
 }
 
 func Open(path string) (*Log, error) {
@@ -36,9 +37,16 @@ func Open(path string) (*Log, error) {
 		return nil, err
 	}
 	if n := len(entries); n > 0 {
+		l.count = n
 		l.last = entries[n-1].Hash
 	}
 	return l, nil
+}
+
+func (l *Log) Head() (count int, hash string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.count, l.last
 }
 
 func hashOf(e Entry) string {
@@ -65,6 +73,7 @@ func (l *Log) Append(event, actor string, fields map[string]any) error {
 	if _, err := f.Write(append(b, '\n')); err != nil {
 		return err
 	}
+	l.count++
 	l.last = e.Hash
 	return nil
 }
@@ -120,4 +129,19 @@ func Verify(path string) (int, error) {
 		prev = e.Hash
 	}
 	return len(es), nil
+}
+
+// Contains reports whether 1-based entry number count exists with the given hash.
+func Contains(path string, count int, hash string) (bool, error) {
+	if count == 0 {
+		return true, nil
+	}
+	es, err := readAll(path)
+	if err != nil {
+		return false, err
+	}
+	if count < 0 || len(es) < count {
+		return false, nil
+	}
+	return es[count-1].Hash == hash, nil
 }

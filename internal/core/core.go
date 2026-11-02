@@ -105,6 +105,7 @@ type Core struct {
 
 	mu        sync.Mutex
 	st        *State // nil while locked
+	auditCut  bool
 	reqs      map[string]*Request
 	order     []string
 	bot       *telegram.Bot
@@ -146,6 +147,13 @@ func (c *Core) Close() {
 }
 
 func (c *Core) statePath() string { return filepath.Join(c.opt.DataDir, "state.json") }
+func (c *Core) auditPath() string { return filepath.Join(c.opt.DataDir, "audit.jsonl") }
+
+func (c *Core) AuditTruncated() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.auditCut
+}
 
 func (c *Core) log(event, actor string, f map[string]any) {
 	if err := c.Audit.Append(event, actor, f); err != nil {
@@ -161,11 +169,14 @@ func randHex(n int) string {
 	return hex.EncodeToString(b)
 }
 
+// saveLocked anchors the current audit head in state; entries written after the
+// last save are not covered until the next save or Lock.
 func (c *Core) saveLocked() error {
 	k, err := c.Vault.MACKey()
 	if err != nil {
 		return ErrLocked
 	}
+	c.st.AuditCount, c.st.AuditHash = c.Audit.Head()
 	return saveState(c.statePath(), c.st, k)
 }
 
@@ -179,7 +190,7 @@ func (c *Core) Setup(pass []byte) error {
 	if err := c.Vault.Init(pass); err != nil {
 		return err
 	}
-	c.st = &State{Profiles: map[string]policy.Profile{}, Tokens: map[string]Token{}}
+	c.st = &State{Version: currentStateVersion, Profiles: map[string]policy.Profile{}, Tokens: map[string]Token{}}
 	if err := c.saveLocked(); err != nil {
 		return err
 	}
@@ -209,6 +220,8 @@ func (c *Core) Login(pass []byte, code string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	wasLocked := c.st == nil
+	var auditCount int
+	var auditHash string
 	if wasLocked {
 		c.Vault.Adopt(id)
 		k, err := c.Vault.MACKey()
@@ -221,6 +234,7 @@ func (c *Core) Login(pass []byte, code string) error {
 			c.log("state_tamper", "web", nil)
 			return err
 		}
+		auditCount, auditHash = c.st.AuditCount, c.st.AuditHash
 	}
 	if c.st.TOTPEnabled {
 		if err := c.checkSecondFactorLocked(code); err != nil {
@@ -233,6 +247,10 @@ func (c *Core) Login(pass []byte, code string) error {
 		}
 	}
 	if wasLocked {
+		if ok, err := audit.Contains(c.auditPath(), auditCount, auditHash); err != nil || !ok {
+			c.auditCut = true
+			c.log("audit_truncated", "web", map[string]any{"count": auditCount})
+		}
 		c.startBotLocked()
 	}
 	c.log("login", "web", nil)
@@ -380,9 +398,12 @@ func (c *Core) Lock(actor string) {
 		}
 	}
 	c.stopBotLocked()
+	c.log("lock", actor, nil)
+	if err := c.saveLocked(); err != nil {
+		slog.Error("state save", "err", err)
+	}
 	c.st = nil
 	c.Vault.Lock()
-	c.log("lock", actor, nil)
 }
 
 func (c *Core) stopBotLocked() {

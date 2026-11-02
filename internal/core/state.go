@@ -27,10 +27,13 @@ type TelegramCfg struct {
 	ChatID int64 `json:"chat_id"`
 }
 
+const currentStateVersion = 1
+
 // State is authenticated with a key derived from the vault identity, so someone
 // who can write the data directory but lacks the passphrase cannot add a profile
 // or a token.
 type State struct {
+	Version      int                       `json:"version"`
 	Profiles     map[string]policy.Profile `json:"profiles"`
 	Tokens       map[string]Token          `json:"tokens"`
 	Telegram     TelegramCfg               `json:"telegram"`
@@ -39,6 +42,8 @@ type State struct {
 	// RecoveryHashes are SHA-256 of single-use recovery codes. The codes carry
 	// 50 random bits, so a fast hash is enough.
 	RecoveryHashes []string `json:"recovery_hashes,omitempty"`
+	AuditCount     int      `json:"audit_count"`
+	AuditHash      string   `json:"audit_hash"`
 }
 
 type signedFile struct {
@@ -64,7 +69,17 @@ func saveState(path string, st *State, key []byte) error {
 	return vault.AtomicWrite(path, raw)
 }
 
-var ErrTampered = errors.New("state file failed authentication")
+var (
+	ErrTampered    = errors.New("state file failed authentication")
+	ErrStateTooNew = errors.New("state file version is newer than this binary")
+)
+
+var stateMigrations = []func(*State) error{
+	0: func(st *State) error {
+		st.Version = 1
+		return nil
+	},
+}
 
 func loadState(path string, key []byte) (*State, error) {
 	raw, err := os.ReadFile(path)
@@ -84,6 +99,17 @@ func loadState(path string, key []byte) (*State, error) {
 	st := &State{}
 	if err := json.Unmarshal(f.Data, st); err != nil {
 		return nil, err
+	}
+	if st.Version < 0 {
+		return nil, ErrTampered
+	}
+	if st.Version > currentStateVersion {
+		return nil, ErrStateTooNew
+	}
+	for st.Version < currentStateVersion {
+		if err := stateMigrations[st.Version](st); err != nil {
+			return nil, err
+		}
 	}
 	if st.Profiles == nil {
 		st.Profiles = map[string]policy.Profile{}

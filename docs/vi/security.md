@@ -29,7 +29,7 @@
 | Output | Che secret và dạng base64, hex, URL-encode. Không theo redirect. |
 | Web | Không có API đọc secret, cookie HttpOnly và SameSite=Strict, CSP chặt, giới hạn đăng nhập. |
 | Container | Không root, rootfs chỉ đọc, bỏ mọi capability. |
-| Audit | Chuỗi băm phát hiện sửa dòng. Cắt bớt phần cuối file thì chưa phát hiện được. |
+| Audit | Chuỗi băm phát hiện sửa dòng; trạng thái có chữ ký lưu vị trí cuối khi lưu và khi khoá để phát hiện cắt bớt cuối file (các mục ghi sau lần lưu cuối chưa được phủ). |
 
 ## Khi token bị lộ
 
