@@ -1,7 +1,4 @@
 //! Authenticated state file (port of `internal/core/state.go`).
-//!
-//! Profiles, connections and secret metadata are kept as generic JSON values
-//! until the policy types are wired in; only their map shape is fixed here.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -9,9 +6,10 @@ use std::path::Path;
 
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
+
+use crate::policy::{Connection, Profile, SecretMeta};
 
 pub const CURRENT_STATE_VERSION: i64 = 1;
 
@@ -47,7 +45,7 @@ impl From<std::io::Error> for Error {
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Agent token. Only the SHA-256 of the value is stored.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Token {
     pub id: String,
     pub name: String,
@@ -67,18 +65,16 @@ pub struct TelegramCfg {
     pub chat_id: i64,
 }
 
-type Map = BTreeMap<String, Value>;
-
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct State {
     #[serde(default)]
     pub version: i64,
     #[serde(default)]
-    pub profiles: Map,
-    #[serde(default, skip_serializing_if = "Map::is_empty")]
-    pub connections: Map,
-    #[serde(default, skip_serializing_if = "Map::is_empty")]
-    pub secrets: Map,
+    pub profiles: BTreeMap<String, Profile>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub connections: BTreeMap<String, Connection>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub secrets: BTreeMap<String, SecretMeta>,
     #[serde(default)]
     pub tokens: BTreeMap<String, Token>,
     #[serde(default)]

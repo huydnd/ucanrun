@@ -4,6 +4,7 @@
 pub mod audit;
 pub mod backup;
 pub mod client;
+pub mod core;
 pub mod gojson;
 pub mod mcp;
 pub mod policy;
