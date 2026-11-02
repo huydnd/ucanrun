@@ -38,6 +38,17 @@ Sau khi khởi tạo, tab **Bắt đầu** dẫn bạn qua bốn bước. Bướ
 
 Kiểm tra agent: `ucr profiles`.
 
+## Agent dùng secret thế nào
+
+Agent gọi công cụ MCP `list_secrets`, rồi `call` với header như `Authorization: Bearer {{secret:github_token}}`.
+
+- Máy chủ trong URL phải nằm trong danh sách secret cho phép.
+- Secret chỉ đặt trong header, không trong URL hay body.
+- Mọi yêu cầu đều cần bạn duyệt, tin nhắn ghi rõ agent tự soạn.
+- Với image `exec`, `run_command` dùng được secret có đánh dấu "cho dùng trong lệnh", luôn cần TOTP.
+
+Muốn giới hạn chặt hơn, tab Nâng cao định nghĩa các hành động cố định, xem [hành động cố định](catalog.md).
+
 ## Mất điện thoại
 
 Đăng nhập bằng mật khẩu chính và một mã khôi phục, nhập vào ô mã TOTP. Mỗi mã dùng một lần. Sau đó vào **Cài đặt** → **TOTP** → **Đổi điện thoại** để đăng ký thiết bị mới.

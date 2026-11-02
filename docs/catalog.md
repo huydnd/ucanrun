@@ -1,4 +1,6 @@
-# Services and actions
+# Fixed actions (advanced)
+
+Most setups do not need this: save secrets with a description and allowed hosts, and agents write their own requests for you to approve. Use fixed actions when an agent should only fill in values you allow.
 
 ucanrun has one general model instead of per-service code:
 

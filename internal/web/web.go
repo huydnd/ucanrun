@@ -627,7 +627,20 @@ func (s *Server) listSecrets(w http.ResponseWriter, _ *http.Request) {
 		fail(w, err)
 		return
 	}
-	writeJSON(w, 200, l)
+	meta, err := s.C.SecretMetas()
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	type row struct {
+		vault.Meta
+		policy.SecretMeta
+	}
+	out := make([]row, 0, len(l))
+	for _, m := range l {
+		out = append(out, row{m, meta[m.Name]})
+	}
+	writeJSON(w, 200, out)
 }
 
 // putSecret is write-only by design: no endpoint ever returns a secret value.
@@ -639,15 +652,30 @@ func (s *Server) putSecret(w http.ResponseWriter, r *http.Request) {
 	}
 	var in struct {
 		Value string `json:"value"`
+		policy.SecretMeta
 	}
 	if !read(w, r, &in) {
 		return
 	}
-	if err := s.C.Vault.Put(name, []byte(in.Value)); err != nil {
+	if err := in.SecretMeta.Validate(); err != nil {
 		fail(w, err)
 		return
 	}
-	s.C.Audit.Append("secret_put", "web", map[string]any{"name": name})
+	// An empty value keeps the stored one, so notes can change on their own.
+	if in.Value != "" {
+		if err := s.C.Vault.Put(name, []byte(in.Value)); err != nil {
+			fail(w, err)
+			return
+		}
+		s.C.Audit.Append("secret_put", "web", map[string]any{"name": name})
+	} else if l, _ := s.C.Vault.List(); !hasSecret(l, name) {
+		writeJSON(w, 400, map[string]string{"error": "value is required for a new secret"})
+		return
+	}
+	if err := s.C.SetSecretMeta(name, in.SecretMeta); err != nil {
+		fail(w, err)
+		return
+	}
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
@@ -662,6 +690,7 @@ func (s *Server) deleteSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.C.Audit.Append("secret_delete", "web", map[string]any{"name": name})
+	s.C.DeleteSecretMeta(name)
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
@@ -768,17 +797,32 @@ func (s *Server) AgentHandler() http.Handler {
 		}
 		writeJSON(w, 200, p)
 	}))
+	m.HandleFunc("GET /v1/secrets", bearer(func(w http.ResponseWriter, _ *http.Request, t core.Token) {
+		l, err := s.C.SecretsFor(t)
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		writeJSON(w, 200, l)
+	}))
 	m.HandleFunc("POST /v1/requests", bearer(func(w http.ResponseWriter, r *http.Request, t core.Token) {
 		var in struct {
 			Profile string            `json:"profile"`
 			Params  map[string]string `json:"params"`
+			Call    *policy.Call      `json:"call"`
 			Reason  string            `json:"reason"`
 			WaitSec int               `json:"wait_sec"`
 		}
 		if !read(w, r, &in) {
 			return
 		}
-		q, err := s.C.Submit(t, in.Profile, in.Params, in.Reason)
+		var q core.Request
+		var err error
+		if in.Call != nil {
+			q, err = s.C.SubmitCall(t, *in.Call, in.Reason)
+		} else {
+			q, err = s.C.Submit(t, in.Profile, in.Params, in.Reason)
+		}
 		if err != nil {
 			fail(w, err)
 			return
@@ -799,4 +843,13 @@ func (s *Server) AgentHandler() http.Handler {
 		writeJSON(w, 200, q)
 	}))
 	return m
+}
+
+func hasSecret(l []vault.Meta, name string) bool {
+	for _, m := range l {
+		if m.Name == name {
+			return true
+		}
+	}
+	return false
 }

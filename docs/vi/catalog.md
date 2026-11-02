@@ -1,4 +1,6 @@
-# Dịch vụ và hành động
+# Hành động cố định (nâng cao)
+
+Đa số trường hợp không cần phần này: lưu secret kèm mô tả và máy chủ được phép, agent tự soạn yêu cầu để bạn duyệt. Dùng hành động cố định khi muốn agent chỉ điền được giá trị bạn cho phép.
 
 ucanrun dùng một mô hình chung thay vì code riêng cho từng dịch vụ:
 

@@ -169,6 +169,18 @@ func (c *Client) Run(ctx context.Context, profile string, params map[string]stri
 	return v, err
 }
 
+func (c *Client) Secrets(ctx context.Context) (any, error) {
+	var v any
+	return v, c.do(ctx, "GET", "/v1/secrets", nil, &v)
+}
+
+// Call sends a request the agent wrote, as {"http": {...}} or {"exec": {...}}.
+func (c *Client) Call(ctx context.Context, call json.RawMessage, reason string, wait int) (map[string]any, error) {
+	v := map[string]any{}
+	err := c.do(ctx, "POST", "/v1/requests", map[string]any{"call": call, "reason": reason, "wait_sec": wait}, &v)
+	return v, err
+}
+
 func (c *Client) Request(ctx context.Context, id string) (map[string]any, error) {
 	v := map[string]any{}
 	return v, c.do(ctx, "GET", "/v1/requests/"+id, nil, &v)

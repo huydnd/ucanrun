@@ -190,7 +190,7 @@ func (c *Core) Setup(pass []byte) error {
 	if err := c.Vault.Init(pass); err != nil {
 		return err
 	}
-	c.st = &State{Version: currentStateVersion, Profiles: map[string]policy.Profile{}, Tokens: map[string]Token{}, Connections: map[string]policy.Connection{}}
+	c.st = &State{Version: currentStateVersion, Profiles: map[string]policy.Profile{}, Tokens: map[string]Token{}, Connections: map[string]policy.Connection{}, Secrets: map[string]policy.SecretMeta{}}
 	if err := c.saveLocked(); err != nil {
 		return err
 	}
@@ -641,6 +641,83 @@ func (c *Core) PutProfile(p policy.Profile) error {
 	return c.saveLocked()
 }
 
+// SecretInfo is what an agent may know about a secret.
+type SecretInfo struct {
+	Name          string   `json:"name"`
+	Description   string   `json:"description,omitempty"`
+	Hosts         []string `json:"hosts,omitempty"`
+	AllowCommands bool     `json:"allow_commands,omitempty"`
+}
+
+// SecretsFor lists the secrets an agent can use in its own calls. A token
+// limited to profiles sees none.
+func (c *Core) SecretsFor(t Token) ([]SecretInfo, error) {
+	c.mu.Lock()
+	if c.st == nil {
+		c.mu.Unlock()
+		return nil, ErrLocked
+	}
+	meta := map[string]policy.SecretMeta{}
+	for k, v := range c.st.Secrets {
+		meta[k] = v
+	}
+	c.mu.Unlock()
+	out := []SecretInfo{}
+	if len(t.Profiles) > 0 {
+		return out, nil
+	}
+	l, err := c.Vault.List()
+	if err != nil {
+		return nil, err
+	}
+	for _, s := range l {
+		m, ok := meta[s.Name]
+		if !ok || len(m.Hosts) == 0 && !(m.AllowCommands && c.opt.AllowExec) {
+			continue
+		}
+		out = append(out, SecretInfo{Name: s.Name, Description: m.Description, Hosts: m.Hosts, AllowCommands: m.AllowCommands && c.opt.AllowExec})
+	}
+	return out, nil
+}
+
+// SecretMetas returns the owner's notes for every secret.
+func (c *Core) SecretMetas() (map[string]policy.SecretMeta, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.st == nil {
+		return nil, ErrLocked
+	}
+	out := map[string]policy.SecretMeta{}
+	for k, v := range c.st.Secrets {
+		out[k] = v
+	}
+	return out, nil
+}
+
+func (c *Core) SetSecretMeta(name string, m policy.SecretMeta) error {
+	if err := m.Validate(); err != nil {
+		return err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.st == nil {
+		return ErrLocked
+	}
+	c.st.Secrets[name] = m
+	c.log("secret_meta", "web", map[string]any{"name": name, "hosts": m.Hosts, "commands": m.AllowCommands})
+	return c.saveLocked()
+}
+
+func (c *Core) DeleteSecretMeta(name string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.st == nil {
+		return ErrLocked
+	}
+	delete(c.st.Secrets, name)
+	return c.saveLocked()
+}
+
 func (c *Core) Connections() ([]policy.Connection, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -890,6 +967,44 @@ func (c *Core) submitLocked(t Token, profile string, params map[string]string, r
 	if err != nil {
 		return Request{}, err
 	}
+	return c.enqueueLocked(t, profile, params, p, a, reason, notify)
+}
+
+// SubmitCall queues a request the agent wrote itself. Only tokens without a
+// profile limit may do this, because a limited token was meant to be narrow.
+func (c *Core) SubmitCall(t Token, call policy.Call, reason string) (Request, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.st == nil {
+		return Request{}, ErrLocked
+	}
+	if len(t.Profiles) > 0 {
+		c.log("request_forbidden", t.Name, map[string]any{"profile": policy.AdhocProfile})
+		return Request{}, ErrForbidden
+	}
+	if call.Exec != nil && !c.opt.AllowExec {
+		return Request{}, ErrExecOff
+	}
+	meta := map[string]policy.SecretMeta{}
+	if l, err := c.Vault.List(); err == nil {
+		for _, m := range l {
+			if x, ok := c.st.Secrets[m.Name]; ok {
+				meta[m.Name] = x
+			}
+		}
+	}
+	p, err := policy.FromCall(call, meta)
+	if err != nil {
+		return Request{}, err
+	}
+	a, err := p.Render(nil)
+	if err != nil {
+		return Request{}, err
+	}
+	return c.enqueueLocked(t, policy.AdhocProfile, nil, p, a, reason, true)
+}
+
+func (c *Core) enqueueLocked(t Token, profile string, params map[string]string, p policy.Profile, a *policy.Action, reason string, notify bool) (Request, error) {
 	pending := 0
 	for _, r := range c.reqs {
 		if r.State == Pending && r.Caller == t.Name {
@@ -950,6 +1065,14 @@ func approvalText(r *Request, vi bool) string {
 	head := l["head"]
 	if r.Risk == policy.RiskHigh {
 		head = l["high"]
+	}
+	if r.Profile == policy.AdhocProfile {
+		// The agent wrote this one, so the command is the only thing to trust.
+		if vi {
+			head += "\n✍️ Agent tự soạn lệnh này, hãy đọc kỹ."
+		} else {
+			head += "\n✍️ The agent wrote this command itself. Read it carefully."
+		}
 	}
 	// Telegram drops messages over 4096 characters, which would leave the
 	// request invisible. Say so plainly when text is cut.

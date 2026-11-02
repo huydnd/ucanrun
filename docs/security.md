@@ -22,6 +22,7 @@
 | Gate | Without the access code every web path returns 401, except `/healthz`. |
 | Vault | One `age` file per secret. The key is wrapped with the master password using scrypt and is only in RAM while unlocked. |
 | State | Profiles and tokens are HMAC-signed with a key derived from the vault. A modified file refuses to unlock. |
+| Agent calls | A secret goes only to the hosts its owner listed, only in headers, and every call needs approval. Commands need a per-secret flag, the exec image and TOTP. |
 | Params | Escaped by position. Blocks `..`, control and bidi characters, and values that start a command line option. |
 | Approval | Bound to a hash of the action, expires in 2 minutes, silence means no. |
 | Choosing a secret | Only the approver chooses, from a declared list, recorded in the audit log. |

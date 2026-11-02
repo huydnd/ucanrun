@@ -31,12 +31,23 @@ The Start tab walks through four steps. Skip any step and return to it later wit
 
 1. **Connect Telegram:** create a bot with @BotFather, paste its token, and send `/pair <code>` to the bot. The code has 6 characters, lasts 3 minutes and is cancelled after 3 wrong tries.
 2. **Enable TOTP:** scan the QR code and save the 8 recovery codes. They are shown once.
-3. **Add a service:** pick it in Quick add, paste its token once and tick the actions, see [services and actions](catalog.md). For anything else use the [profile form](profiles.md).
+3. **Save a secret:** on the Secrets tab, paste the value, write one line on what it is for, and list the hosts it may be sent to, such as `api.github.com`. Without hosts, agents cannot use it.
 4. **Create an agent token:** choose your agent and the profiles it may use, then follow the instructions shown. The token goes into that agent's own MCP settings.
 
 The agent machine needs the `ucr` command: `docker cp ucanrun:/usr/local/bin/ucr ~/.local/bin/ucr`.
 
 Check it: `ucr profiles` with `UCANRUN_URL` and `UCANRUN_TOKEN` set, or call `list_profiles` from the agent.
+
+## How an agent uses a secret
+
+The agent calls the MCP tool `list_secrets`, then `call` with a header such as `Authorization: Bearer {{secret:github_token}}`. Rules:
+
+- The URL host must be one the secret allows.
+- Secrets go in headers only, never in the URL or body.
+- You approve every request; the message says the agent wrote it.
+- With the `exec` image, `run_command` can use secrets marked "allow in commands". These always need TOTP.
+
+For tighter control, the Advanced tab defines fixed actions agents may only fill in, see [fixed actions](catalog.md).
 
 ## Lost your phone
 
