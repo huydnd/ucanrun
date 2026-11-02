@@ -75,7 +75,7 @@ mod tests {
         let v = json!({"z": 1, "a": "x<y>&z", "n": {"k": [1, "two", true]}, "u": "\u{2028} line", "c": "\u{1}"});
         assert_eq!(
             to_string(&v),
-            r#"{"a":"x<y>&z","c":"\u0001","n":{"k":[1,"two",true]},"u":"  line","z":1}"#
+            r#"{"a":"x\u003cy\u003e\u0026z","c":"\u0001","n":{"k":[1,"two",true]},"u":"\u2028 line","z":1}"#
         );
     }
 }
