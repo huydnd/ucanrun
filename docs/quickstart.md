@@ -48,6 +48,15 @@ Muốn việc khác thì dùng [form tạo profile](profiles.md).
 3. Nối Claude Code: `claude mcp add --scope user ucanrun -- ucr mcp`.
 4. Kiểm tra: `ucr profiles`.
 
+## Cài lên điện thoại
+
+Mở trang bằng trình duyệt, nhập mã truy cập, rồi:
+
+- **Android, Chrome:** menu ⋮ → **Thêm vào Màn hình chính**.
+- **iPhone, Safari:** nút Chia sẻ → **Thêm vào MH chính**.
+
+App mở toàn màn hình như ứng dụng thường. iPhone giữ dữ liệu riêng cho app cài trên màn hình chính, nên phải nhập mã truy cập thêm một lần. App không lưu dữ liệu kho để dùng offline, nên cần có mạng.
+
 ## Dùng hằng ngày
 
 - Agent xin làm việc, bạn nhận tin trên Telegram và bấm **Duyệt** hoặc **Từ chối**. Không bấm trong 2 phút thì coi như từ chối.
