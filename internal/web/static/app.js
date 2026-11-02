@@ -184,7 +184,7 @@ const templates = {
 
 function newDraft(over) {
   const d = Object.assign({description: "", name: "", nameTouched: false, kind: "http", method: "GET", url: "", auth: "none", authHeader: "", secret: "",
-    choices: [], bodyMode: "none", jsonRows: [], raw: "", rawType: "text/plain", params: [], approval: "ask", argv: "", envRows: [], extraHeaders: {}, timeout: 0}, JSON.parse(JSON.stringify(over || {})));
+    choices: [], stdinSecret: "", stdin: "", fileRows: [], bodyMode: "none", jsonRows: [], raw: "", rawType: "text/plain", params: [], approval: "ask", argv: "", envRows: [], extraHeaders: {}, timeout: 0}, JSON.parse(JSON.stringify(over || {})));
   d.params = d.params.map(p => Object.assign({name: "", type: "slug", pattern: "", choices: "", required: true, description: "", sample: ""}, p));
   return d;
 }
@@ -216,8 +216,10 @@ function toProfile(d) {
     p.exec = {argv: d.argv.split("\n").map(s => s.trim()).filter(Boolean)};
     const rows = d.envRows.filter(r => r.key && r.secret);
     if (rows.length) p.exec.env = Object.fromEntries(rows.map(r => [r.key, `{{secret:${r.secret}}}`]));
-    if (d.stdin) p.exec.stdin = d.stdin;
-    if (d.files) p.exec.files = d.files;
+    if (d.stdinSecret) p.exec.stdin = `{{secret:${d.stdinSecret}}}`;
+    else if (d.stdin) p.exec.stdin = d.stdin;
+    const files = d.fileRows.filter(r => r.key && r.secret);
+    if (files.length) p.exec.files = Object.fromEntries(files.map(r => [r.key, `{{secret:${r.secret}}}`]));
     return p;
   }
   const headers = Object.assign({}, d.extraHeaders);
@@ -247,7 +249,11 @@ function fromProfile(p) {
     return base;
   });
   d.choices = p.secret_choices || [];
-  d.stdin = p.exec ? p.exec.stdin : undefined; d.files = p.exec ? p.exec.files : undefined;
+  if (p.exec) {
+    const m = (p.exec.stdin || "").match(/^\{\{secret:(.+?)\}\}$/);
+    if (m) d.stdinSecret = m[1]; else d.stdin = p.exec.stdin;
+    d.fileRows = Object.entries(p.exec.files || {}).map(([key, v]) => ({key, secret: (v.match(/\{\{secret:(.+?)\}\}/) || [])[1] || ""}));
+  }
   if (p.exec) {
     d.kind = "exec"; d.argv = p.exec.argv.join("\n");
     d.envRows = Object.entries(p.exec.env || {}).map(([key, v]) => ({key, secret: (v.match(/\{\{secret:(.+?)\}\}/) || [])[1] || ""}));
@@ -384,8 +390,21 @@ function renderBuilder(body, d, secrets) {
         return h("div", {class: "kv"}, k, secretSelect(r.secret, v => { r.secret = v; refresh(); }),
           h("button", {"aria-label": "Xoá", onclick: () => { d.envRows.splice(i, 1); drawAuth(); refresh(); }}, "×"));
       });
-      fill(authBox, h("p", {class: "muted"}, "Secret được truyền qua biến môi trường, không lộ trên dòng lệnh."), rows,
-        h("button", {onclick: () => { d.envRows.push({key: "", secret: ""}); drawAuth(); }}, "+ Thêm biến"));
+      const fileRows = d.fileRows.map((r, i) => {
+        const k = h("input", {placeholder: "id_key", "aria-label": "Tên file", autocomplete: "off"}); k.value = r.key;
+        k.addEventListener("input", () => { r.key = k.value; refresh(); });
+        return h("div", {class: "kv"}, k, secretSelect(r.secret, v => { r.secret = v; refresh(); }),
+          h("button", {"aria-label": "Xoá file", onclick: () => { d.fileRows.splice(i, 1); drawAuth(); refresh(); }}, "×"));
+      });
+      fill(authBox,
+        h("h3", null, "Mật khẩu đưa vào chương trình"),
+        h("small", {class: "muted"}, "Dùng cho sudo -S và các lệnh đọc mật khẩu từ đầu vào."),
+        select(d.stdinSecret, [["", "Không dùng"]].concat(secrets.map(s => [s.name, s.name])), v => { d.stdinSecret = v; refresh(); }, "Mật khẩu stdin"),
+        h("h3", {class: "gap"}, "File tạm từ secret"),
+        h("small", {class: "muted"}, "Như khoá SSH. Tạo trong thư mục chạy, xoá ngay sau khi xong."),
+        fileRows, h("button", {onclick: () => { d.fileRows.push({key: "", secret: ""}); drawAuth(); }}, "+ Thêm file"),
+        h("h3", {class: "gap"}, "Biến môi trường"),
+        rows, h("button", {onclick: () => { d.envRows.push({key: "", secret: ""}); drawAuth(); }}, "+ Thêm biến"));
       return;
     }
     const kids = [select(d.auth, [["none", "Không cần đăng nhập"], ["bearer", "Bearer token (phổ biến nhất)"], ["token", "Token kiểu Gitea, GitHub"], ["header", "Header riêng, như X-Api-Key"]],
