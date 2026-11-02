@@ -137,7 +137,12 @@ fn client() -> &'static reqwest::Client {
     })
 }
 
-async fn run_http(h: &HttpSpec, get: &dyn Fn(&str) -> String, timeout: Duration) -> RunResult {
+// The getter is Sync so the run future can move between threads.
+async fn run_http(
+    h: &HttpSpec,
+    get: &(dyn Fn(&str) -> String + Sync),
+    timeout: Duration,
+) -> RunResult {
     let Ok(method) = reqwest::Method::from_bytes(h.method.as_bytes()) else {
         return fail("bad request");
     };
@@ -210,7 +215,11 @@ fn make_home() -> std::io::Result<std::path::PathBuf> {
     }
 }
 
-async fn run_exec(e: &ExecSpec, get: &dyn Fn(&str) -> String, timeout: Duration) -> RunResult {
+async fn run_exec(
+    e: &ExecSpec,
+    get: &(dyn Fn(&str) -> String + Sync),
+    timeout: Duration,
+) -> RunResult {
     // A private HOME stops one run from planting config for the next.
     let Ok(home) = make_home() else {
         return fail("could not prepare a working directory");
@@ -222,7 +231,7 @@ async fn run_exec(e: &ExecSpec, get: &dyn Fn(&str) -> String, timeout: Duration)
 
 async fn exec_in(
     e: &ExecSpec,
-    get: &dyn Fn(&str) -> String,
+    get: &(dyn Fn(&str) -> String + Sync),
     timeout: Duration,
     home: &std::path::Path,
 ) -> RunResult {
