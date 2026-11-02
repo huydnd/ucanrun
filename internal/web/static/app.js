@@ -177,10 +177,11 @@ const errorText = [
   [/auth needs either one secret or a list/, "Chọn một secret, hoặc tích các secret được chọn khi duyệt."],
   [/connection name must/, "Tên kết nối chỉ gồm chữ thường, số, dấu gạch."],
   [/connection is used by: (.+)/, m => `Kết nối đang được dùng bởi: ${m[1]}. Xoá các hành động đó trước.`],
-  [/profile "(.+)" would break/, m => `Thay đổi này làm hỏng hành động "${m[1]}".`],
+  // Name the action and say why, so the fix is obvious.
+  [/profile "(.+?)" would break: (.+)/, m => `Thay đổi này làm hỏng hành động "${m[1]}": ${viErr(m[2])}`],
   [/unknown connection/, "Kết nối không tồn tại."],
   [/secret_choices is required/, "Hãy tích ít nhất một secret được phép chọn."],
-  [/secret choice needs a human/, "Chọn secret khi duyệt thì không thể tự chạy."],
+  [/secret choice needs a human/, "Chọn secret khi duyệt thì phải có người duyệt. Đổi hành động đó sang \"Luôn hỏi tôi\" trước."],
 ];
 function viErr(msg) {
   for (const [re, t] of errorText) { const m = msg.match(re); if (m) return tr(typeof t === "function" ? t(m) : t); }

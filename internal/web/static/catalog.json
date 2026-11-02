@@ -36,7 +36,6 @@
      "name": "github-whoami",
      "description": "Xem tài khoản GitHub của token",
      "risk": "low",
-     "auto_approve": true,
      "http": {
       "method": "GET",
       "url": "/user"
