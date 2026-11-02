@@ -320,10 +320,12 @@ async function viewProfiles(body) {
           } catch (e) { err.textContent = viErr(e.message); }
         }}, "Thêm") : null, h("button", {onclick: () => openBuilder(fromProfile(c.profile))}, "Tuỳ chỉnh")), err));
   };
-  const groups = [...new Set(catalog.map(c => c.group))];
+  const execOn = !!(state.status && state.status.exec);
+  const usable = catalog.filter(c => execOn || !c.profile.exec);
+  const groups = [...new Set(usable.map(c => c.group))];
   fill(body, h("div", {class: "card"}, h("h2", null, "Thêm nhanh"),
     h("p", {class: "muted"}, "Dán token của dịch vụ rồi bấm Thêm, không cần cấu hình gì khác."),
-    groups.map(g => h("div", null, h("h3", null, g), h("div", {class: "tiles"}, catalog.filter(c => c.group === g).map(catalogCard))))),
+    groups.map(g => h("div", null, h("h3", null, g), h("div", {class: "tiles"}, usable.filter(c => c.group === g).map(catalogCard))))),
   h("div", {class: "card"}, h("h2", null, "Tự tạo profile"),
     h("p", {class: "muted"}, "Profile là một việc cụ thể bạn cho phép agent xin làm."),
     h("div", {class: "row"}, Object.values(templates).map(t => h("button", {onclick: () => openBuilder(newDraft(t.d))}, t.label)))),
@@ -376,8 +378,8 @@ function renderBuilder(body, d, secrets) {
       h("small", {class: "muted"}, "Tên máy luôn cố định, agent chỉ điền được các giá trị ở mục 4."));
   };
   const step2 = h("section", {class: "card"}, h("h3", null, "2. Gọi tới đâu"),
-    choiceGroup("kind", d.kind, [{value: "http", title: "Gọi API", help: "An toàn hơn, nên dùng"}, {value: "exec", title: "Chạy lệnh", help: "Nâng cao, chạy trong container"}],
-      v => { d.kind = v; drawWhere(); drawAuth(); refresh(); }), where);
+    state.status && state.status.exec ? choiceGroup("kind", d.kind, [{value: "http", title: "Gọi API", help: "An toàn hơn, nên dùng"}, {value: "exec", title: "Chạy lệnh", help: "Nâng cao, chạy trong container"}],
+      v => { d.kind = v; drawWhere(); drawAuth(); refresh(); }) : null, where);
 
   // 3. Credentials
   const authBox = h("div");

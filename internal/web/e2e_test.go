@@ -838,6 +838,58 @@ func TestGateBlocksEverythingWithoutCode(t *testing.T) {
 	}
 }
 
+func TestLoadGateToken(t *testing.T) {
+	dir := t.TempDir()
+	a, created, err := LoadGateToken(dir, "")
+	if err != nil || !created || len(a) < 20 {
+		t.Fatalf("%q %v %v", a, created, err)
+	}
+	fi, _ := os.Stat(filepath.Join(dir, "gate.token"))
+	if fi.Mode().Perm() != 0o600 {
+		t.Fatalf("mode %o", fi.Mode().Perm())
+	}
+	b, created, _ := LoadGateToken(dir, "")
+	if b != a || created {
+		t.Fatal("code changed on restart")
+	}
+	if c, _, _ := LoadGateToken(dir, "explicit"); c != "explicit" {
+		t.Fatal("explicit value ignored")
+	}
+}
+
+func TestExecOffByDefault(t *testing.T) {
+	e := setup(t, time.Minute)
+	p := policy.Profile{Name: "e", Risk: policy.RiskLow, Exec: &policy.ExecSpec{Argv: []string{"/usr/bin/git", "--version"}}}
+	if code, _ := e.req("PUT", "/api/profiles", p); code == 200 {
+		t.Fatal("exec profile saved while exec is off")
+	}
+	_, m := e.req("POST", "/api/profiles/preview", map[string]any{"profile": p})
+	if m["error"] == nil {
+		t.Fatal("preview allowed exec")
+	}
+	// A stored exec profile, as after turning the option off, must not run.
+	dir := t.TempDir()
+	on, _ := core.New(core.Options{DataDir: dir, WorkFactor: 10, AllowExec: true})
+	defer on.Close()
+	if err := on.Setup([]byte(pass)); err != nil {
+		t.Fatal(err)
+	}
+	if err := on.PutProfile(p); err != nil {
+		t.Fatal(err)
+	}
+	val, _ := on.CreateToken("t", nil)
+	tk, _ := on.Authenticate(val)
+	on.Lock("test")
+	off, _ := core.New(core.Options{DataDir: dir, WorkFactor: 10})
+	defer off.Close()
+	if err := off.Login([]byte(pass), ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := off.Submit(tk, "e", nil, ""); err == nil {
+		t.Fatal("stored exec profile ran while exec is off")
+	}
+}
+
 func TestSetupDisabledWithoutToken(t *testing.T) {
 	dir := t.TempDir()
 	c, _ := core.New(core.Options{DataDir: dir, WorkFactor: 10})

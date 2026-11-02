@@ -46,6 +46,7 @@ var (
 	ErrForbidden  = errors.New("forbidden")
 	ErrBusy       = errors.New("too many pending requests")
 	ErrLoginBusy  = errors.New("login in progress")
+	ErrExecOff    = errors.New("chạy lệnh đang tắt, đặt UCANRUN_ENABLE_EXEC=1 và dùng image exec")
 	ErrBadTOTP    = errors.New("sai mã TOTP")
 	ErrNeedTOTP   = errors.New("cần mã TOTP")
 	ErrDecided    = errors.New("yêu cầu đã được xử lý hoặc hết hạn")
@@ -89,7 +90,10 @@ type Options struct {
 	ApprovalTTL time.Duration
 	TelegramAPI string // override for tests
 	WorkFactor  int
-	Now         func() time.Time
+	// AllowExec permits profiles that run programs. Off by default: the default
+	// image only calls APIs.
+	AllowExec bool
+	Now       func() time.Time
 }
 
 type Core struct {
@@ -444,9 +448,15 @@ func (c *Core) Profiles() ([]policy.Profile, error) {
 	return out, nil
 }
 
+// ExecEnabled reports whether profiles may run programs.
+func (c *Core) ExecEnabled() bool { return c.opt.AllowExec }
+
 func (c *Core) PutProfile(p policy.Profile) error {
 	if err := p.Validate(); err != nil {
 		return err
+	}
+	if p.Exec != nil && !c.opt.AllowExec {
+		return ErrExecOff
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -600,6 +610,9 @@ func (c *Core) Submit(t Token, profile string, params map[string]string, reason 
 	p, ok := c.st.Profiles[profile]
 	if !ok {
 		return Request{}, ErrNotFound
+	}
+	if p.Exec != nil && !c.opt.AllowExec {
+		return Request{}, ErrExecOff
 	}
 	a, err := p.Render(params)
 	if err != nil {
@@ -871,6 +884,10 @@ func (c *Core) Preview(p policy.Profile, sample map[string]string) Preview {
 	out := Preview{Warnings: []string{}}
 	if err := p.Validate(); err != nil {
 		out.Error = err.Error()
+		return out
+	}
+	if p.Exec != nil && !c.opt.AllowExec {
+		out.Error = ErrExecOff.Error()
 		return out
 	}
 	out.Warnings = append(out.Warnings, p.Lint()...)

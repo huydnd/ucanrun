@@ -40,4 +40,4 @@
 
 ## Sao lưu
 
-`backup.sh` sao lưu `data/` lúc 03:00. Secret vẫn ở dạng mã hoá, cần mật khẩu chính mới đọc được. Giữ bản gốc của secret quan trọng trong Bitwarden.
+Sao lưu volume `data`. Secret vẫn ở dạng mã hoá, cần mật khẩu chính mới đọc được. Giữ bản gốc của secret quan trọng trong trình quản lý mật khẩu.

@@ -13,6 +13,7 @@ Agent <──── kết quả ───────────────┘
 ## Tài liệu
 
 - [Bắt đầu nhanh](docs/quickstart.md)
+- [Cấu hình](docs/configuration.md)
 - [Danh mục mẫu](docs/catalog.md): thêm dịch vụ bằng một lần bấm.
 - [Tạo profile](docs/profiles.md), gồm chọn secret trên Telegram.
 - [Lệnh root trên máy chủ](docs/server-root.md)
@@ -22,11 +23,14 @@ Agent <──── kết quả ───────────────┘
 ## Chạy nhanh
 
 ```bash
-docker compose -f deploy/compose.yml up -d
+git clone <repo> && cd ucanrun
+docker compose up -d
 docker logs ucanrun
 ```
 
-Mở `http://127.0.0.1:8780` rồi làm theo [Bắt đầu nhanh](docs/quickstart.md).
+Không cần tạo file cấu hình. Mở `http://127.0.0.1:8780`, nhập mã truy cập trong log, rồi làm theo [Bắt đầu nhanh](docs/quickstart.md).
+
+Mặc định, image chỉ có binary và chỉ gọi được API. Muốn chạy lệnh, xem [cấu hình](docs/configuration.md).
 
 ## Phát triển
 
@@ -36,3 +40,7 @@ go test -race ./...
 ```
 
 Biến `UCANRUN_LIVE_TG_TOKEN`, `UCANRUN_LIVE_TG_CHAT` bật bài test với Bot API thật.
+
+## Giấy phép
+
+[Apache-2.0](LICENSE)

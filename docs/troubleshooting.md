@@ -2,13 +2,14 @@
 
 | Triệu chứng | Nguyên nhân | Cách xử lý |
 |---|---|---|
-| Chỉ thấy ô "Mã truy cập" | Trình duyệt chưa nhập mã cổng | Lấy mã trong `.env`, xem [Bắt đầu nhanh](quickstart.md) |
+| Chỉ thấy ô "Mã truy cập" | Trình duyệt chưa nhập mã cổng | Chạy `docker exec ucanrun ucr gate` |
 | Agent nhận lỗi 423 | Kho đang khoá | Đăng nhập web |
 | Không có tin Telegram | Kho khoá, hoặc chưa ghép nối | Đăng nhập, xem **Cài đặt** |
 | `/pair` không phản hồi | Mã sai, hết 3 phút, hoặc sai 3 lần | Tạo mã mới trong **Cài đặt** |
-| Trang báo 502 | Container không chạy hoặc URL tunnel sai | `docker ps`, xem log `cloudflare-tunnel` |
+| Trang báo 502 | Container không chạy hoặc URL tunnel sai | `docker ps`, kiểm tra địa chỉ reverse proxy |
 | Setup token đổi liên tục | Container khởi động lại, thường do thiếu RAM | `docker inspect ucanrun`, cần `mem_limit` từ 768m |
 | `secret "x" unavailable` | Kho chưa có secret này | Thêm ở tab **Secret** |
+| Không có nút Chạy lệnh | Đang dùng image mặc định | Xem [cấu hình](configuration.md) |
 | Lỗi 429 | Quá 5 yêu cầu chờ, hoặc 30 yêu cầu trong 10 phút | Chờ, hoặc xử lý các yêu cầu đang chờ |
 | Không đăng nhập được | Sai nhiều lần | Chờ tới 60 giây rồi thử lại |
 | Không lưu được profile | Lỗi hiện dưới ô xem trước | Sửa theo thông báo |

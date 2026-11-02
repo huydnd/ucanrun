@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -40,14 +41,17 @@ Server, on the machine that holds the data directory:
   ucr list                  list secret names
   ucr rm NAME               delete a secret
   ucr audit-verify          check the audit log chain
+  ucr gate                  print the web access code
+  ucr health                exit 0 if the server answers
 
 Agent:
   ucr profiles              list permitted actions
   ucr run PROFILE [k=v...]  request an action (--reason "text")
   ucr mcp                   stdio MCP server
 
-Environment: UCANRUN_DATA, UCANRUN_WEB_ADDR, UCANRUN_AGENT_ADDR,
-UCANRUN_SECURE_COOKIE, UCANRUN_APPROVAL_TTL, UCANRUN_URL, UCANRUN_TOKEN
+Environment: UCANRUN_PUBLIC_URL, UCANRUN_GATE_TOKEN, UCANRUN_GATE=off,
+UCANRUN_ENABLE_EXEC=1, UCANRUN_DATA, UCANRUN_WEB_ADDR, UCANRUN_AGENT_ADDR,
+UCANRUN_APPROVAL_TTL, UCANRUN_URL, UCANRUN_TOKEN
 `
 
 func env(k, d string) string {
@@ -90,6 +94,14 @@ func main() {
 		} else {
 			err = vault.New(filepath.Join(dataDir(), "vault")).Delete(args[0])
 		}
+	case "health":
+		err = health()
+	case "gate":
+		var tok string
+		tok, _, err = web.LoadGateToken(dataDir(), os.Getenv("UCANRUN_GATE_TOKEN"))
+		if err == nil {
+			fmt.Println(tok)
+		}
 	case "audit-verify":
 		var n int
 		n, err = audit.Verify(filepath.Join(dataDir(), "audit.jsonl"))
@@ -127,7 +139,8 @@ func serve() error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	c, err := core.New(core.Options{DataDir: dir, ApprovalTTL: ttl, TelegramAPI: os.Getenv("UCANRUN_TELEGRAM_API")})
+	c, err := core.New(core.Options{DataDir: dir, ApprovalTTL: ttl, TelegramAPI: os.Getenv("UCANRUN_TELEGRAM_API"),
+		AllowExec: os.Getenv("UCANRUN_ENABLE_EXEC") == "1"})
 	if err != nil {
 		return err
 	}
@@ -140,10 +153,26 @@ func serve() error {
 		// Goes to stdout, not the audit log, and stops working after setup.
 		fmt.Printf("ucanrun chưa khởi tạo. Setup token: %s\n", setup)
 	}
-	s := web.New(c, setup, filepath.Join(dir, "audit.jsonl"), os.Getenv("UCANRUN_SECURE_COOKIE") == "1")
-	s.GateToken = os.Getenv("UCANRUN_GATE_TOKEN")
-	if s.GateToken == "" {
-		slog.Warn("UCANRUN_GATE_TOKEN is empty, the web UI has no access gate")
+	public, err := publicURL()
+	if err != nil {
+		return err
+	}
+	s := web.New(c, setup, filepath.Join(dir, "audit.jsonl"), strings.HasPrefix(public, "https://"))
+	if os.Getenv("UCANRUN_GATE") == "off" {
+		slog.Warn("UCANRUN_GATE=off: the web UI has no access gate")
+	} else {
+		tok, created, err := web.LoadGateToken(dir, os.Getenv("UCANRUN_GATE_TOKEN"))
+		if err != nil {
+			return err
+		}
+		s.GateToken = tok
+		// Shown until setup finishes, so a restart mid-setup does not lose it.
+		if created || setup != "" {
+			fmt.Printf("Mã truy cập: %s\n", tok)
+		}
+	}
+	if setup != "" {
+		fmt.Printf("Mở %s để khởi tạo. Xem lại mã bằng: ucr gate\n", public)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -182,6 +211,41 @@ func harden() {
 		slog.Warn("could not disable dumps", "err", e)
 	}
 	syscall.Setrlimit(syscall.RLIMIT_CORE, &syscall.Rlimit{})
+}
+
+// publicURL returns the address people use, which also decides cookie security.
+func publicURL() (string, error) {
+	v := strings.TrimRight(os.Getenv("UCANRUN_PUBLIC_URL"), "/")
+	if v == "" {
+		_, port, err := net.SplitHostPort(env("UCANRUN_WEB_ADDR", "127.0.0.1:8780"))
+		if err != nil {
+			return "", err
+		}
+		return "http://127.0.0.1:" + port, nil
+	}
+	u, err := url.Parse(v)
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+		return "", errors.New("UCANRUN_PUBLIC_URL must look like https://ucanrun.example.com")
+	}
+	return v, nil
+}
+
+// health is the container health check. The default image has no shell or wget.
+func health() error {
+	_, port, err := net.SplitHostPort(env("UCANRUN_WEB_ADDR", "127.0.0.1:8780"))
+	if err != nil {
+		return err
+	}
+	cl := &http.Client{Timeout: 3 * time.Second}
+	resp, err := cl.Get("http://127.0.0.1:" + port + "/healthz")
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("status %d", resp.StatusCode)
+	}
+	return nil
 }
 
 func add(args []string) error {

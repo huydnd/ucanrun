@@ -322,6 +322,7 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	if out["authed"] == true {
 		out["telegram"] = s.C.TelegramStatus()
 		out["totp"] = s.C.TOTPEnabled()
+		out["exec"] = s.C.ExecEnabled()
 	}
 	writeJSON(w, 200, out)
 }

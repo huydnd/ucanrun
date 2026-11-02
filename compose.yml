@@ -1,0 +1,26 @@
+# git clone, then `docker compose up -d`. No other setup is needed.
+# Set UCANRUN_PUBLIC_URL when serving from a domain.
+services:
+  ucanrun:
+    image: ucanrun:local
+    build: .
+    container_name: ucanrun
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 128
+    mem_limit: 768m # scrypt needs about 256 MiB per unlock
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    environment:
+      - UCANRUN_PUBLIC_URL=${UCANRUN_PUBLIC_URL:-}
+      - UCANRUN_GATE_TOKEN=${UCANRUN_GATE_TOKEN:-}
+    volumes:
+      - ucanrun-data:/data
+    ports:
+      - "127.0.0.1:${UCANRUN_PORT:-8780}:8780"
+      - "127.0.0.1:${UCANRUN_AGENT_PORT:-8781}:8781"
+
+volumes:
+  ucanrun-data:
