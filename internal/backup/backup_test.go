@@ -309,7 +309,6 @@ func TestFailedRestoreLeavesTargetUnchanged(t *testing.T) {
 	}
 }
 
-
 func withLimits(t *testing.T, file, total int64) {
 	f, tt := MaxFileSize, MaxTotalSize
 	MaxFileSize, MaxTotalSize = file, total
