@@ -2412,7 +2412,10 @@ async fn ucr(env: &[(&str, &str)], args: &[&str], stdin: Option<&str>) -> Out {
     let mut child = cmd.spawn().unwrap();
     let mut sin = child.stdin.take().unwrap();
     if let Some(s) = stdin {
-        sin.write_all(s.as_bytes()).await.unwrap();
+        // The child may exit without reading stdin; a closed pipe is fine.
+        if let Err(e) = sin.write_all(s.as_bytes()).await {
+            assert_eq!(e.kind(), std::io::ErrorKind::BrokenPipe, "{e}");
+        }
     }
     drop(sin);
     let o = child.wait_with_output().await.unwrap();
