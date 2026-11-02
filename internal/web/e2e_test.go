@@ -3,6 +3,9 @@ package web
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -968,6 +971,36 @@ func TestTelegramSpeaksEnglishByDefault(t *testing.T) {
 	defer vi.Close()
 	if got := vi.Translate("sai mã TOTP"); got != "sai mã TOTP" {
 		t.Fatal(got)
+	}
+}
+
+func TestNewerStateIsExplained(t *testing.T) {
+	e := setup(t, time.Minute)
+	e.req("POST", "/api/lock", nil)
+	p := filepath.Join(e.dir, "state.json")
+	var f struct {
+		MAC  string         `json:"mac"`
+		Data map[string]any `json:"data"`
+	}
+	raw, _ := os.ReadFile(p)
+	json.Unmarshal(raw, &f)
+	f.Data["version"] = 99
+	d, _ := json.Marshal(f.Data)
+	if err := e.c.Vault.Unlock([]byte(pass)); err != nil {
+		t.Fatal(err)
+	}
+	k, _ := e.c.Vault.MACKey()
+	e.c.Vault.Lock()
+	m := hmac.New(sha256.New, k)
+	m.Write(d)
+	out, _ := json.Marshal(map[string]any{"mac": hex.EncodeToString(m.Sum(nil)), "data": json.RawMessage(d)})
+	os.WriteFile(p, out, 0o600)
+	code, r := e.req("POST", "/api/login", map[string]string{"passphrase": pass})
+	if code != 409 || !strings.Contains(fmt.Sprint(r["error"]), "bản mới hơn") {
+		t.Fatalf("%d %v", code, r)
+	}
+	if !e.c.Locked() {
+		t.Fatal("unlocked with a newer state")
 	}
 }
 
