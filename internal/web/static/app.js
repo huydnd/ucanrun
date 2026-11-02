@@ -73,7 +73,7 @@ function renderLogin(locked) {
   }, locked ? h("p", {class: "muted"}, "Kho đang khoá, agent chưa chạy được lệnh nào.") : null)));
 }
 
-const tabs = {start: "Bắt đầu", requests: "Yêu cầu", secrets: "Secret", profiles: "Profile", tokens: "Token agent", settings: "Cài đặt", audit: "Nhật ký"};
+const tabs = {start: "Bắt đầu", requests: "Yêu cầu", secrets: "Secret", tokens: "Token agent", profiles: "Nâng cao", settings: "Cài đặt", audit: "Nhật ký"};
 
 function renderShell() {
   const body = h("main");
@@ -119,23 +119,42 @@ async function viewRequests(body) {
     rest.length ? h("h2", null, "Gần đây") : null, rest.slice(0, 30).map(card));
 }
 
-async function viewSecrets(body) {
+async function viewSecrets(body, editing) {
   const list = await api("GET", "/api/secrets");
-  const n = field("Tên", {autocomplete: "off"});
-  const v = field("Giá trị", {type: "password", autocomplete: "off"});
+  const cur = editing ? list.find(x => x.name === editing) : null;
+  const n = field("Tên", {autocomplete: "off", spellcheck: "false", placeholder: "github_token"});
+  const v = field(cur ? "Giá trị mới (để trống nếu giữ nguyên)" : "Giá trị", {type: "password", autocomplete: "off"});
+  const desc = h("textarea", {class: "short", "aria-label": "Dùng để làm gì", placeholder: "Ví dụ: Token GitHub cá nhân, đọc repo và tạo issue"});
+  const hosts = field("Máy chủ được phép gửi tới", {autocomplete: "off", spellcheck: "false", placeholder: "api.github.com"});
   const multi = h("textarea", {class: "short", spellcheck: "false", "aria-label": "Giá trị nhiều dòng", hidden: true});
   const toggle = h("input", {type: "checkbox", onchange: e => { multi.hidden = !e.target.checked; v.el.hidden = e.target.checked; }});
-  fill(body,
-    form("Thêm hoặc thay secret", [n, v], "Lưu", async () => {
-      await api("PUT", "/api/secrets/" + encodeURIComponent(n.input.value), {value: toggle.checked ? multi.value : v.input.value});
-      viewSecrets(body);
-    }, h("div", null, h("p", {class: "muted"}, "Giá trị chỉ ghi, không có cách xem lại trên giao diện. Nhập trùng tên để thay."),
-      h("label", {class: "check"}, toggle, h("span", null, "Nhiều dòng, như khoá SSH")), multi)),
+  const cmd = h("input", {type: "checkbox"});
+  if (cur) {
+    n.input.value = cur.name; n.input.readOnly = true;
+    desc.value = cur.description || ""; hosts.input.value = (cur.hosts || []).join(", "); cmd.checked = !!cur.allow_commands;
+  }
+  const execOn = !!(state.status && state.status.exec);
+  const save = form(cur ? "Sửa secret" : "Lưu secret mới", [n, v], "Lưu", async () => {
+    const hs = hosts.input.value.split(/[\s,]+/).map(x => x.trim().toLowerCase()).filter(Boolean);
+    await api("PUT", "/api/secrets/" + encodeURIComponent(n.input.value.trim()), {
+      value: toggle.checked ? multi.value : v.input.value, description: desc.value.trim(), hosts: hs, allow_commands: cmd.checked});
+    viewSecrets(body);
+  }, h("div", null,
+    h("label", {class: "check"}, toggle, h("span", null, "Nhiều dòng, như khoá SSH")), multi,
+    h("label", null, h("span", null, "Dùng để làm gì"), desc, h("small", {class: "muted"}, "Agent đọc dòng này để biết khi nào dùng secret. Không ghi giá trị vào đây.")),
+    hosts.el, h("small", {class: "muted"}, "Agent chỉ gửi được secret tới các máy chủ này, cách nhau bằng dấu phẩy. Dùng *.example.com cho mọi tên miền con. Để trống thì agent không dùng được."),
+    execOn ? h("label", {class: "check"}, cmd, h("span", null, "Cho dùng trong lệnh agent tự soạn (luôn cần TOTP)")) : null,
+    h("p", {class: "muted"}, "Giá trị chỉ ghi, không có cách xem lại trên giao diện.")));
+  if (cur) save.append(h("div", {class: "row"}, h("button", {onclick: () => viewSecrets(body)}, "Huỷ")));
+  fill(body, save,
     h("div", {class: "card"}, h("h2", null, `Secret (${list.length})`),
-      list.length ? list.map(s => h("div", {class: "spread"}, h("span", null, h("code", null, s.name), h("div", {class: "muted"}, new Date(s.updated).toLocaleString())),
-        h("button", {class: "danger", onclick: async () => {
-          if (confirm(tr(`Xoá secret ${s.name}?`))) { await api("DELETE", "/api/secrets/" + encodeURIComponent(s.name)); viewSecrets(body); }
-        }}, "Xoá"))) : h("p", {class: "muted"}, "Chưa có secret.")));
+      list.length ? list.map(s => h("div", {class: "spread"}, h("span", null, h("code", null, s.name),
+          s.description ? h("div", null, s.description) : h("div", {class: "note"}, "Chưa có mô tả, agent sẽ không biết dùng vào việc gì."),
+          h("div", {class: "muted"}, (s.hosts && s.hosts.length ? "→ " + s.hosts.join(", ") : tr("agent không dùng trực tiếp")) + (s.allow_commands ? " · " + tr("dùng trong lệnh") : ""))),
+        h("span", null, h("button", {onclick: () => { viewSecrets(body, s.name); window.scrollTo(0, 0); }}, "Sửa"), " ",
+          h("button", {class: "danger", onclick: async () => {
+            if (confirm(tr(`Xoá secret ${s.name}?`))) { await api("DELETE", "/api/secrets/" + encodeURIComponent(s.name)); viewSecrets(body); }
+          }}, "Xoá")))) : h("p", {class: "muted"}, "Chưa có secret.")));
 }
 
 // --- Profile builder ---
@@ -170,6 +189,9 @@ const errorText = [
   [/env "(.+)" is not allowed/, m => `Không dùng được biến ${m[1]}, vì nó đổi cách chương trình chạy.`],
   [/high risk profile cannot auto/, "Mức cần TOTP không thể tự chạy."],
   [/a param may not/, "Giá trị mẫu không hợp lệ ở vị trí này."],
+  [/bad host "(.+?)"/, m => `Máy chủ "${m[1]}" không hợp lệ, hãy ghi dạng api.example.com.`],
+  [/value is required for a new secret/, "Secret mới cần có giá trị."],
+  [/description is limited/, "Mô tả tối đa 300 ký tự."],
   [/with a connection the url is a path/, "Với kết nối, chỉ ghi đường dẫn bắt đầu bằng /."],
   [/is set by the connection/, "Header này do kết nối đặt, profile không ghi đè được."],
   [/base url must/, "Địa chỉ gốc phải có dạng https://api.example.com, không có ? hay #."],
@@ -449,7 +471,8 @@ async function viewProfiles(body, keptImport) {
     } catch (e) { ioErr.textContent = viErr(e.message); }
   }}, "Xuất profile");
   const importOpenBtn = h("button", {type: "button", onclick: () => { fileInput.value = ""; fileInput.click(); }}, "Nhập profile");
-  fill(body, h("div", {class: "card"}, h("h2", null, "Thêm nhanh"),
+  fill(body, h("p", {class: "note"}, "Không bắt buộc. Thông thường chỉ cần lưu secret kèm mô tả ở tab Secret, agent tự soạn lệnh và bạn duyệt. Phần này để giới hạn chặt hơn: agent chỉ chạy đúng các hành động bạn định sẵn."),
+  h("div", {class: "card"}, h("h2", null, "Thêm nhanh"),
     h("p", {class: "muted"}, "Chọn dịch vụ, dán token một lần, rồi chọn các hành động agent được xin."),
     h("div", {class: "tiles"}, usable.map(serviceCard),
       h("div", {class: "tile"}, h("b", null, "Dịch vụ khác"), h("small", {class: "muted"}, "Mọi API dùng token: khai báo địa chỉ và cách đăng nhập."),
@@ -899,7 +922,7 @@ async function loadSteps() {
   const steps = [
     {key: "telegram", title: "Nối Telegram", why: "Để nhận yêu cầu duyệt trên điện thoại.", done: !!(s.telegram && s.telegram.paired)},
     {key: "totp", title: "Bật TOTP và lưu mã khôi phục", why: "Lớp bảo vệ thứ hai khi đăng nhập và duyệt việc rủi ro cao.", done: !!s.totp && s.recovery_left > 0},
-    {key: "service", title: "Thêm dịch vụ đầu tiên", why: "Dán token của dịch vụ, ví dụ GitHub.", done: profiles.length > 0},
+    {key: "service", title: "Lưu secret đầu tiên", why: "Kèm một dòng mô tả và máy chủ được phép gửi tới.", done: (await api("GET", "/api/secrets")).some(x => (x.hosts || []).length) || profiles.length > 0},
     {key: "agent", title: "Tạo token cho agent", why: "Để agent gửi được yêu cầu tới ucanrun.", done: tokens.length > 0},
   ];
   return {s, steps};
@@ -932,8 +955,8 @@ async function viewStart(body) {
   } else if (cur.key === "totp") {
     panel = totpCard(s, () => { state.startStep = null; redraw(); });
   } else if (cur.key === "service") {
-    panel = h("div", {class: "card"}, h("h2", null, "Thêm dịch vụ"), h("p", {class: "muted"}, "Tab Profile có sẵn các mẫu như GitHub, Cloudflare. Dán token rồi bấm Thêm."),
-      h("div", {class: "row"}, h("button", {class: "primary", onclick: () => { state.tab = "profiles"; renderShell(); }}, "Mở danh sách mẫu")));
+    panel = h("div", {class: "card"}, h("h2", null, "Lưu secret"), h("p", {class: "muted"}, "Mở tab Secret, dán token, viết một dòng nó dùng làm gì và máy chủ nhận nó, ví dụ api.github.com. Agent sẽ thấy tên và mô tả, không bao giờ thấy giá trị."),
+      h("div", {class: "row"}, h("button", {class: "primary", onclick: () => { state.tab = "secrets"; renderShell(); }}, "Mở tab Secret")));
   } else {
     const profiles = await api("GET", "/api/profiles");
     panel = agentTokenForm(profiles, (id, token) => { fill(body, head, agentGuide(id, token, () => { state.startStep = null; redraw(); })); window.scrollTo(0, 0); });

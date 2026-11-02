@@ -94,6 +94,15 @@ func (c *Core) Health() ([]HealthItem, error) {
 			used[n] = true
 		}
 	}
+	c.mu.Lock()
+	if c.st != nil {
+		for n, m := range c.st.Secrets {
+			if len(m.Hosts) > 0 || m.AllowCommands {
+				used[n] = true
+			}
+		}
+	}
+	c.mu.Unlock()
 	delete(used, policy.ChoiceRef) // a placeholder, not a stored secret
 	add("auto_write", autoWrite, "Không có profile tự chạy việc ghi.", "Profile tự chạy việc ghi hoặc chạy lệnh mà không ai duyệt.", "warn")
 	add("lint", linted, "Các profile không có cảnh báo.", "Profile có cảnh báo cấu hình, xem khi sửa profile.", "warn")

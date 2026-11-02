@@ -36,6 +36,7 @@ type State struct {
 	Version      int                          `json:"version"`
 	Profiles     map[string]policy.Profile    `json:"profiles"`
 	Connections  map[string]policy.Connection `json:"connections,omitempty"`
+	Secrets      map[string]policy.SecretMeta `json:"secrets,omitempty"`
 	Tokens       map[string]Token             `json:"tokens"`
 	Telegram     TelegramCfg                  `json:"telegram"`
 	TOTPEnabled  bool                         `json:"totp_enabled"`
@@ -120,6 +121,9 @@ func loadState(path string, key []byte) (*State, error) {
 	}
 	if st.Connections == nil {
 		st.Connections = map[string]policy.Connection{}
+	}
+	if st.Secrets == nil {
+		st.Secrets = map[string]policy.SecretMeta{}
 	}
 	return st, nil
 }
