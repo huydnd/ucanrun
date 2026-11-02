@@ -687,12 +687,21 @@ function totpCard(s, after) {
   return card;
 }
 
+function healthCard(items) {
+  const bad = items.filter(i => i.level === "bad").length, warn = items.filter(i => i.level === "warn").length;
+  const parts = [bad ? `${bad} lỗi` : "", warn ? `${warn} cảnh báo` : ""].filter(Boolean);
+  const title = "Sức khoẻ bảo mật" + (parts.length ? ` (${parts.join(", ")})` : " (ổn)");
+  return h("div", {class: "card"}, h("h2", null, title),
+    h("ul", {class: "health"}, items.map(i => h("li", null, h("span", {class: "dot " + i.level, "aria-hidden": "true"}), h("span", null, i.message,
+      (i.names || []).map(n => [" ", h("code", null, n)]))))));
+}
+
 async function viewSettings(body) {
-  const s = await api("GET", "/api/status");
+  const [s, health] = await Promise.all([api("GET", "/api/status"), api("GET", "/api/health")]);
   const o = field("Mật khẩu hiện tại", {type: "password", autocomplete: "current-password"});
   const n = field("Mật khẩu mới", {type: "password", autocomplete: "new-password"});
   const langSel = select(lang, [["vi", "Tiếng Việt"], ["en", "English"]], v => { try { localStorage.setItem("ucr_lang", v); } catch (_) {} location.reload(); }, "Ngôn ngữ");
-  fill(body, h("div", {class: "card"}, h("h2", null, "Ngôn ngữ"), langSel), telegramCard(s), totpCard(s), form("Đổi mật khẩu chính", [o, n], "Đổi", async () => {
+  fill(body, healthCard(health), h("div", {class: "card"}, h("h2", null, "Ngôn ngữ"), langSel), telegramCard(s), totpCard(s), form("Đổi mật khẩu chính", [o, n], "Đổi", async () => {
     await api("POST", "/api/passphrase", {old: o.input.value, new: n.input.value}); o.input.value = n.input.value = "";
   }));
 }
