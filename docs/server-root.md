@@ -38,4 +38,10 @@ Xoá khoá khỏi máy: `rm ~/ucanrun_key ~/ucanrun_key.pub`.
 
 ## Giới hạn
 
-Khoá máy chủ không được ghim: mỗi lần chạy có HOME mới nên SSH chấp nhận khoá lần đầu gặp. Kết nối chỉ đi trong máy qua mạng Docker, nên rủi ro thấp. 
+Khoá máy chủ không được ghim: mỗi lần chạy có HOME mới nên SSH chấp nhận khoá lần đầu gặp. Kết nối chỉ đi trong máy qua mạng Docker, nên rủi ro thấp.
+
+Luồng này đã chạy thật: duyệt trên Telegram có TOTP, `systemctl restart cron` thành công.
+
+## Lỗi thường gặp
+
+`sudo: 3 incorrect password attempts` nghĩa là stdin không phải mật khẩu sudo. Xem ô xem trước, phải là secret mật khẩu, không phải khoá SSH.
