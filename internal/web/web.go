@@ -69,7 +69,7 @@ func fail(w http.ResponseWriter, err error) {
 		code = http.StatusForbidden
 	case errors.Is(err, core.ErrNotFound), errors.Is(err, vault.ErrNotFound):
 		code = http.StatusNotFound
-	case errors.Is(err, core.ErrBusy):
+	case errors.Is(err, core.ErrBusy), errors.Is(err, core.ErrLoginBusy):
 		code = http.StatusTooManyRequests
 	}
 	writeJSON(w, code, map[string]string{"error": err.Error()})
@@ -86,9 +86,12 @@ func read(w http.ResponseWriter, r *http.Request, v any) bool {
 	return true
 }
 
-func secure(next http.Handler) http.Handler {
+func (s *Server) secure(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
+		if s.SecureCookie {
+			h.Set("Strict-Transport-Security", "max-age=31536000")
+		}
 		h.Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; img-src data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Frame-Options", "DENY")
@@ -234,6 +237,16 @@ func (s *Server) Handler() http.Handler {
 		}
 		writeJSON(w, 200, p)
 	}))
+	m.HandleFunc("POST /api/profiles/preview", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Profile policy.Profile    `json:"profile"`
+			Sample  map[string]string `json:"sample"`
+		}
+		if !read(w, r, &in) {
+			return
+		}
+		writeJSON(w, 200, s.C.Preview(in.Profile, in.Sample))
+	}))
 	m.HandleFunc("DELETE /api/profiles/{name}", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		if err := s.C.DeleteProfile(r.PathValue("name")); err != nil {
 			fail(w, err)
@@ -297,7 +310,7 @@ func (s *Server) Handler() http.Handler {
 		}
 		writeJSON(w, 200, map[string]bool{"ok": true})
 	}))
-	return secure(csrf(m))
+	return s.secure(csrf(m))
 }
 
 func (s *Server) status(w http.ResponseWriter, r *http.Request) {
@@ -345,9 +358,13 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "thử lại sau ít giây"})
 		return
 	}
+	if len(in.Passphrase) > 1024 {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "sai thông tin đăng nhập"})
+		return
+	}
 	err := s.C.Login([]byte(in.Passphrase), in.TOTP)
-	if errors.Is(err, core.ErrNeedTOTP) {
-		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": err.Error(), "need_totp": true})
+	if errors.Is(err, core.ErrLoginBusy) {
+		fail(w, err)
 		return
 	}
 	if err != nil {

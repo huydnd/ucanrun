@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
 	"sort"
 	"strings"
@@ -38,7 +40,10 @@ func Redact(s string, secrets [][]byte) string {
 		forms = append(forms, t, strings.TrimSpace(t),
 			base64.StdEncoding.EncodeToString(v), base64.RawStdEncoding.EncodeToString(v),
 			base64.URLEncoding.EncodeToString(v), base64.RawURLEncoding.EncodeToString(v),
-			hex.EncodeToString(v), url.QueryEscape(t))
+			hex.EncodeToString(v), strings.ToUpper(hex.EncodeToString(v)), url.QueryEscape(t), url.PathEscape(t))
+		if b, err := json.Marshal(t); err == nil {
+			forms = append(forms, string(b[1:len(b)-1]))
+		}
 	}
 	sort.Slice(forms, func(i, j int) bool { return len(forms[i]) > len(forms[j]) })
 	for _, f := range forms {
@@ -133,8 +138,15 @@ func (c *capped) Write(p []byte) (int, error) {
 }
 
 func runExec(ctx context.Context, e *ExecSpec, get func(string) string) Result {
+	// A private HOME stops one run from planting config for the next.
+	home, err := os.MkdirTemp("", "ucr-run-")
+	if err != nil {
+		return Result{Exit: -1, Output: "could not prepare a working directory"}
+	}
+	defer os.RemoveAll(home)
 	cmd := exec.CommandContext(ctx, e.Argv[0], e.Argv[1:]...)
-	cmd.Env = []string{"PATH=/usr/local/bin:/usr/bin:/bin", "HOME=/tmp"}
+	cmd.Dir = home
+	cmd.Env = []string{"PATH=/usr/local/bin:/usr/bin:/bin", "HOME=" + home, "GIT_TERMINAL_PROMPT=0"}
 	for k, v := range e.Env {
 		cmd.Env = append(cmd.Env, k+"="+Expand(v, get))
 	}
@@ -143,7 +155,7 @@ func runExec(ctx context.Context, e *ExecSpec, get func(string) string) Result {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 	cmd.WaitDelay = 2 * time.Second
-	err := cmd.Run()
+	err = cmd.Run()
 	r := Result{OK: err == nil, Output: out.b.String()}
 	if cmd.ProcessState != nil {
 		r.Exit = cmd.ProcessState.ExitCode()

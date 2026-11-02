@@ -171,3 +171,78 @@ func TestRunMissingSecretDoesNotExecute(t *testing.T) {
 		t.Fatal("ran without secret")
 	}
 }
+
+func TestURLEscapingByPosition(t *testing.T) {
+	p := &Profile{Name: "x", Risk: RiskLow, Params: []Param{{Name: "a", Pattern: `.+`, Required: true}},
+		HTTP: &HTTPSpec{Method: "GET", URL: "https://api.example/v1/repos/{{a}}/info?owner={{a}}"}}
+	for _, v := range []string{"..", "."} {
+		if _, err := p.Render(map[string]string{"a": v}); err == nil {
+			t.Fatalf("traversal %q accepted", v)
+		}
+	}
+	a, err := p.Render(map[string]string{"a": "x&admin=true"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(a.HTTP.URL, "?owner=x%26admin%3Dtrue") {
+		t.Fatalf("query injection: %s", a.HTTP.URL)
+	}
+}
+
+func TestFormBodyEscaped(t *testing.T) {
+	p := &Profile{Name: "z", Risk: RiskLow, Params: []Param{{Name: "n", Pattern: `.*`}},
+		HTTP: &HTTPSpec{Method: "POST", URL: "https://a.example/x", Body: "x={{n}}",
+			Headers: map[string]string{"Content-Type": "application/x-www-form-urlencoded"}}}
+	a, err := p.Render(map[string]string{"n": "1&role=admin"})
+	if err != nil || strings.Contains(a.HTTP.Body, "&role") {
+		t.Fatalf("%v %v", a, err)
+	}
+}
+
+func TestExecOptionInjection(t *testing.T) {
+	p := &Profile{Name: "y", Risk: RiskLow, Params: []Param{{Name: "u", Pattern: `.+`, Required: true}},
+		Exec: &ExecSpec{Argv: []string{"/usr/bin/git", "clone", "{{u}}"}}}
+	if _, err := p.Render(map[string]string{"u": "--upload-pack=touch /tmp/pwn"}); err == nil {
+		t.Fatal("option injection accepted")
+	}
+	p.Exec.Argv = []string{"/usr/bin/git", "--name={{u}}"}
+	if _, err := p.Render(map[string]string{"u": "-x"}); err != nil {
+		t.Fatalf("value after a literal option must stay legal: %v", err)
+	}
+}
+
+func TestValidateRejectsDangerousShapes(t *testing.T) {
+	for k := range map[string]bool{"LD_PRELOAD": true, "PATH": true, "GIT_SSH_COMMAND": true, "bad-name": true, "HTTPS_PROXY": true} {
+		p := &Profile{Name: "r", Risk: RiskLow, Exec: &ExecSpec{Argv: []string{"/usr/bin/git"}, Env: map[string]string{k: "x"}}}
+		if p.Validate() == nil {
+			t.Errorf("env %s accepted", k)
+		}
+	}
+	un := &Profile{Name: "q", Risk: RiskLow, Params: []Param{{Name: "n", Pattern: `.*`}}, HTTP: &HTTPSpec{Method: "GET", URL: "https://a.example/x"}}
+	if un.Validate() == nil {
+		t.Error("unused param accepted")
+	}
+}
+
+func TestControlCharsRejected(t *testing.T) {
+	p := httpProfile()
+	p.Params[1].Pattern = `(?s).*`
+	for _, v := range []string{"safe\u202Etxt", "a\nb", "a\x00b", "a\u200Bb"} {
+		if _, err := p.Render(map[string]string{"name": "x", "note": v}); err == nil {
+			t.Errorf("%q accepted", v)
+		}
+	}
+}
+
+func TestExecRunsInPrivateHome(t *testing.T) {
+	pwd, err := exec.LookPath("pwd")
+	if err != nil {
+		t.Skip("pwd missing")
+	}
+	a := &Action{TimeoutSec: 5, Exec: &ExecSpec{Argv: []string{pwd}}}
+	r1 := Run(context.Background(), a, nil)
+	r2 := Run(context.Background(), a, nil)
+	if !strings.Contains(r1.Output, "ucr-run-") || r1.Output == r2.Output {
+		t.Fatalf("%q %q", r1.Output, r2.Output)
+	}
+}

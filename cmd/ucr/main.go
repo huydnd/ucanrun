@@ -143,8 +143,13 @@ func serve() error {
 	s := web.New(c, setup, filepath.Join(dir, "audit.jsonl"), os.Getenv("UCANRUN_SECURE_COOKIE") == "1")
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	webSrv := &http.Server{Addr: env("UCANRUN_WEB_ADDR", "127.0.0.1:8780"), Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second}
-	agentSrv := &http.Server{Addr: env("UCANRUN_AGENT_ADDR", "127.0.0.1:8781"), Handler: s.AgentHandler(), ReadHeaderTimeout: 10 * time.Second}
+	harden()
+	mk := func(addr string, h http.Handler) *http.Server {
+		return &http.Server{Addr: addr, Handler: h, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second,
+			WriteTimeout: 130 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 16 << 10}
+	}
+	webSrv := mk(env("UCANRUN_WEB_ADDR", "127.0.0.1:8780"), s.Handler())
+	agentSrv := mk(env("UCANRUN_AGENT_ADDR", "127.0.0.1:8781"), s.AgentHandler())
 	errc := make(chan error, 2)
 	for _, srv := range []*http.Server{webSrv, agentSrv} {
 		l, err := net.Listen("tcp", srv.Addr)
@@ -164,6 +169,15 @@ func serve() error {
 	webSrv.Shutdown(sc)
 	agentSrv.Shutdown(sc)
 	return nil
+}
+
+// harden keeps keys out of core files and away from same-uid processes.
+func harden() {
+	const prSetDumpable = 4
+	if _, _, e := syscall.RawSyscall(syscall.SYS_PRCTL, prSetDumpable, 0, 0); e != 0 {
+		slog.Warn("could not disable dumps", "err", e)
+	}
+	syscall.Setrlimit(syscall.RLIMIT_CORE, &syscall.Rlimit{})
 }
 
 func add(args []string) error {

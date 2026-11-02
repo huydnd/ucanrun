@@ -19,6 +19,8 @@ Agent <──── kết quả ───────────────┘
 | Profile | Host, secret và mẫu lệnh do người viết. Agent chỉ điền param đã khai báo, mỗi param phải qua regex. Không cho shell, không cho secret trong URL hay argv. |
 | Duyệt | Gắn với hash của đúng lệnh, dùng một lần, hết hạn thì coi như từ chối, chỉ nhận đúng user và chat đã ghép nối. Tin nhắn hiện lệnh thật, không hiện lời agent tự mô tả. |
 | Rủi ro cao | Cần thêm TOTP. Mỗi mã chỉ dùng một lần. |
+| Tham số | Escape theo vị trí (path, query, JSON, form). Chặn `..`, ký tự điều khiển, bidi, giá trị bắt đầu bằng `-` trong lệnh, và tham số khai báo mà không dùng. |
+| Lệnh | Không shell, không biến môi trường nguy hiểm, mỗi lần chạy một HOME riêng. |
 | Output | Che giá trị secret và dạng base64, hex, URL-encode. Không theo redirect. |
 | Web | Không có API đọc secret. Cookie HttpOnly, SameSite=Strict, chống CSRF, CSP chặt, giới hạn đăng nhập. |
 | Audit | JSONL có chuỗi băm, phát hiện sửa hoặc xoá dòng. Không ghi secret. |
@@ -48,6 +50,8 @@ Mở `http://127.0.0.1:8780`, nhập setup token, đặt mật khẩu chính, r�
 Mỗi lần container khởi động lại, kho ở trạng thái khoá. Agent nhận lỗi 423 cho đến khi bạn đăng nhập.
 
 ## Profile
+
+Tạo profile trong tab **Profile**: chọn mẫu, điền form, xem trước đúng nội dung Telegram sẽ hiện. JSON chỉ cần khi muốn sao chép giữa các máy.
 
 ```json
 {

@@ -33,9 +33,10 @@ type Config struct {
 }
 
 type Bot struct {
-	cfg  Config
-	h    Handler
-	http *http.Client
+	cfgMu sync.RWMutex
+	cfg   Config
+	h     Handler
+	http  *http.Client
 
 	mu      sync.Mutex
 	waiting map[int64]pendingCode // user id -> request awaiting a TOTP reply
@@ -120,11 +121,12 @@ func keyboard(id, short string) map[string]any {
 
 // Notify sends a request for approval.
 func (b *Bot) Notify(ctx context.Context, id, short, text string) error {
+	_, chat := b.owner()
 	var m struct {
 		MessageID int64 `json:"message_id"`
 	}
 	err := b.call(ctx, "sendMessage", map[string]any{
-		"chat_id": b.cfg.ChatID, "text": text, "reply_markup": keyboard(id, short),
+		"chat_id": chat, "text": text, "reply_markup": keyboard(id, short),
 		"disable_web_page_preview": true,
 	}, &m)
 	if err == nil {
@@ -144,7 +146,8 @@ func (b *Bot) Finish(ctx context.Context, id, text string) {
 	if !ok {
 		return
 	}
-	if err := b.call(ctx, "editMessageText", map[string]any{"chat_id": b.cfg.ChatID, "message_id": mid, "text": text}, nil); err != nil {
+	_, chat := b.owner()
+	if err := b.call(ctx, "editMessageText", map[string]any{"chat_id": chat, "message_id": mid, "text": text}, nil); err != nil {
 		slog.Warn("telegram finish", "err", err)
 	}
 }
@@ -218,8 +221,15 @@ func (b *Bot) Run(ctx context.Context) {
 	}
 }
 
+func (b *Bot) owner() (user, chat int64) {
+	b.cfgMu.RLock()
+	defer b.cfgMu.RUnlock()
+	return b.cfg.UserID, b.cfg.ChatID
+}
+
 func (b *Bot) authorized(user, chat int64) bool {
-	return b.cfg.UserID != 0 && user == b.cfg.UserID && chat == b.cfg.ChatID
+	u, c := b.owner()
+	return u != 0 && user == u && chat == c
 }
 
 var codeRe = regexp.MustCompile(`^\d{6}$`)
@@ -236,7 +246,9 @@ func (b *Bot) handle(ctx context.Context, u update) {
 	text := strings.TrimSpace(m.Text)
 	if code, ok := strings.CutPrefix(text, "/pair "); ok {
 		if m.Chat.Type == "private" && b.h.Pair(strings.TrimSpace(code), m.From.ID, m.Chat.ID) {
+			b.cfgMu.Lock()
 			b.cfg.UserID, b.cfg.ChatID = m.From.ID, m.Chat.ID
+			b.cfgMu.Unlock()
 			b.say(ctx, m.Chat.ID, "Đã ghép nối. Từ giờ chỉ tài khoản này được duyệt yêu cầu.")
 		}
 		return

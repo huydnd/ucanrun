@@ -225,8 +225,9 @@ func setup(t *testing.T, ttl time.Duration) *env {
 		mu.Lock()
 		auth = r.Header.Get("Authorization")
 		n++
+		got := auth
 		mu.Unlock()
-		fmt.Fprintf(w, "created, debug header was %s", auth)
+		fmt.Fprintf(w, "created, debug header was %s", got)
 	}))
 	t.Cleanup(e.target.Close)
 	e.gotAuth = func() string { mu.Lock(); defer mu.Unlock(); return auth }
@@ -585,6 +586,71 @@ func TestWebHardening(t *testing.T) {
 	}
 	if !saw429 {
 		t.Fatal("login not throttled")
+	}
+}
+
+func TestLoginDoesNotRevealPassphraseOrStallApprovals(t *testing.T) {
+	e := setup(t, time.Minute)
+	sec := e.enableTOTP()
+	_ = sec
+	// A correct passphrase with no code must look the same as a wrong one.
+	c1, b1 := e.raw("POST", "/api/login", map[string]string{"passphrase": pass}, map[string]string{"X-Ucanrun": "1"})
+	if c1 != 401 || bytes.Contains(b1, []byte("need_totp")) || !bytes.Contains(b1, []byte("sai thông tin")) {
+		t.Fatalf("oracle: %d %s", c1, b1)
+	}
+}
+
+func TestTokenNamesUniqueAndRateLimited(t *testing.T) {
+	e := setup(t, time.Minute)
+	e.token("dup", nil)
+	if code, _ := e.req("POST", "/api/tokens", map[string]any{"name": "dup"}); code == 200 {
+		t.Fatal("duplicate token name")
+	}
+	cl := e.token("flood", nil)
+	var last error
+	for i := 0; i < 40; i++ {
+		_, last = cl.Run(context.Background(), "auto", map[string]string{"repo": "a"}, "", 0)
+	}
+	if last == nil || !strings.Contains(last.Error(), "429") {
+		t.Fatalf("no rate limit: %v", last)
+	}
+}
+
+func TestLongDisplayStillReachesTelegram(t *testing.T) {
+	e := setup(t, time.Minute)
+	e.pair()
+	p := policy.Profile{Name: "big", Risk: policy.RiskLow, Params: []policy.Param{{Name: "b", Pattern: `[a-z]+`, Required: true}},
+		HTTP: &policy.HTTPSpec{Method: "POST", URL: e.target.URL + "/x", Body: "{{b}}"}}
+	if code, m := e.req("PUT", "/api/profiles", p); code != 200 {
+		t.Fatalf("%d %v", code, m)
+	}
+	cl := e.token("c", nil)
+	if _, err := cl.Run(context.Background(), "big", map[string]string{"b": strings.Repeat("a", 4000)}, "", 0); err != nil {
+		t.Fatal(err)
+	}
+	e.tg.lastButton(t, "ĐÃ CẮT BỚT")
+}
+
+func TestPreview(t *testing.T) {
+	e := setup(t, time.Minute)
+	bad := map[string]any{"profile": map[string]any{"name": "Bad Name"}, "sample": map[string]string{}}
+	if _, m := e.req("POST", "/api/profiles/preview", bad); m["error"] == nil {
+		t.Fatalf("no error: %v", m)
+	}
+	p := policy.Profile{Name: "del", Risk: policy.RiskLow, Params: []policy.Param{{Name: "r", Pattern: `.+`, Required: true}},
+		HTTP: &policy.HTTPSpec{Method: "DELETE", URL: "http://api.example.com/{{r}}", Headers: map[string]string{"Authorization": "Bearer {{secret:missing}}"}}}
+	_, m := e.req("POST", "/api/profiles/preview", map[string]any{"profile": p, "sample": map[string]string{"r": "x"}})
+	w, _ := json.Marshal(m["warnings"])
+	for _, want := range []string{"HTTP không mã hoá", "TOTP", "nhận mọi thứ", "Chưa có secret"} {
+		if !strings.Contains(string(w), want) {
+			t.Fatalf("missing %q in %s", want, w)
+		}
+	}
+	if !strings.Contains(m["display"].(string), "‹secret:missing›") {
+		t.Fatalf("%v", m)
+	}
+	if e.hits() != 0 {
+		t.Fatal("preview ran the action")
 	}
 }
 

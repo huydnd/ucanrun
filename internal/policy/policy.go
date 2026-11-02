@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
 )
 
 const (
@@ -90,7 +91,7 @@ func (p *Profile) Validate() error {
 	if p.TimeoutSec < 0 || p.TimeoutSec > 600 {
 		return errors.New("timeout_sec must be 0..600")
 	}
-	declared := map[string]bool{}
+	declared, used := map[string]bool{}, map[string]bool{}
 	for _, q := range p.Params {
 		if !regexp.MustCompile(`^[a-z][a-z0-9_]*$`).MatchString(q.Name) {
 			return fmt.Errorf("bad param name %q", q.Name)
@@ -138,8 +139,14 @@ func (p *Profile) Validate() error {
 			return errors.New("argv[0] must be a literal absolute path")
 		}
 		switch e.Argv[0][strings.LastIndex(e.Argv[0], "/")+1:] {
-		case "sh", "bash", "dash", "ash", "zsh", "env", "python", "python3", "perl", "ruby", "node":
+		case "sh", "bash", "dash", "ash", "zsh", "env", "python", "python3", "perl", "ruby", "node",
+			"busybox", "awk", "sed", "find", "xargs", "sudo", "su", "nohup", "timeout":
 			return errors.New("interpreters are not allowed, they turn params into code")
+		}
+		for k := range e.Env {
+			if !envNameRe.MatchString(k) || dangerousEnv(k) {
+				return fmt.Errorf("env %q is not allowed, it changes how the program runs", k)
+			}
 		}
 		for _, a := range e.Argv {
 			if _, s := refs(a); len(s) > 0 {
@@ -157,6 +164,7 @@ func (p *Profile) Validate() error {
 			if !declared[n] {
 				return fmt.Errorf("undeclared param %q", n)
 			}
+			used[n] = true
 		}
 		for _, n := range ss {
 			if strings.HasPrefix(n, "_") {
@@ -164,7 +172,30 @@ func (p *Profile) Validate() error {
 			}
 		}
 	}
+	// An unused param never reaches the approver's screen, so it would be an
+	// unreviewed channel from the agent into the log.
+	for _, q := range p.Params {
+		if !used[q.Name] {
+			return fmt.Errorf("param %q is declared but never used", q.Name)
+		}
+	}
 	return nil
+}
+
+var envNameRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+func dangerousEnv(k string) bool {
+	u := strings.ToUpper(k)
+	for _, p := range []string{"LD_", "DYLD_", "GIT_SSH", "GIT_CONFIG", "GIT_EXEC", "GIT_ASKPASS", "SSH_ASKPASS", "BASH_", "PYTHON", "NODE_", "PERL", "RUBY"} {
+		if strings.HasPrefix(u, p) {
+			return true
+		}
+	}
+	switch u {
+	case "PATH", "HOME", "IFS", "ENV", "SHELL", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "CURL_HOME", "TMPDIR":
+		return true
+	}
+	return false
 }
 
 // CheckParams rejects unknown, missing or non-matching values.
@@ -191,6 +222,12 @@ func (p *Profile) CheckParams(in map[string]string) error {
 		if strings.ContainsAny(v, "{}") && (strings.Contains(v, "{{") || strings.Contains(v, "}}")) {
 			return fmt.Errorf("param %q must not contain template braces", q.Name)
 		}
+		// Control and bidi characters can make the approval text lie.
+		for _, r := range v {
+			if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+				return fmt.Errorf("param %q contains a control character", q.Name)
+			}
+		}
 	}
 	for k := range in {
 		if !known[k] {
@@ -210,6 +247,25 @@ func subst(s string, params map[string]string, esc func(string) string) string {
 	})
 }
 
+// renderURL escapes by position: "&" and "=" are harmless in a path but split a
+// query string. A "." or ".." segment is refused, because path escaping keeps
+// dots and the server would resolve the traversal.
+func renderURL(u string, params map[string]string) (string, error) {
+	base, query, hasQuery := strings.Cut(u, "?")
+	out := subst(base, params, url.PathEscape)
+	if i := strings.Index(out, "://"); i >= 0 {
+		for _, seg := range strings.Split(out[i+3:], "/") {
+			if seg == "." || seg == ".." {
+				return "", errors.New("a param may not create a . or .. path segment")
+			}
+		}
+	}
+	if hasQuery {
+		out += "?" + subst(query, params, url.QueryEscape)
+	}
+	return out, nil
+}
+
 func jsonEsc(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b[1 : len(b)-1])
@@ -226,20 +282,27 @@ func (p *Profile) Render(params map[string]string) (*Action, error) {
 		a.TimeoutSec = 30
 	}
 	if h := p.HTTP; h != nil {
-		out := &HTTPSpec{Method: h.Method, URL: subst(h.URL, params, url.PathEscape)}
-		isJSON := false
+		u, err := renderURL(h.URL, params)
+		if err != nil {
+			return nil, err
+		}
+		out := &HTTPSpec{Method: h.Method, URL: u}
+		isJSON, isForm := false, false
 		if len(h.Headers) > 0 {
 			out.Headers = map[string]string{}
 			for k, v := range h.Headers {
 				out.Headers[k] = subst(v, params, raw)
-				if strings.EqualFold(k, "content-type") && strings.Contains(v, "json") {
-					isJSON = true
+				if strings.EqualFold(k, "content-type") {
+					isJSON = strings.Contains(v, "json")
+					isForm = strings.Contains(v, "x-www-form-urlencoded")
 				}
 			}
 		}
 		esc := raw
 		if isJSON {
 			esc = jsonEsc
+		} else if isForm {
+			esc = url.QueryEscape
 		}
 		out.Body = subst(h.Body, params, esc)
 		a.HTTP = out
@@ -247,7 +310,12 @@ func (p *Profile) Render(params map[string]string) (*Action, error) {
 	if e := p.Exec; e != nil {
 		out := &ExecSpec{}
 		for _, s := range e.Argv {
-			out.Argv = append(out.Argv, subst(s, params, raw))
+			v := subst(s, params, raw)
+			// "--upload-pack=..." style values would turn data into an option.
+			if strings.HasPrefix(v, "-") && !strings.HasPrefix(s, "-") {
+				return nil, errors.New("a param may not start a command line option")
+			}
+			out.Argv = append(out.Argv, v)
 		}
 		if len(e.Env) > 0 {
 			out.Env = map[string]string{}
@@ -357,4 +425,44 @@ func Expand(s string, get func(string) string) string {
 		}
 		return get(g[2])
 	})
+}
+
+// Lint returns advice for the author. Validate decides what is forbidden; this
+// only points out choices that are legal but often unintended.
+func (p *Profile) Lint() []string {
+	var out []string
+	if h := p.HTTP; h != nil {
+		_, secrets := refs(strings.Join(mapValues(h.Headers), " ") + h.Body)
+		if strings.HasPrefix(h.URL, "http://") && len(secrets) > 0 {
+			if u, err := url.Parse(strings.SplitN(h.URL, "{{", 2)[0]); err == nil && strings.Contains(u.Hostname(), ".") {
+				out = append(out, "Secret sẽ đi qua HTTP không mã hoá. Hãy dùng https cho dịch vụ bên ngoài.")
+			}
+		}
+		if h.Method != "GET" && p.AutoApprove {
+			out = append(out, "Tự chạy với phương thức ghi: agent thay đổi được dữ liệu mà không ai duyệt.")
+		}
+		if h.Method == "DELETE" && p.Risk != RiskHigh {
+			out = append(out, "Hành động xoá nên đặt mức cần TOTP.")
+		}
+	}
+	if p.Exec != nil {
+		out = append(out, "Chạy lệnh là lựa chọn rủi ro hơn gọi API, vì chương trình đó có thể làm nhiều hơn bạn thấy.")
+		if p.AutoApprove {
+			out = append(out, "Chạy lệnh mà không ai duyệt là rủi ro cao.")
+		}
+	}
+	for _, q := range p.Params {
+		if q.Pattern == ".*" || q.Pattern == ".+" {
+			out = append(out, "Giá trị \""+q.Name+"\" nhận mọi thứ. Hãy giới hạn kiểu dữ liệu.")
+		}
+	}
+	return out
+}
+
+func mapValues(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for _, v := range m {
+		out = append(out, v)
+	}
+	return out
 }

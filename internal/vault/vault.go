@@ -140,14 +140,22 @@ func (v *Vault) loadIdentity(pass []byte) (*age.X25519Identity, error) {
 }
 
 func (v *Vault) Unlock(pass []byte) error {
-	id, err := v.loadIdentity(pass)
+	id, err := v.Open(pass)
 	if err != nil {
 		return err
 	}
+	v.Adopt(id)
+	return nil
+}
+
+// Open derives the identity without changing state. scrypt is slow, so callers
+// run it outside their own locks and then Adopt the result.
+func (v *Vault) Open(pass []byte) (*age.X25519Identity, error) { return v.loadIdentity(pass) }
+
+func (v *Vault) Adopt(id *age.X25519Identity) {
 	v.mu.Lock()
 	v.identity = id
 	v.mu.Unlock()
-	return nil
 }
 
 // Verify checks a passphrase without changing the lock state.

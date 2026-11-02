@@ -29,6 +29,9 @@ const (
 	secretTOTP     = "_totp_secret"
 	MinPassphrase  = 12
 	maxPending     = 5
+	rateWindow     = 10 * time.Minute
+	rateMax        = 30
+	maxDisplay     = 3000
 	maxHistory     = 200
 )
 
@@ -37,6 +40,7 @@ var (
 	ErrNotFound   = errors.New("not found")
 	ErrForbidden  = errors.New("forbidden")
 	ErrBusy       = errors.New("too many pending requests")
+	ErrLoginBusy  = errors.New("login in progress")
 	ErrBadTOTP    = errors.New("sai mã TOTP")
 	ErrNeedTOTP   = errors.New("cần mã TOTP")
 	ErrDecided    = errors.New("yêu cầu đã được xử lý hoặc hết hạn")
@@ -94,6 +98,8 @@ type Core struct {
 	botStop  context.CancelFunc
 	pairCode string
 	pairTill time.Time
+	loginMu  sync.Mutex
+	recent   map[string][]time.Time
 	baseCtx  context.Context
 	cancel   context.CancelFunc
 }
@@ -115,7 +121,7 @@ func New(opt Options) (*Core, error) {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	c := &Core{opt: opt, Vault: v, Audit: l, reqs: map[string]*Request{}, baseCtx: ctx, cancel: cancel}
+	c := &Core{opt: opt, Vault: v, Audit: l, reqs: map[string]*Request{}, recent: map[string][]time.Time{}, baseCtx: ctx, cancel: cancel}
 	go c.expiryLoop(ctx)
 	return c, nil
 }
@@ -176,13 +182,21 @@ func (c *Core) Locked() bool {
 // Login verifies the passphrase and, once enrolled, TOTP. If the vault was
 // locked it unlocks, and stays locked again when TOTP fails.
 func (c *Core) Login(pass []byte, code string) error {
+	// scrypt takes a second and 256 MiB. One at a time, and outside c.mu, so
+	// anonymous logins can neither exhaust memory nor stall approvals.
+	if !c.loginMu.TryLock() {
+		return ErrLoginBusy
+	}
+	defer c.loginMu.Unlock()
+	id, err := c.Vault.Open(pass)
+	if err != nil {
+		return err
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	wasLocked := c.st == nil
 	if wasLocked {
-		if err := c.Vault.Unlock(pass); err != nil {
-			return err
-		}
+		c.Vault.Adopt(id)
 		k, err := c.Vault.MACKey()
 		if err == nil {
 			c.st, err = loadState(c.statePath(), k)
@@ -193,8 +207,6 @@ func (c *Core) Login(pass []byte, code string) error {
 			c.log("state_tamper", "web", nil)
 			return err
 		}
-	} else if err := c.Vault.Verify(pass); err != nil {
-		return err
 	}
 	if c.st.TOTPEnabled {
 		if err := c.checkTOTPLocked(code); err != nil {
@@ -444,6 +456,11 @@ func (c *Core) CreateToken(name string, profiles []string) (string, error) {
 	if c.st == nil {
 		return "", ErrLocked
 	}
+	for _, t := range c.st.Tokens {
+		if t.Name == name {
+			return "", errors.New("tên token đã tồn tại") // the name is the caller identity
+		}
+	}
 	val := "ucr_" + randHex(32)
 	s := sha256.Sum256([]byte(val))
 	id := randHex(4)
@@ -559,13 +576,29 @@ func (c *Core) Submit(t Token, profile string, params map[string]string, reason 
 		return Request{}, ErrBusy
 	}
 	now := c.opt.Now()
+	kept := c.recent[t.Name][:0]
+	for _, at := range c.recent[t.Name] {
+		if now.Sub(at) < rateWindow {
+			kept = append(kept, at)
+		}
+	}
+	if len(kept) >= rateMax {
+		c.recent[t.Name] = kept
+		return Request{}, ErrBusy // floods train a human to approve without reading
+	}
+	c.recent[t.Name] = append(kept, now)
 	r := &Request{ID: randHex(6), Profile: profile, Params: params, Caller: t.Name,
 		Reason: cleanReason(reason), Risk: p.Risk, Hash: policy.Hash(&p, a, t.Name), Display: a.Display(),
 		State: Pending, Created: now, Expires: now.Add(c.opt.ApprovalTTL), action: a, done: make(chan struct{})}
 	c.reqs[r.ID] = r
 	c.order = append(c.order, r.ID)
 	c.trimLocked()
-	c.log("request", t.Name, map[string]any{"id": r.ID, "profile": profile, "params": params, "hash": r.Hash, "reason": r.Reason})
+	// Nothing runs unless it was recorded first.
+	if err := c.Audit.Append("request", t.Name, map[string]any{"id": r.ID, "profile": profile, "params": params, "hash": r.Hash, "reason": r.Reason}); err != nil {
+		slog.Error("audit append", "err", err)
+		c.finishLocked(r, Failed, "audit")
+		return Request{}, errors.New("cannot record the request")
+	}
 	if p.AutoApprove {
 		c.startLocked(r, "auto")
 		return r.public(), nil
@@ -575,6 +608,7 @@ func (c *Core) Submit(t Token, profile string, params map[string]string, reason 
 		go func() {
 			if err := bot.Notify(c.baseCtx, id, short, text); err != nil {
 				slog.Warn("telegram notify", "err", err)
+				c.log("notify_failed", "telegram", map[string]any{"id": id})
 			}
 		}()
 	}
@@ -587,7 +621,13 @@ func approvalText(r *Request) string {
 	if r.Risk == policy.RiskHigh {
 		head = "⚠️ RỦI RO CAO, cần TOTP"
 	}
-	fmt.Fprintf(&b, "%s\n\nProfile: %s\nAgent: %s\nHết hạn sau: %.0f giây\n\nLệnh sẽ chạy:\n%s\n", head, r.Profile, r.Caller, r.Expires.Sub(r.Created).Seconds(), r.Display)
+	// Telegram drops messages over 4096 characters, which would leave the
+	// request invisible. Say so plainly when text is cut.
+	shown := r.Display
+	if rs := []rune(shown); len(rs) > maxDisplay {
+		shown = string(rs[:maxDisplay]) + "\n… [ĐÃ CẮT BỚT, xem đủ trên web trước khi duyệt]"
+	}
+	fmt.Fprintf(&b, "%s\n\nProfile: %s\nAgent: %s\nHết hạn sau: %.0f giây\n\nLệnh sẽ chạy:\n%s\n", head, r.Profile, r.Caller, r.Expires.Sub(r.Created).Seconds(), shown)
 	if r.Reason != "" {
 		fmt.Fprintf(&b, "\nLý do (agent tự khai, chưa kiểm chứng): %s\n", r.Reason)
 	}
@@ -739,6 +779,41 @@ func (c *Core) Requests() []Request {
 	for i := len(c.order) - 1; i >= 0; i-- {
 		if r, ok := c.reqs[c.order[i]]; ok {
 			out = append(out, r.public())
+		}
+	}
+	return out
+}
+
+// Preview validates a draft and renders it with sample values, using the same
+// code path as a real request. It runs nothing.
+type Preview struct {
+	Error    string   `json:"error,omitempty"`
+	Display  string   `json:"display,omitempty"`
+	Warnings []string `json:"warnings"`
+}
+
+func (c *Core) Preview(p policy.Profile, sample map[string]string) Preview {
+	out := Preview{Warnings: []string{}}
+	if err := p.Validate(); err != nil {
+		out.Error = err.Error()
+		return out
+	}
+	out.Warnings = append(out.Warnings, p.Lint()...)
+	a, err := p.Render(sample)
+	if err != nil {
+		out.Error = err.Error()
+		return out
+	}
+	out.Display = a.Display()
+	have := map[string]bool{}
+	if l, err := c.Vault.List(); err == nil {
+		for _, m := range l {
+			have[m.Name] = true
+		}
+	}
+	for _, n := range a.Secrets() {
+		if !have[n] {
+			out.Warnings = append(out.Warnings, "Chưa có secret \""+n+"\" trong kho, lệnh sẽ không chạy được.")
 		}
 	}
 	return out
