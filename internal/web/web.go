@@ -13,8 +13,11 @@ import (
 	"encoding/json"
 	"errors"
 	"io/fs"
+	"log/slog"
 	"mime"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -47,6 +50,7 @@ type Server struct {
 	SetupToken   string
 	AuditPath    string
 	GateToken    string
+	CatalogDir   string
 
 	mu       sync.Mutex
 	sessions map[string]*session
@@ -200,6 +204,7 @@ func (s *Server) recordLogin(ok bool) {
 func (s *Server) Handler() http.Handler {
 	m := http.NewServeMux()
 	sub, _ := fs.Sub(staticFS, "static")
+	m.HandleFunc("GET /catalog.json", s.catalog)
 	m.Handle("GET /", http.FileServerFS(sub))
 	m.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, 200, map[string]bool{"ok": true}) })
 	m.HandleFunc("GET /api/status", s.status)
@@ -368,6 +373,76 @@ func (s *Server) Handler() http.Handler {
 		writeJSON(w, 200, map[string]bool{"ok": true})
 	}))
 	return s.gate(s.secure(csrf(m)))
+}
+
+type catalogEntry struct {
+	Group   string         `json:"group"`
+	GroupEn string         `json:"group_en,omitempty"`
+	Title   string         `json:"title"`
+	TitleEn string         `json:"title_en,omitempty"`
+	Hint    string         `json:"hint"`
+	HintEn  string         `json:"hint_en,omitempty"`
+	Secrets []string       `json:"secrets"`
+	Custom  bool           `json:"custom,omitempty"`
+	Profile policy.Profile `json:"profile"`
+}
+
+func (s *Server) catalog(w http.ResponseWriter, _ *http.Request) {
+	raw, _ := staticFS.ReadFile("static/catalog.json")
+	var base []catalogEntry
+	_ = json.Unmarshal(raw, &base)
+	out := make([]catalogEntry, 0, len(base))
+	seen := make(map[string]bool, len(base))
+	for _, e := range base {
+		if e.Secrets == nil {
+			e.Secrets = []string{}
+		}
+		seen[e.Profile.Name] = true
+		out = append(out, e)
+	}
+	if s.CatalogDir != "" {
+		entries, err := os.ReadDir(s.CatalogDir)
+		if err != nil {
+			if !errors.Is(err, fs.ErrNotExist) {
+				slog.Warn("reading catalog dir", "dir", s.CatalogDir, "reason", err)
+			}
+		} else {
+			for _, d := range entries {
+				if !strings.HasSuffix(d.Name(), ".json") || d.IsDir() || d.Type()&fs.ModeSymlink != 0 {
+					continue
+				}
+				info, err := d.Info()
+				if err != nil || !info.Mode().IsRegular() || info.Size() > 1<<20 {
+					continue
+				}
+				b, err := os.ReadFile(filepath.Join(s.CatalogDir, d.Name()))
+				if err != nil || len(b) > 1<<20 {
+					continue
+				}
+				var extra []catalogEntry
+				if err := json.Unmarshal(b, &extra); err != nil {
+					slog.Warn("skipping catalog file", "file", d.Name(), "reason", err)
+					continue
+				}
+				for _, e := range extra {
+					if err := e.Profile.Validate(); err != nil {
+						slog.Warn("skipping catalog entry", "file", d.Name(), "profile", e.Profile.Name, "reason", err)
+						continue
+					}
+					if seen[e.Profile.Name] {
+						slog.Warn("skipping duplicate catalog entry", "file", d.Name(), "profile", e.Profile.Name, "reason", "duplicate profile name")
+						continue
+					}
+					if e.Secrets == nil {
+						e.Secrets = []string{}
+					}
+					seen[e.Profile.Name] = true
+					out = append(out, e)
+				}
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) status(w http.ResponseWriter, r *http.Request) {

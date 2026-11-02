@@ -298,7 +298,7 @@ function select(value, options, onchange, label) {
   return s;
 }
 
-async function viewProfiles(body) {
+async function viewProfiles(body, keptImport) {
   const [list, secrets] = await Promise.all([api("GET", "/api/profiles"), api("GET", "/api/secrets")]);
   const openBuilder = d => renderBuilder(body, d, secrets);
   // Run now as the owner, to check a profile before an agent relies on it.
@@ -344,6 +344,74 @@ async function viewProfiles(body) {
   const execOn = !!(state.status && state.status.exec);
   const usable = catalog.filter(c => execOn || !c.profile.exec);
   const groups = [...new Set(usable.map(c => c.group))];
+  const ioErr = h("div", {class: "err", role: "alert"});
+  const importBox = keptImport || h("div");
+  const fileInput = h("input", {type: "file", accept: "application/json", hidden: true, onchange: () => {
+    ioErr.textContent = "";
+    fill(importBox);
+    const f = fileInput.files && fileInput.files[0];
+    if (!f) return;
+    if (f.size > 1048576) {
+      ioErr.textContent = tr("File quá lớn (tối đa 1 MiB).");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onerror = () => { ioErr.textContent = tr("Không đọc được file."); };
+    reader.onload = () => {
+      let data;
+      try { data = JSON.parse(String(reader.result)); } catch (_) {
+        ioErr.textContent = tr("JSON không hợp lệ");
+        return;
+      }
+      if (!data || data.ucanrun_profiles !== 1 || !Array.isArray(data.profiles)) {
+        ioErr.textContent = tr("File profile không đúng định dạng.");
+        return;
+      }
+      const rows = data.profiles.map(p => {
+        const item = p && typeof p === "object" ? p : {};
+        const name = typeof item.name === "string" ? item.name : "";
+        const desc = typeof item.description === "string" ? item.description : "";
+        const cb = h("input", {type: "checkbox", checked: true});
+        const res = h("span", {class: "muted"});
+        const el = h("div", {class: "spread"},
+          h("label", {class: "check"}, cb,
+            h("span", null, desc ? h("b", null, desc) : null, desc ? " " : null, h("code", null, name),
+              haveProfile(name) ? " " : null, haveProfile(name) ? h("span", {class: "badge"}, "ghi đè") : null)),
+          res);
+        return {profile: item, cb, res, el};
+      });
+      const importBtn = h("button", {class: "primary", type: "button", onclick: async () => {
+        importBtn.disabled = true;
+        for (const r of rows) {
+          if (!r.cb.checked) continue;
+          try {
+            await api("PUT", "/api/profiles", r.profile);
+            r.res.className = "muted";
+            r.res.textContent = "ok";
+          } catch (e) {
+            r.res.className = "err";
+            r.res.textContent = viErr(e.message);
+          }
+        }
+        importBtn.disabled = false;
+        await viewProfiles(body, importBox);
+      }}, "Nhập các profile đã chọn");
+      fill(importBox, h("div", {class: "card"}, h("h3", null, "Nhập profile"), rows.map(r => r.el), h("div", {class: "row"}, importBtn)));
+    };
+    reader.readAsText(f);
+  }});
+  const exportBtn = h("button", {type: "button", onclick: async () => {
+    ioErr.textContent = "";
+    try {
+      const profiles = await api("GET", "/api/profiles");
+      const blob = new Blob([JSON.stringify({ucanrun_profiles: 1, profiles}, null, 2)], {type: "application/json"});
+      const url = URL.createObjectURL(blob);
+      const a = h("a", {href: url, download: "ucanrun-profiles.json"});
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) { ioErr.textContent = viErr(e.message); }
+  }}, "Xuất profile");
+  const importOpenBtn = h("button", {type: "button", onclick: () => { fileInput.value = ""; fileInput.click(); }}, "Nhập profile");
   fill(body, h("div", {class: "card"}, h("h2", null, "Thêm nhanh"),
     h("p", {class: "muted"}, "Dán token của dịch vụ rồi bấm Thêm, không cần cấu hình gì khác."),
     groups.map(g => h("div", null, h("h3", null, lang === "en" && (usable.find(c => c.group === g).group_en) || g), h("div", {class: "tiles"}, usable.filter(c => c.group === g).map(catalogCard))))),
@@ -355,7 +423,11 @@ async function viewProfiles(body) {
       h("span", {class: "badge " + (p.risk === "high" ? "high" : "")}, p.risk === "high" ? "cần TOTP" : p.auto_approve ? "tự chạy" : "hỏi duyệt"),
       h("div", {class: "muted"}, h("code", null, "ucr run " + p.name + (p.params || []).map(q => ` ${q.name}=…`).join("")))),
     h("span", null, h("button", {onclick: () => openTest(p)}, "Chạy thử"), " ", h("button", {onclick: () => openBuilder(fromProfile(p))}, "Sửa"), " ",
-      h("button", {class: "danger", onclick: async () => { if (confirm(tr(`Xoá profile ${p.name}?`))) { await api("DELETE", "/api/profiles/" + encodeURIComponent(p.name)); viewProfiles(body); } }}, "Xoá")))) : h("p", {class: "muted"}, "Chưa có profile.")));
+      h("button", {class: "danger", onclick: async () => { if (confirm(tr(`Xoá profile ${p.name}?`))) { await api("DELETE", "/api/profiles/" + encodeURIComponent(p.name)); viewProfiles(body); } }}, "Xoá")))) : h("p", {class: "muted"}, "Chưa có profile."),
+    h("div", {class: "row"}, exportBtn, importOpenBtn, fileInput),
+    h("p", {class: "muted"}, "File chỉ có tên secret, không có giá trị."),
+    ioErr),
+  importBox);
 }
 
 function renderBuilder(body, d, secrets) {
