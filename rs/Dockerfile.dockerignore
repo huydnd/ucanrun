@@ -1,6 +1,0 @@
-*
-!rs/Cargo.toml
-!rs/Cargo.lock
-!rs/src
-!internal/web/static
-!internal/web/gate.html

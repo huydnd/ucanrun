@@ -3,10 +3,11 @@ on: [push, pull_request]
 jobs:
   test:
     runs-on: ubuntu-latest
-    container: golang:1.27.3-alpine
+    container: rust:1.99.1-alpine3.23
     steps:
-      - run: apk add --no-cache git nodejs
+      - run: apk add --no-cache git nodejs musl-dev gcc
       - uses: actions/checkout@v4
-      - run: go vet ./...
-      - run: test -z "$(gofmt -l cmd internal)"
-      - run: go test -count=1 ./...
+      - run: rustup component add rustfmt clippy
+      - run: cargo fmt --check
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked

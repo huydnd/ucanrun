@@ -1,5 +1,6 @@
-.git
-data
-ucr
-*.md
-docs
+*
+!Cargo.toml
+!Cargo.lock
+!src
+!web/static
+!web/gate.html
