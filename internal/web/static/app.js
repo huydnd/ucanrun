@@ -138,22 +138,43 @@ async function viewSecrets(body, editing) {
   const multi = h("textarea", {class: "short", spellcheck: "false", "aria-label": "Giá trị nhiều dòng", hidden: true});
   const toggle = h("input", {type: "checkbox", onchange: e => { multi.hidden = !e.target.checked; v.el.hidden = e.target.checked; }});
   const cmd = h("input", {type: "checkbox"});
+  // A secret is one value, or several named fields such as a database login.
+  let multiMode = !!(cur && cur.fields && cur.fields.length);
+  const rows = (cur && cur.fields || []).map(f => ({name: f.name, public: !!f.public, value: "", had: true}));
+  if (!rows.length) rows.push({name: "host", public: true, value: ""}, {name: "user", public: true, value: ""}, {name: "password", public: false, value: ""});
+  const fieldBox = h("div", {hidden: !multiMode});
+  const drawFields = () => fill(fieldBox, h("small", {class: "muted"}, "Trường công khai (máy chủ, cổng, user, tên database) agent thấy được giá trị và dùng ở mọi vị trí. Trường kín như password chỉ đi vào header hoặc biến môi trường."),
+    rows.map((r, i) => {
+      const nm = h("input", {"aria-label": "Tên trường", autocomplete: "off", spellcheck: "false", placeholder: "password"}); nm.value = r.name;
+      const val = h("input", {"aria-label": "Giá trị trường", autocomplete: "off", type: r.public ? "text" : "password", placeholder: r.had ? tr("giữ nguyên") : ""}); val.value = r.value;
+      const pub = h("input", {type: "checkbox", checked: r.public, onchange: e => { r.public = e.target.checked; val.type = r.public ? "text" : "password"; }});
+      nm.addEventListener("input", () => { r.name = nm.value.trim(); });
+      val.addEventListener("input", () => { r.value = val.value; });
+      return h("div", {class: "field-row"}, nm, val, h("label", {class: "check"}, pub, h("span", null, "Công khai")),
+        h("button", {"aria-label": "Xoá trường", onclick: () => { rows.splice(i, 1); drawFields(); }}, "×"));
+    }), h("button", {onclick: () => { rows.push({name: "", public: false, value: ""}); drawFields(); }}, "+ Thêm trường"));
+  drawFields();
+  const modeSel = choiceGroup("secretkind", multiMode ? "multi" : "one", [{value: "one", title: "Một giá trị", help: "Token, API key"}, {value: "multi", title: "Nhiều trường", help: "Đăng nhập database, máy chủ"}],
+    v => { multiMode = v === "multi"; fieldBox.hidden = !multiMode; v_wrap.hidden = multiMode; });
   if (cur) {
     n.input.value = cur.name; n.input.readOnly = true;
     desc.value = cur.description || ""; hosts.input.value = (cur.hosts || []).join(", "); cmd.checked = !!cur.allow_commands;
   }
   const execOn = !!(state.status && state.status.exec);
-  const save = form(cur ? "Sửa secret" : "Lưu secret mới", [n, v], "Lưu", async () => {
+  const v_wrap = h("div", {hidden: multiMode}, v.el, h("label", {class: "check"}, toggle, h("span", null, "Nhiều dòng, như khoá SSH")), multi);
+  const save = form(cur ? "Sửa secret" : "Lưu secret mới", [n], "Lưu", async () => {
     const hs = hosts.input.value.split(/[\s,]+/).map(x => x.trim().toLowerCase()).filter(Boolean);
-    await api("PUT", "/api/secrets/" + encodeURIComponent(n.input.value.trim()), {
-      value: toggle.checked ? multi.value : v.input.value, description: desc.value.trim(), hosts: hs, allow_commands: cmd.checked});
+    const body = {description: desc.value.trim(), hosts: hs, allow_commands: cmd.checked};
+    if (multiMode) body.fields = rows.filter(r => r.name).map(r => ({name: r.name, public: r.public, value: r.value}));
+    else body.value = toggle.checked ? multi.value : v.input.value;
+    await api("PUT", "/api/secrets/" + encodeURIComponent(n.input.value.trim()), body);
     viewSecrets(body);
-  }, h("div", null,
-    h("label", {class: "check"}, toggle, h("span", null, "Nhiều dòng, như khoá SSH")), multi,
+  }, h("div", null, v_wrap, fieldBox,
     h("label", null, h("span", null, "Dùng để làm gì"), desc, h("small", {class: "muted"}, "Agent đọc dòng này để biết khi nào dùng secret. Không ghi giá trị vào đây.")),
     hosts.el, h("small", {class: "muted"}, "Agent chỉ gửi được secret tới các máy chủ này, cách nhau bằng dấu phẩy. Dùng *.example.com cho mọi tên miền con. Để trống thì agent không dùng được."),
     execOn ? h("label", {class: "check"}, cmd, h("span", null, "Cho dùng trong lệnh agent tự soạn (luôn cần TOTP)")) : null,
     h("p", {class: "muted"}, "Giá trị chỉ ghi, không có cách xem lại trên giao diện.")));
+  save.insertBefore(modeSel, save.querySelector("label").nextSibling);
   if (cur) save.append(h("div", {class: "row"}, h("button", {onclick: () => viewSecrets(body)}, "Huỷ")));
   const addBox = cur ? save : h("details", {class: "card add", open: !list.length}, h("summary", null, tr("Thêm secret")), save);
   if (!cur) { save.classList.remove("card"); save.querySelector("h2").remove(); }
@@ -161,6 +182,7 @@ async function viewSecrets(body, editing) {
     h("div", {class: "card"}, h("h2", null, `Secret (${list.length})`),
       list.length ? list.map(s => h("div", {class: "spread"}, h("span", null, h("code", null, s.name),
           s.description ? h("div", null, s.description) : h("div", {class: "note"}, "Chưa có mô tả, agent sẽ không biết dùng vào việc gì."),
+          s.fields && s.fields.length ? h("div", {class: "muted"}, s.fields.map(f => f.public ? `${f.name}=${f.value || ""}` : `${f.name}=•••`).join("  ")) : null,
           h("div", {class: "muted"}, (s.hosts && s.hosts.length ? "→ " + s.hosts.join(", ") : tr("agent không dùng trực tiếp")) + (s.allow_commands ? " · " + tr("dùng trong lệnh") : ""))),
         h("span", null, h("button", {onclick: () => { viewSecrets(body, s.name); window.scrollTo(0, 0); }}, "Sửa"), " ",
           h("button", {class: "danger", onclick: async () => {
