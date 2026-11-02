@@ -31,7 +31,7 @@ The Start tab walks through four steps. Skip any step and return to it later wit
 
 1. **Connect Telegram:** create a bot with @BotFather, paste its token, and send `/pair <code>` to the bot. The code has 6 characters, lasts 3 minutes and is cancelled after 3 wrong tries.
 2. **Enable TOTP:** scan the QR code and save the 8 recovery codes. They are shown once.
-3. **Add a service:** pick a template and paste a token, see the [catalog](catalog.md). For anything else use the [profile form](profiles.md).
+3. **Add a service:** pick it in Quick add, paste its token once and tick the actions, see [services and actions](catalog.md). For anything else use the [profile form](profiles.md).
 4. **Create an agent token:** choose your agent and the profiles it may use, then follow the instructions shown. The token goes into that agent's own MCP settings.
 
 The agent machine needs the `ucr` command: `docker cp ucanrun:/usr/local/bin/ucr ~/.local/bin/ucr`.

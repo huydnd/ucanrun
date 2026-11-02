@@ -54,10 +54,12 @@ type Profile struct {
 	AutoApprove bool   `json:"auto_approve,omitempty"`
 	TimeoutSec  int    `json:"timeout_sec,omitempty"`
 	// SecretChoices lists what the approver may pick for {{secret:choice}}.
-	SecretChoices []string  `json:"secret_choices,omitempty"`
-	Params        []Param   `json:"params,omitempty"`
-	HTTP          *HTTPSpec `json:"http,omitempty"`
-	Exec          *ExecSpec `json:"exec,omitempty"`
+	SecretChoices []string `json:"secret_choices,omitempty"`
+	// Connection names a Connection. HTTP.URL is then a path such as "/repos".
+	Connection string    `json:"connection,omitempty"`
+	Params     []Param   `json:"params,omitempty"`
+	HTTP       *HTTPSpec `json:"http,omitempty"`
+	Exec       *ExecSpec `json:"exec,omitempty"`
 }
 
 // Action is a fully rendered request except for secret placeholders.
@@ -86,6 +88,18 @@ func refs(s string) (params, secrets []string) {
 // Validate enforces the rules that keep a secret from leaving for an
 // agent-chosen destination.
 func (p *Profile) Validate() error {
+	if p.Connection != "" {
+		// Checked in full once resolved against its connection. Here only the
+		// shape is checked, using a stand-in host.
+		if p.HTTP == nil || !strings.HasPrefix(p.HTTP.URL, "/") {
+			return errors.New("with a connection the url is a path that starts with /")
+		}
+		q := *p
+		h := *p.HTTP
+		h.URL = "https://connection.invalid" + h.URL
+		q.HTTP, q.Connection = &h, ""
+		return q.Validate()
+	}
 	if !nameRe.MatchString(p.Name) {
 		return errors.New("profile name must match [a-z0-9][a-z0-9_-]*")
 	}

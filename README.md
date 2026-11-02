@@ -39,7 +39,7 @@ No config file is needed. Open `http://127.0.0.1:8780`, enter the access code fr
 
 - [Quick start](docs/quickstart.md)
 - [Configuration](docs/configuration.md)
-- [Template catalog](docs/catalog.md)
+- [Services and actions](docs/catalog.md)
 - [Creating profiles](docs/profiles.md)
 - [Root commands over SSH](docs/ssh-sudo.md)
 - [Security model](docs/security.md)

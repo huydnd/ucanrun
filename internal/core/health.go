@@ -29,6 +29,10 @@ func (c *Core) Health() ([]HealthItem, error) {
 	totpOn, recovery, paired, cut := c.st.TOTPEnabled, len(c.st.RecoveryHashes), c.st.Telegram.UserID != 0, c.auditCut
 	profiles := make([]policy.Profile, 0, len(c.st.Profiles))
 	for _, p := range c.st.Profiles {
+		// Judge what actually runs, with the connection applied.
+		if r, err := policy.Resolve(p, c.st.Connections); err == nil {
+			p = r
+		}
 		profiles = append(profiles, p)
 	}
 	var unscoped []string

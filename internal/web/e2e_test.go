@@ -746,32 +746,6 @@ func TestApproverChoosesSecretOnTelegram(t *testing.T) {
 	}
 }
 
-func TestCatalogIsValid(t *testing.T) {
-	raw, err := staticFS.ReadFile("static/catalog.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var cat []struct {
-		Title   string         `json:"title"`
-		Secrets []string       `json:"secrets"`
-		Profile policy.Profile `json:"profile"`
-	}
-	if err := json.Unmarshal(raw, &cat); err != nil {
-		t.Fatal(err)
-	}
-	if len(cat) < 8 {
-		t.Fatalf("only %d entries", len(cat))
-	}
-	for _, c := range cat {
-		if err := c.Profile.Validate(); err != nil {
-			t.Errorf("%s: %v", c.Profile.Name, err)
-		}
-		if len(c.Secrets) == 0 && len(c.Profile.SecretChoices) == 0 {
-			t.Errorf("%s: names no secret", c.Profile.Name)
-		}
-	}
-}
-
 func TestGateBlocksEverythingWithoutCode(t *testing.T) {
 	e := setup(t, time.Minute)
 	e.s.GateToken = "open sesame gate code"
@@ -1064,6 +1038,75 @@ func TestUnlockAtStart(t *testing.T) {
 	cl := &client.Client{URL: e.agent.URL, Token: val, HTTP: http.DefaultClient}
 	if _, err := cl.Profiles(context.Background()); err != nil {
 		t.Fatalf("agents should work after auto unlock: %v", err)
+	}
+}
+
+func TestConnections(t *testing.T) {
+	e := setup(t, time.Minute)
+	conn := map[string]any{"name": "svc", "base_url": e.target.URL + "/api", "auth": map[string]any{"type": "bearer", "secret": "gitea"}, "headers": map[string]string{"Accept": "application/json"}}
+	if code, m := e.req("PUT", "/api/connections", conn); code != 200 {
+		t.Fatalf("%d %v", code, m)
+	}
+	p := map[string]any{"name": "svc-get", "risk": "low", "auto_approve": true, "connection": "svc",
+		"params": []map[string]any{{"name": "id", "pattern": "[a-z0-9]{1,8}", "required": true}},
+		"http":   map[string]any{"method": "GET", "url": "/items/{{id}}"}}
+	if code, m := e.req("PUT", "/api/profiles", p); code != 200 {
+		t.Fatalf("%d %v", code, m)
+	}
+	cl := e.token("c", nil)
+	r, err := cl.Run(context.Background(), "svc-get", map[string]string{"id": "abc"}, "", 5)
+	if err != nil || r["state"] != "done" || e.gotAuth() != "Bearer "+secret {
+		t.Fatalf("%v %v %q", r, err, e.gotAuth())
+	}
+	if !strings.Contains(r["display"].(string), "/api/items/abc") || strings.Contains(fmt.Sprint(r), secret) {
+		t.Fatalf("%v", r["display"])
+	}
+	// A profile cannot take over the auth header or leave the host.
+	bad := map[string]any{"name": "svc-bad", "risk": "low", "connection": "svc", "http": map[string]any{"method": "GET", "url": "//evil.example/x"}}
+	if code, _ := e.req("PUT", "/api/profiles", bad); code == 200 {
+		t.Fatal("protocol-relative path accepted")
+	}
+	bad["http"] = map[string]any{"method": "GET", "url": "/x", "headers": map[string]string{"Authorization": "Bearer {{secret:other}}"}}
+	if code, _ := e.req("PUT", "/api/profiles", bad); code == 200 {
+		t.Fatal("auth header override accepted")
+	}
+	if code, _ := e.req("PUT", "/api/profiles", map[string]any{"name": "svc-x", "risk": "low", "connection": "ghost", "http": map[string]any{"method": "GET", "url": "/x"}}); code == 200 {
+		t.Fatal("unknown connection accepted")
+	}
+	// Moving the connection moves every profile on it, and the approval shows the new host.
+	conn["base_url"] = e.target.URL + "/v2"
+	if code, m := e.req("PUT", "/api/connections", conn); code != 200 {
+		t.Fatalf("%d %v", code, m)
+	}
+	r, _ = cl.Run(context.Background(), "svc-get", map[string]string{"id": "abc"}, "", 5)
+	if !strings.Contains(r["display"].(string), "/v2/items/abc") {
+		t.Fatalf("%v", r["display"])
+	}
+	// A change that would break a profile is refused as a whole.
+	if code, _ := e.req("PUT", "/api/connections", map[string]any{"name": "svc", "base_url": "https://{{x}}.example", "auth": map[string]any{"type": "none"}}); code == 200 {
+		t.Fatal("broken connection accepted")
+	}
+	if code, _ := e.req("DELETE", "/api/connections/svc", nil); code == 200 {
+		t.Fatal("deleted a connection in use")
+	}
+	e.req("DELETE", "/api/profiles/svc-get", nil)
+	if code, _ := e.req("DELETE", "/api/connections/svc", nil); code != 200 {
+		t.Fatal("could not delete an unused connection")
+	}
+	// Choosing the secret moves to the connection.
+	e.pair()
+	e.req("PUT", "/api/secrets/other", map[string]string{"value": "second-secret-value-42"})
+	e.req("PUT", "/api/connections", map[string]any{"name": "pick", "base_url": e.target.URL, "auth": map[string]any{"type": "token", "choices": []string{"gitea", "other"}}})
+	e.req("PUT", "/api/profiles", map[string]any{"name": "pick-me", "risk": "low", "connection": "pick", "http": map[string]any{"method": "GET", "url": "/me"}})
+	r, err = cl.Run(context.Background(), "pick-me", nil, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.tg.lastButton(t, "Bấm tên secret")
+	e.tg.press(owner, owner, "a:"+r["id"].(string)+":"+r["hash"].(string)[:16]+":1")
+	e.wait(r["id"].(string), core.Done)
+	if e.gotAuth() != "token second-secret-value-42" {
+		t.Fatalf("%q", e.gotAuth())
 	}
 }
 

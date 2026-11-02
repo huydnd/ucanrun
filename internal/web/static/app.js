@@ -170,6 +170,15 @@ const errorText = [
   [/env "(.+)" is not allowed/, m => `Không dùng được biến ${m[1]}, vì nó đổi cách chương trình chạy.`],
   [/high risk profile cannot auto/, "Mức cần TOTP không thể tự chạy."],
   [/a param may not/, "Giá trị mẫu không hợp lệ ở vị trí này."],
+  [/with a connection the url is a path/, "Với kết nối, chỉ ghi đường dẫn bắt đầu bằng /."],
+  [/is set by the connection/, "Header này do kết nối đặt, profile không ghi đè được."],
+  [/base url must/, "Địa chỉ gốc phải có dạng https://api.example.com, không có ? hay #."],
+  [/the base url of a connection is fixed/, "Địa chỉ gốc phải cố định, không chứa giá trị của agent."],
+  [/auth needs either one secret or a list/, "Chọn một secret, hoặc tích các secret được chọn khi duyệt."],
+  [/connection name must/, "Tên kết nối chỉ gồm chữ thường, số, dấu gạch."],
+  [/connection is used by: (.+)/, m => `Kết nối đang được dùng bởi: ${m[1]}. Xoá các hành động đó trước.`],
+  [/profile "(.+)" would break/, m => `Thay đổi này làm hỏng hành động "${m[1]}".`],
+  [/unknown connection/, "Kết nối không tồn tại."],
   [/secret_choices is required/, "Hãy tích ít nhất một secret được phép chọn."],
   [/secret choice needs a human/, "Chọn secret khi duyệt thì không thể tự chạy."],
 ];
@@ -182,14 +191,12 @@ const templates = {
   blank: {label: "Trống", d: {}},
   bearer: {label: "API có Bearer token", d: {description: "Đọc dữ liệu từ API", method: "GET", url: "https://api.example.com/v1/items/{{item_id}}", auth: "bearer",
     params: [{name: "item_id", type: "slug", required: true}]}},
-  gitea: {label: "Gitea: tạo repo", d: {description: "Tạo repo private trên Gitea", method: "POST", url: "https://gitea.example.com/api/v1/user/repos", auth: "token",
-    bodyMode: "json", jsonRows: [{key: "name", value: "{{repo}}"}, {key: "private", value: "true"}], params: [{name: "repo", type: "slug", required: true}]}},
   webhook: {label: "Gọi webhook", d: {description: "Kích hoạt webhook", method: "POST", url: "https://hooks.example.com/run", auth: "header", authHeader: "X-Api-Key",
     bodyMode: "json", jsonRows: [{key: "event", value: "{{event}}"}], params: [{name: "event", type: "choice", choices: "deploy, restart", required: true}]}},
 };
 
 function newDraft(over) {
-  const d = Object.assign({description: "", name: "", nameTouched: false, kind: "http", method: "GET", url: "", auth: "none", authHeader: "", secret: "",
+  const d = Object.assign({description: "", name: "", nameTouched: false, kind: "http", connection: "", method: "GET", url: "", auth: "none", authHeader: "", secret: "",
     choices: [], stdinSecret: "", stdin: "", fileRows: [], bodyMode: "none", jsonRows: [], raw: "", rawType: "text/plain", params: [], approval: "ask", argv: "", envRows: [], extraHeaders: {}, timeout: 0}, JSON.parse(JSON.stringify(over || {})));
   d.params = d.params.map(p => Object.assign({name: "", type: "slug", pattern: "", choices: "", required: true, description: "", sample: ""}, p));
   return d;
@@ -226,6 +233,16 @@ function toProfile(d) {
     else if (d.stdin) p.exec.stdin = d.stdin;
     const files = d.fileRows.filter(r => r.key && r.secret);
     if (files.length) p.exec.files = Object.fromEntries(files.map(r => [r.key, `{{secret:${r.secret}}}`]));
+    return p;
+  }
+  if (d.kind === "conn") {
+    // The connection supplies host and sign-in; the profile is only the request.
+    p.connection = d.connection;
+    p.http = {method: d.method, url: d.url};
+    const hs = Object.assign({}, d.extraHeaders);
+    if (d.bodyMode === "json") { hs["Content-Type"] = "application/json"; p.http.body = jsonBody(d.jsonRows); }
+    if (d.bodyMode === "raw") { hs["Content-Type"] = d.rawType; p.http.body = d.raw; }
+    if (Object.keys(hs).length) p.http.headers = hs;
     return p;
   }
   const headers = Object.assign({}, d.extraHeaders);
@@ -267,11 +284,12 @@ function fromProfile(p) {
   }
   const h = p.http; d.method = h.method; d.url = h.url;
   const headers = Object.assign({}, h.headers);
-  const auth = headers.Authorization || "";
+  if (p.connection) { d.kind = "conn"; d.connection = p.connection; }
+  const auth = p.connection ? "" : headers.Authorization || "";
   let m;
   if ((m = auth.match(/^Bearer \{\{secret:(.+?)\}\}$/))) { d.auth = "bearer"; d.secret = m[1]; delete headers.Authorization; }
   else if ((m = auth.match(/^token \{\{secret:(.+?)\}\}$/))) { d.auth = "token"; d.secret = m[1]; delete headers.Authorization; }
-  else for (const [k, v] of Object.entries(headers)) {
+  else if (!p.connection) for (const [k, v] of Object.entries(headers)) {
     if ((m = v.match(/^\{\{secret:(.+?)\}\}$/))) { d.auth = "header"; d.authHeader = k; d.secret = m[1]; delete headers[k]; break; }
   }
   if (h.body) {
@@ -299,8 +317,9 @@ function select(value, options, onchange, label) {
 }
 
 async function viewProfiles(body, keptImport) {
-  const [list, secrets] = await Promise.all([api("GET", "/api/profiles"), api("GET", "/api/secrets")]);
-  const openBuilder = d => renderBuilder(body, d, secrets);
+  const [list, secrets, conns] = await Promise.all([api("GET", "/api/profiles"), api("GET", "/api/secrets"), api("GET", "/api/connections")]);
+  const openBuilder = d => renderBuilder(body, d, secrets, conns);
+  const openConn = c => { fill(body, connForm(c, secrets, () => viewProfiles(body))); window.scrollTo(0, 0); };
   // Run now as the owner, to check a profile before an agent relies on it.
   const openTest = p => {
     const inputs = (p.params || []).map(q => { const f = field(q.name, {autocomplete: "off", spellcheck: "false"}); return [q.name, f]; });
@@ -321,29 +340,41 @@ async function viewProfiles(body, keptImport) {
   const catalog = await fetch("catalog.json").then(r => r.json()).catch(() => []);
   const haveSecret = n => secrets.some(s => s.name === n);
   const haveProfile = n => list.some(p => p.name === n);
-  const catalogCard = c => {
-    const missing = c.secrets.filter(n => !haveSecret(n));
-    const inputs = c.custom ? [] : missing.map(n => h("input", {type: "password", autocomplete: "off", placeholder: "Dán " + n, "aria-label": n}));
-    const err = h("div", {class: "err"});
-    const added = haveProfile(c.profile.name);
-    const direct = !c.custom && !(c.profile.secret_choices || []).length;
-    return h("div", {class: "tile"}, h("b", null, lang === "en" && c.title_en || c.title), h("small", {class: "muted"}, lang === "en" && c.hint_en || c.hint),
-      added ? h("span", {class: "badge"}, "đã thêm") : h("div", null, inputs,
-        h("div", {class: "row"}, direct ? h("button", {class: "primary", onclick: async () => {
-          err.textContent = "";
-          try {
-            for (const [i, n] of missing.entries()) {
-              if (!inputs[i].value) throw new Error("Hãy dán giá trị " + n);
-              await api("PUT", "/api/secrets/" + encodeURIComponent(n), {value: inputs[i].value.trim()});
-            }
-            await api("PUT", "/api/profiles", Object.assign({}, c.profile, lang === "en" && c.title_en ? {description: c.title_en} : {}));
-            viewProfiles(body);
-          } catch (e) { err.textContent = viErr(e.message); }
-        }}, "Thêm") : null, h("button", {onclick: () => openBuilder(fromProfile(c.profile))}, "Tuỳ chỉnh")), err));
+  const haveConn = n => conns.some(c => c.name === n);
+  const L = (o, k) => lang === "en" && o[k + "_en"] || o[k];
+  // One card per service: paste its token once, then pick the actions to allow.
+  const serviceCard = e => {
+    const svc = e.service, err = h("div", {class: "err"});
+    const fresh = e.actions.filter(a => !haveProfile(a.profile.name));
+    const picks = fresh.map((a, i) => ({a, cb: h("input", {type: "checkbox", checked: i === 0})}));
+    const secretName = svc && svc.auth && svc.auth.secret;
+    const needSecret = svc && !haveConn(svc.name) && secretName && !haveSecret(secretName) && !e.custom;
+    const tokenIn = needSecret ? h("input", {type: "password", autocomplete: "off", placeholder: "Dán " + secretName, "aria-label": secretName}) : null;
+    const direct = svc && !e.custom || svc && haveConn(svc.name);
+    const add = async () => {
+      err.textContent = "";
+      try {
+        if (!picks.some(x => x.cb.checked)) throw new Error("Hãy chọn ít nhất một hành động.");
+        if (tokenIn) {
+          if (!tokenIn.value) throw new Error("Hãy dán giá trị " + secretName);
+          await api("PUT", "/api/secrets/" + encodeURIComponent(secretName), {value: tokenIn.value.trim()});
+        }
+        if (!haveConn(svc.name)) await api("PUT", "/api/connections", svc);
+        for (const x of picks) if (x.cb.checked) await api("PUT", "/api/profiles", Object.assign({}, x.a.profile, lang === "en" && x.a.title_en ? {description: x.a.title_en} : {}));
+        viewProfiles(body);
+      } catch (e2) { err.textContent = viErr(e2.message); }
+    };
+    return h("div", {class: "tile"}, h("b", null, svc ? (svc.title || svc.name) : L(e, "title")), h("small", {class: "muted"}, L(e, "hint")),
+      svc && haveConn(svc.name) ? h("span", {class: "badge"}, "đã có kết nối") : null,
+      picks.length ? h("div", {class: "picklist"}, picks.map(x => h("label", {class: "check"}, x.cb, h("span", null, L(x.a, "title"))))) : h("span", {class: "badge"}, "đã thêm"),
+      tokenIn,
+      picks.length ? h("div", {class: "row"},
+        direct ? h("button", {class: "primary", onclick: add}, "Thêm") : null,
+        svc ? h("button", {onclick: () => openConn(Object.assign({}, svc, {_new: !haveConn(svc.name)}))}, "Tuỳ chỉnh kết nối")
+          : h("button", {onclick: () => openBuilder(fromProfile(picks[0].a.profile))}, "Tuỳ chỉnh")) : null, err);
   };
   const execOn = !!(state.status && state.status.exec);
-  const usable = catalog.filter(c => execOn || !c.profile.exec);
-  const groups = [...new Set(usable.map(c => c.group))];
+  const usable = catalog.filter(e => execOn || !e.actions.some(a => a.profile.exec));
   const ioErr = h("div", {class: "err", role: "alert"});
   const importBox = keptImport || h("div");
   const fileInput = h("input", {type: "file", accept: "application/json", hidden: true, onchange: () => {
@@ -382,6 +413,10 @@ async function viewProfiles(body, keptImport) {
       });
       const importBtn = h("button", {class: "primary", type: "button", onclick: async () => {
         importBtn.disabled = true;
+        // Connections first, because profiles refer to them.
+        for (const c of Array.isArray(data.connections) ? data.connections : []) {
+          try { await api("PUT", "/api/connections", c); } catch (e) { ioErr.textContent = viErr(e.message); }
+        }
         for (const r of rows) {
           if (!r.cb.checked) continue;
           try {
@@ -404,7 +439,8 @@ async function viewProfiles(body, keptImport) {
     ioErr.textContent = "";
     try {
       const profiles = await api("GET", "/api/profiles");
-      const blob = new Blob([JSON.stringify({ucanrun_profiles: 1, profiles}, null, 2)], {type: "application/json"});
+      const connections = await api("GET", "/api/connections");
+      const blob = new Blob([JSON.stringify({ucanrun_profiles: 1, connections, profiles}, null, 2)], {type: "application/json"});
       const url = URL.createObjectURL(blob);
       const a = h("a", {href: url, download: "ucanrun-profiles.json"});
       a.click();
@@ -413,8 +449,16 @@ async function viewProfiles(body, keptImport) {
   }}, "Xuất profile");
   const importOpenBtn = h("button", {type: "button", onclick: () => { fileInput.value = ""; fileInput.click(); }}, "Nhập profile");
   fill(body, h("div", {class: "card"}, h("h2", null, "Thêm nhanh"),
-    h("p", {class: "muted"}, "Dán token của dịch vụ rồi bấm Thêm, không cần cấu hình gì khác."),
-    groups.map(g => h("div", null, h("h3", null, lang === "en" && (usable.find(c => c.group === g).group_en) || g), h("div", {class: "tiles"}, usable.filter(c => c.group === g).map(catalogCard))))),
+    h("p", {class: "muted"}, "Chọn dịch vụ, dán token một lần, rồi chọn các hành động agent được xin."),
+    h("div", {class: "tiles"}, usable.map(serviceCard),
+      h("div", {class: "tile"}, h("b", null, "Dịch vụ khác"), h("small", {class: "muted"}, "Mọi API dùng token: khai báo địa chỉ và cách đăng nhập."),
+        h("div", {class: "row"}, h("button", {class: "primary", onclick: () => openConn({_new: true, name: "", base_url: "https://", auth: {type: "bearer", secret: ""}})}, "Thêm kết nối"))))),
+  h("div", {class: "card"}, h("h2", null, `Kết nối (${conns.length})`),
+    conns.length ? conns.map(c => h("div", {class: "spread"}, h("span", null, h("b", null, c.title || c.name), " ", h("code", null, c.name),
+      h("div", {class: "muted"}, c.base_url + " · " + c.auth.type + (c.auth.secret ? " · " + c.auth.secret : c.auth.choices && c.auth.choices.length ? " · " + c.auth.choices.join(" / ") : ""))),
+      h("span", null, h("button", {onclick: () => openBuilder(newDraft({kind: "conn", connection: c.name, url: "/"}))}, "Hành động mới"), " ",
+        h("button", {onclick: () => openConn(c)}, "Sửa"), " ",
+        h("button", {class: "danger", onclick: async () => { if (confirm(tr(`Xoá kết nối ${c.name}?`))) { try { await api("DELETE", "/api/connections/" + encodeURIComponent(c.name)); viewProfiles(body); } catch (e) { alert(viErr(e.message)); } } }}, "Xoá")))) : h("p", {class: "muted"}, "Chưa có kết nối.")),
   h("div", {class: "card"}, h("h2", null, "Tự tạo profile"),
     h("p", {class: "muted"}, "Profile là một việc cụ thể bạn cho phép agent xin làm."),
     h("div", {class: "row"}, Object.values(templates).map(t => h("button", {onclick: () => openBuilder(newDraft(t.d))}, t.label)))),
@@ -430,7 +474,54 @@ async function viewProfiles(body, keptImport) {
   importBox);
 }
 
-function renderBuilder(body, d, secrets) {
+function connForm(c, secrets, done) {
+  const x = JSON.parse(JSON.stringify(c)); x.auth = x.auth || {type: "bearer"}; x.headers = x.headers || {};
+  let mode = x.auth.choices && x.auth.choices.length ? "pick" : "one";
+  const name = field("Tên kết nối", {autocomplete: "off", spellcheck: "false"}); name.input.value = x.name || "";
+  if (!x._new) name.input.readOnly = true;
+  const title = field("Tên hiển thị", {autocomplete: "off"}); title.input.value = x.title || "";
+  const base = field("Địa chỉ gốc", {autocomplete: "off", spellcheck: "false", placeholder: "https://api.example.com/v1"}); base.input.value = x.base_url || "";
+  const authBox = h("div"), headBox = h("div");
+  const drawAuthC = () => {
+    const kids = [select(x.auth.type, [["bearer", "Bearer token (phổ biến nhất)"], ["token", "Token kiểu Gitea, GitHub"], ["header", "Header riêng, như X-Api-Key"], ["none", "Không cần đăng nhập"]], v => { x.auth.type = v; drawAuthC(); }, "Cách đăng nhập")];
+    if (x.auth.type === "header") { const hn = field("Tên header", {placeholder: "X-Api-Key", autocomplete: "off"}); hn.input.value = x.auth.header || ""; hn.input.addEventListener("input", () => { x.auth.header = hn.input.value; }); kids.push(hn.el); }
+    if (x.auth.type !== "none") {
+      kids.push(choiceGroup("secretmode", mode, [{value: "one", title: "Một secret"}, {value: "pick", title: "Chọn khi duyệt", help: "Nhiều tài khoản cho cùng dịch vụ"}], v => { mode = v; drawAuthC(); }));
+      if (mode === "one") {
+        const sn = field("Tên secret", {autocomplete: "off", spellcheck: "false", list: "secret-names"}); sn.input.value = x.auth.secret || "";
+        sn.input.addEventListener("input", () => { x.auth.secret = sn.input.value.trim(); });
+        kids.push(sn.el, h("datalist", {id: "secret-names"}, secrets.map(s => h("option", {value: s.name}))), h("small", {class: "muted"}, "Chưa có secret này thì thêm ở tab Secret, hoặc dán token khi dùng Thêm nhanh."));
+      } else {
+        x.auth.choices = x.auth.choices || [];
+        kids.push(secrets.length ? h("div", {class: "picklist"}, secrets.map(s => h("label", {class: "check"}, h("input", {type: "checkbox", checked: x.auth.choices.includes(s.name), onchange: e => { x.auth.choices = e.target.checked ? x.auth.choices.concat(s.name) : x.auth.choices.filter(n => n !== s.name); }}), h("span", null, s.name))))
+          : h("p", {class: "note"}, "Kho chưa có secret. Hãy thêm ở tab Secret trước."));
+      }
+    }
+    fill(authBox, kids);
+  };
+  const drawHead = () => fill(headBox, Object.entries(x.headers).map(([k, v]) => {
+    const kk = h("input", {"aria-label": "Tên header", autocomplete: "off"}); kk.value = k;
+    const vv = h("input", {"aria-label": "Giá trị", autocomplete: "off"}); vv.value = v;
+    const sync = () => { delete x.headers[k]; if (kk.value) x.headers[kk.value] = vv.value; k = kk.value; };
+    kk.addEventListener("change", sync); vv.addEventListener("input", sync);
+    return h("div", {class: "kv"}, kk, vv, h("button", {"aria-label": "Xoá", onclick: () => { delete x.headers[k]; drawHead(); }}, "×"));
+  }), h("button", {onclick: () => { x.headers["X-Header-" + (Object.keys(x.headers).length + 1)] = ""; drawHead(); }}, "+ Thêm header"));
+  drawAuthC(); drawHead();
+  const card = form(x._new ? "Thêm kết nối" : "Sửa kết nối", [name, title, base], "Lưu kết nối", async () => {
+    const out = {name: name.input.value.trim() || slugify(title.input.value), title: title.input.value.trim(), base_url: base.input.value.trim(), auth: {type: x.auth.type}};
+    if (x.auth.type === "header") out.auth.header = x.auth.header;
+    if (x.auth.type !== "none") { if (mode === "one") out.auth.secret = x.auth.secret; else out.auth.choices = x.auth.choices; }
+    const hs = Object.fromEntries(Object.entries(x.headers).filter(([k, v]) => k && v));
+    if (Object.keys(hs).length) out.headers = hs;
+    try { await api("PUT", "/api/connections", out); } catch (e) { throw new Error(viErr(e.message)); }
+    if (x._new && c.service_actions) for (const p of c.service_actions) await api("PUT", "/api/profiles", p).catch(() => {});
+    done();
+  }, h("p", {class: "muted"}, "Một kết nối là một dịch vụ: nơi gọi tới và cách đăng nhập. Mọi hành động dùng chung, agent không đổi được máy chủ."));
+  card.append(h("h3", {class: "gap"}, "Đăng nhập"), authBox, h("h3", {class: "gap"}, "Header chung (tuỳ chọn)"), headBox, h("div", {class: "row"}, h("button", {onclick: done}, "Huỷ")));
+  return card;
+}
+
+function renderBuilder(body, d, secrets, conns = []) {
   let lastField = null, timer = null, valid = false;
   if (!d.name && d.description) d.name = slugify(d.description);
   const refresh = () => { clearTimeout(timer); timer = setTimeout(runPreview, 250); };
@@ -464,6 +555,19 @@ function renderBuilder(body, d, secrets) {
         h("small", {class: "muted"}, "Dòng đầu là đường dẫn đầy đủ. Không qua shell, nên không dùng được dấu | hay >.")));
       return;
     }
+    const methodSel = () => select(d.method, ["GET", "POST", "PUT", "PATCH", "DELETE"].map(m => [m, m]), v => { d.method = v; if (v !== "GET" && d.approval === "auto") { d.approval = "ask"; drawApproval(); } refresh(); }, "Phương thức");
+    if (d.kind === "conn") {
+      if (!d.connection && conns.length) d.connection = conns[0].name;
+      const c = conns.find(x => x.name === d.connection);
+      const path = h("input", {autocomplete: "off", spellcheck: "false", placeholder: "/items/{{item_id}}", "aria-label": "Đường dẫn"});
+      path.value = d.url; track(path);
+      path.addEventListener("input", () => { d.url = path.value; refresh(); });
+      fill(where, h("label", null, h("span", null, "Kết nối"), select(d.connection, conns.map(x => [x.name, (x.title || x.name) + " · " + x.base_url]), v => { d.connection = v; drawWhere(); drawAuth(); refresh(); }, "Kết nối")),
+        h("div", {class: "url-row"}, methodSel(), path),
+        h("small", {class: "muted"}, c ? c.base_url.replace(/\/$/, "") + (d.url || "/…") : ""),
+        h("small", {class: "muted"}, "Chỉ ghi đường dẫn bắt đầu bằng /. Máy chủ và đăng nhập lấy từ kết nối."));
+      return;
+    }
     const url = h("input", {type: "url", autocomplete: "off", spellcheck: "false", placeholder: "https://api.example.com/v1/items/{{item_id}}", "aria-label": "Địa chỉ"});
     url.value = d.url; track(url);
     url.addEventListener("input", () => { d.url = url.value; refresh(); });
@@ -471,8 +575,10 @@ function renderBuilder(body, d, secrets) {
       h("small", {class: "muted"}, "Tên máy luôn cố định, agent chỉ điền được các giá trị ở mục 4."));
   };
   const step2 = h("section", {class: "card"}, h("h3", null, "2. Gọi tới đâu"),
-    state.status && state.status.exec ? choiceGroup("kind", d.kind, [{value: "http", title: "Gọi API", help: "An toàn hơn, nên dùng"}, {value: "exec", title: "Chạy lệnh", help: "Nâng cao, chạy trong container"}],
-      v => { d.kind = v; drawWhere(); drawAuth(); refresh(); }) : null, where);
+    choiceGroup("kind", d.kind, [].concat(conns.length ? [{value: "conn", title: "Dùng kết nối", help: "Máy chủ và đăng nhập đã khai báo sẵn"}] : [],
+      [{value: "http", title: "Địa chỉ đầy đủ", help: "Tự ghi URL và cách đăng nhập"}],
+      state.status && state.status.exec ? [{value: "exec", title: "Chạy lệnh", help: "Nâng cao, chạy trong container"}] : []),
+      v => { d.kind = v; drawWhere(); drawAuth(); refresh(); }), where);
 
   // 3. Credentials
   const authBox = h("div");
@@ -480,6 +586,11 @@ function renderBuilder(body, d, secrets) {
     ? select(value, [["", "Chọn secret…"]].concat(withChoice ? [["choice", "Chọn khi duyệt trên Telegram"]] : [], secrets.map(s => [s.name, s.name])), on, "Secret")
     : h("p", {class: "note"}, "Kho chưa có secret. Hãy thêm ở tab Secret trước.");
   const drawAuth = () => {
+    if (d.kind === "conn") {
+      const c = conns.find(x => x.name === d.connection);
+      fill(authBox, h("p", {class: "muted"}, tr("Đăng nhập theo kết nối") + " " + (c ? (c.title || c.name) : "") + (c && c.auth.choices && c.auth.choices.length ? " · " + tr("chọn secret khi duyệt") : c && c.auth.secret ? " · " + c.auth.secret : "")));
+      return;
+    }
     if (d.kind === "exec") {
       const rows = d.envRows.map((r, i) => {
         const k = h("input", {placeholder: "TEN_BIEN", "aria-label": "Tên biến", autocomplete: "off"}); k.value = r.key;
