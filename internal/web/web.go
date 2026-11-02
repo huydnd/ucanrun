@@ -21,10 +21,10 @@ import (
 
 	"github.com/skip2/go-qrcode"
 
-	"github.com/huydnd/ucanrun/internal/audit"
-	"github.com/huydnd/ucanrun/internal/core"
-	"github.com/huydnd/ucanrun/internal/policy"
-	"github.com/huydnd/ucanrun/internal/vault"
+	"ucanrun/internal/audit"
+	"ucanrun/internal/core"
+	"ucanrun/internal/policy"
+	"ucanrun/internal/vault"
 )
 
 func init() { mime.AddExtensionType(".webmanifest", "application/manifest+json") }
@@ -308,8 +308,42 @@ func (s *Server) Handler() http.Handler {
 		if !read(w, r, &in) {
 			return
 		}
-		if err := s.C.TOTPConfirm(in.Code); err != nil {
+		codes, err := s.C.TOTPConfirm(in.Code)
+		if err != nil {
 			fail(w, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"recovery_codes": codes})
+	}))
+	m.HandleFunc("POST /api/totp/recovery", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Code string `json:"code"`
+		}
+		if !read(w, r, &in) {
+			return
+		}
+		codes, err := s.C.NewRecoveryCodes(in.Code)
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"recovery_codes": codes})
+	}))
+	m.HandleFunc("POST /api/totp/reset", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Passphrase string `json:"passphrase"`
+			Code       string `json:"code"`
+		}
+		if !read(w, r, &in) {
+			return
+		}
+		if s.throttled() {
+			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "thử lại sau ít giây"})
+			return
+		}
+		if err := s.C.TOTPReset([]byte(in.Passphrase), in.Code); err != nil {
+			s.recordLogin(false)
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "sai mật khẩu hoặc mã"})
 			return
 		}
 		writeJSON(w, 200, map[string]bool{"ok": true})
@@ -323,6 +357,7 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 		out["telegram"] = s.C.TelegramStatus()
 		out["totp"] = s.C.TOTPEnabled()
 		out["exec"] = s.C.ExecEnabled()
+		out["recovery_left"] = s.C.RecoveryLeft()
 	}
 	writeJSON(w, 200, out)
 }

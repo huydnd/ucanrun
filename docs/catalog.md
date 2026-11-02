@@ -6,17 +6,17 @@ Tab **Profile**, mục **Thêm nhanh**. Mỗi mẫu cần một secret; nếu kh
 |---|---|---|---|
 | GitHub: xem repo | `github-list-repos` | `github_token` | Hỏi |
 | GitHub: tạo issue | `github-create-issue` | `github_token` | Hỏi |
-| Gitea: xem repo | `gitea-list-repos` | `gitea_token` | Hỏi |
-| Gitea: tạo repo private | `gitea-create-repo` | `gitea_token` | Hỏi |
+| Gitea: xem repo (cần sửa địa chỉ) | `gitea-list-repos` | `gitea_token` | Hỏi |
+| Gitea: tạo repo private (cần sửa địa chỉ) | `gitea-create-repo` | `gitea_token` | Hỏi |
 | Cloudflare: xem domain | `cloudflare-list-zones` | `cloudflare_token` | Hỏi |
 | Cloudflare: xoá cache | `cloudflare-purge-cache` | `cloudflare_token` | TOTP |
 | DeepSeek: xem số dư | `deepseek-balance` | `deepseek_key` | Tự chạy |
 | Google AI: xem model | `google-ai-list-models` | `google_ai_key` | Tự chạy |
 | Notion: tìm trang | `notion-search` | `notion_token` | Hỏi |
 | GitHub: chọn tài khoản | `github-whoami` | Chọn trên Telegram | Hỏi |
-| Máy chủ: khởi động lại dịch vụ | `server-restart-service` | Khoá SSH và mật khẩu sudo | TOTP |
+| Khởi động lại dịch vụ qua SSH | `ssh-restart-service` | Khoá SSH và mật khẩu sudo | TOTP |
 
-Hai mục cuối phải bấm **Tuỳ chỉnh** để sửa danh sách cho đúng. Mục máy chủ cần [thiết lập riêng](server-root.md).
+Các mục cần sửa phải bấm **Tuỳ chỉnh**. Mục SSH cần image `exec` và [thiết lập riêng](ssh-sudo.md).
 
 ## Cấp quyền token
 

@@ -9,8 +9,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/huydnd/ucanrun/internal/policy"
-	"github.com/huydnd/ucanrun/internal/vault"
+	"ucanrun/internal/policy"
+	"ucanrun/internal/vault"
 )
 
 // Token authorizes an agent. Only the SHA-256 of the value is stored.
@@ -36,6 +36,9 @@ type State struct {
 	Telegram     TelegramCfg               `json:"telegram"`
 	TOTPEnabled  bool                      `json:"totp_enabled"`
 	LastTOTPStep int64                     `json:"last_totp_step"`
+	// RecoveryHashes are SHA-256 of single-use recovery codes. The codes carry
+	// 50 random bits, so a fast hash is enough.
+	RecoveryHashes []string `json:"recovery_hashes,omitempty"`
 }
 
 type signedFile struct {

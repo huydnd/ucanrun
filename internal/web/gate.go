@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/huydnd/ucanrun/internal/vault"
+	"ucanrun/internal/vault"
 )
 
 //go:embed gate.html

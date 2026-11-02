@@ -10,7 +10,7 @@
 
 ## ucanrun không chống được
 
-- **Agent chủ động vượt rào khi có quyền cao hơn.** User thuộc nhóm `docker` vào được container. Nếu buộc phải dùng, hãy chấp nhận rủi ro này một cách có ý thức. Hướng vá: socket proxy có allowlist.
+- **Agent chủ động vượt rào khi có quyền cao hơn.** User thuộc nhóm `docker` vào được container. Đừng đưa agent vào nhóm `docker`. Nếu buộc phải dùng, hãy đặt socket proxy có allowlist phía trước.
 - Người duyệt bấm mà không đọc. Hãy đọc dòng lệnh, đừng đọc lý do. Lý do là agent tự viết.
 - Dịch vụ đích bị lộ hoặc token có quyền quá rộng.
 - Máy chủ bị chiếm root.

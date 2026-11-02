@@ -18,11 +18,11 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/huydnd/ucanrun/internal/audit"
-	"github.com/huydnd/ucanrun/internal/policy"
-	"github.com/huydnd/ucanrun/internal/telegram"
-	"github.com/huydnd/ucanrun/internal/totp"
-	"github.com/huydnd/ucanrun/internal/vault"
+	"ucanrun/internal/audit"
+	"ucanrun/internal/policy"
+	"ucanrun/internal/telegram"
+	"ucanrun/internal/totp"
+	"ucanrun/internal/vault"
 )
 
 const (
@@ -221,7 +221,7 @@ func (c *Core) Login(pass []byte, code string) error {
 		}
 	}
 	if c.st.TOTPEnabled {
-		if err := c.checkTOTPLocked(code); err != nil {
+		if err := c.checkSecondFactorLocked(code); err != nil {
 			if wasLocked {
 				c.st = nil
 				c.Vault.Lock()
@@ -235,6 +235,118 @@ func (c *Core) Login(pass []byte, code string) error {
 	}
 	c.log("login", "web", nil)
 	return nil
+}
+
+// checkSecondFactorLocked accepts a TOTP code or a single-use recovery code.
+func (c *Core) checkSecondFactorLocked(code string) error {
+	if len(code) == 6 {
+		return c.checkTOTPLocked(code)
+	}
+	if c.useRecoveryLocked(code) {
+		c.log("recovery_code_used", "web", map[string]any{"left": len(c.st.RecoveryHashes)})
+		return c.saveLocked()
+	}
+	if code == "" {
+		return ErrNeedTOTP
+	}
+	return ErrBadTOTP
+}
+
+const recoveryAlphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+
+func normalizeRecovery(s string) string {
+	return strings.ToUpper(strings.NewReplacer("-", "", " ", "").Replace(s))
+}
+
+func hashRecovery(s string) string {
+	h := sha256.Sum256([]byte("ucanrun recovery v1:" + normalizeRecovery(s)))
+	return hex.EncodeToString(h[:])
+}
+
+// newRecoveryCodes returns eight codes shown once, and their hashes.
+func newRecoveryCodes() (plain, hashes []string, err error) {
+	for range 8 {
+		b := make([]byte, 10)
+		for i := range b {
+			n, err := rand.Int(rand.Reader, big.NewInt(int64(len(recoveryAlphabet))))
+			if err != nil {
+				return nil, nil, err
+			}
+			b[i] = recoveryAlphabet[n.Int64()]
+		}
+		code := string(b[:5]) + "-" + string(b[5:])
+		plain, hashes = append(plain, code), append(hashes, hashRecovery(code))
+	}
+	return plain, hashes, nil
+}
+
+func (c *Core) useRecoveryLocked(code string) bool {
+	if len(normalizeRecovery(code)) != 10 {
+		return false
+	}
+	h := hashRecovery(code)
+	for i, v := range c.st.RecoveryHashes {
+		if subtle.ConstantTimeCompare([]byte(v), []byte(h)) == 1 {
+			c.st.RecoveryHashes = append(c.st.RecoveryHashes[:i:i], c.st.RecoveryHashes[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
+// RecoveryLeft reports how many unused recovery codes remain.
+func (c *Core) RecoveryLeft() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.st == nil {
+		return 0
+	}
+	return len(c.st.RecoveryHashes)
+}
+
+// NewRecoveryCodes replaces all codes. A TOTP code proves the phone is in hand.
+func (c *Core) NewRecoveryCodes(code string) ([]string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.st == nil {
+		return nil, ErrLocked
+	}
+	if !c.st.TOTPEnabled {
+		return nil, errors.New("chưa bật TOTP")
+	}
+	if err := c.checkTOTPLocked(code); err != nil {
+		return nil, err
+	}
+	plain, hashes, err := newRecoveryCodes()
+	if err != nil {
+		return nil, err
+	}
+	c.st.RecoveryHashes = hashes
+	c.log("recovery_codes_created", "web", nil)
+	return plain, c.saveLocked()
+}
+
+// TOTPReset turns TOTP off so a new phone can enroll. It needs the passphrase and
+// a current TOTP or recovery code, so a stolen session alone cannot do it.
+func (c *Core) TOTPReset(pass []byte, code string) error {
+	if !c.loginMu.TryLock() {
+		return ErrLoginBusy
+	}
+	defer c.loginMu.Unlock()
+	if err := c.Vault.Verify(pass); err != nil {
+		return err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.st == nil {
+		return ErrLocked
+	}
+	if err := c.checkSecondFactorLocked(code); err != nil {
+		return err
+	}
+	c.st.TOTPEnabled, c.st.RecoveryHashes, c.st.LastTOTPStep = false, nil, 0
+	c.log("totp_reset", "web", nil)
+	return c.saveLocked()
 }
 
 func (c *Core) checkTOTPLocked(code string) error {
@@ -409,21 +521,26 @@ func (c *Core) TOTPStart() (secret, uri string, err error) {
 	if err = c.Vault.Put(secretTOTP, []byte(secret)); err != nil {
 		return
 	}
-	return secret, totp.URI(secret, "huydnd"), nil
+	return secret, totp.URI(secret, "owner"), nil
 }
 
-func (c *Core) TOTPConfirm(code string) error {
+// TOTPConfirm finishes enrollment and returns recovery codes, shown once.
+func (c *Core) TOTPConfirm(code string) ([]string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.st == nil {
-		return ErrLocked
+		return nil, ErrLocked
 	}
 	if err := c.checkTOTPLocked(code); err != nil {
-		return err
+		return nil, err
 	}
-	c.st.TOTPEnabled = true
+	plain, hashes, err := newRecoveryCodes()
+	if err != nil {
+		return nil, err
+	}
+	c.st.TOTPEnabled, c.st.RecoveryHashes = true, hashes
 	c.log("totp_enabled", "web", nil)
-	return c.saveLocked()
+	return plain, c.saveLocked()
 }
 
 func (c *Core) TOTPEnabled() bool {

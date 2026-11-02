@@ -25,37 +25,24 @@ UCANRUN_PUBLIC_URL=https://ucanrun.example.com docker compose up -d
 ## 1. Khởi tạo kho
 
 1. Nhập setup token từ log.
-2. Đặt **mật khẩu chính**, lưu vào Bitwarden. Mất mật khẩu này thì không khôi phục được.
+2. Đặt **mật khẩu chính**, lưu vào trình quản lý mật khẩu. Mất mật khẩu này thì không khôi phục được.
 
-## 2. Nối Telegram
+## 2. Làm theo mục Bắt đầu
 
-1. Tạo bot bằng @BotFather, lấy token. Dùng bot riêng, không dùng chung bot khác.
-2. Vào **Cài đặt**, dán token.
-3. Gửi `/pair <mã>` cho bot trong chat riêng. Mã có 6 ký tự, hạn 3 phút, sai 3 lần là huỷ.
+Sau khi khởi tạo, tab **Bắt đầu** dẫn bạn qua bốn bước. Bước nào chưa làm được thì bỏ qua và quay lại sau.
 
-## 3. Bật TOTP
+1. **Nối Telegram:** tạo bot bằng @BotFather, dán token, gửi `/pair <mã>` cho bot. Mã có 6 ký tự, hạn 3 phút, sai 3 lần là huỷ.
+2. **Bật TOTP:** quét mã QR, rồi lưu 8 mã khôi phục. Các mã này chỉ hiện một lần.
+3. **Thêm dịch vụ:** chọn mẫu, dán token, xem [danh mục mẫu](catalog.md). Việc khác thì dùng [form tạo profile](profiles.md).
+4. **Tạo token cho agent:** chạy các lệnh hiện trên màn hình ở máy agent. Không dán token vào chat với AI.
 
-Vào **Cài đặt**, bấm **Bật TOTP**, quét mã QR. Lưu mã bí mật vào Bitwarden, vì mất nó thì không đăng nhập được.
+Kiểm tra agent: `ucr profiles`.
 
-## 4. Thêm việc cho agent
+## Mất điện thoại
 
-Vào tab **Profile**, mục **Thêm nhanh**. Chọn dịch vụ, dán token, bấm **Thêm**. Xem [danh mục mẫu](catalog.md).
+Đăng nhập bằng mật khẩu chính và một mã khôi phục, nhập vào ô mã TOTP. Mỗi mã dùng một lần. Sau đó vào **Cài đặt** → **TOTP** → **Đổi điện thoại** để đăng ký thiết bị mới.
 
-Muốn việc khác thì dùng [form tạo profile](profiles.md).
-
-## 5. Nối agent
-
-1. Vào **Token agent**, tạo một token cho mỗi agent.
-2. Lưu token, chỉ hiện một lần:
-
-   ```bash
-   mkdir -p ~/.config/ucanrun
-   (umask 077; cat > ~/.config/ucanrun/token)
-   ```
-
-   Dán token, nhấn Enter, rồi `Ctrl-D`. Không dán vào chat với AI.
-3. Nối Claude Code: `claude mcp add --scope user ucanrun -- ucr mcp`.
-4. Kiểm tra: `ucr profiles`.
+Mã khôi phục không duyệt được yêu cầu rủi ro cao.
 
 ## Cài lên điện thoại
 
