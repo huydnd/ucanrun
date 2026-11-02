@@ -472,7 +472,7 @@ async function viewSettings(body) {
   const s = await api("GET", "/api/status");
   const tg = field("Token bot từ @BotFather", {type: "password", autocomplete: "off"});
   const out = h("div");
-  const pairHint = (bot, code) => out.replaceChildren(h("div", {class: "note"}, `Mở chat riêng với ${bot ? "@" + bot : "bot"} và gửi trong 10 phút:`, h("pre", null, "/pair " + code)));
+  const pairHint = (bot, code) => out.replaceChildren(h("div", {class: "note"}, `Mở chat riêng với ${bot ? "@" + bot : "bot"} và gửi trong 3 phút:`, h("pre", null, "/pair " + code)));
   const tgCard = form("Telegram", [tg], "Lưu token", async () => {
     const r = await api("PUT", "/api/telegram", {token: tg.input.value});
     tg.input.value = ""; pairHint(r.bot, r.code);

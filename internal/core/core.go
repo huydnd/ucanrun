@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/big"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -32,6 +33,10 @@ const (
 	rateWindow     = 10 * time.Minute
 	rateMax        = 30
 	maxDisplay     = 3000
+	maxPairFails   = 3
+	pairTTL        = 3 * time.Minute
+	pairLetters    = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789"
+	pairSymbols    = "#$%&+=?!"
 	maxHistory     = 200
 )
 
@@ -90,18 +95,19 @@ type Core struct {
 	Vault *vault.Vault
 	Audit *audit.Log
 
-	mu       sync.Mutex
-	st       *State // nil while locked
-	reqs     map[string]*Request
-	order    []string
-	bot      *telegram.Bot
-	botStop  context.CancelFunc
-	pairCode string
-	pairTill time.Time
-	loginMu  sync.Mutex
-	recent   map[string][]time.Time
-	baseCtx  context.Context
-	cancel   context.CancelFunc
+	mu        sync.Mutex
+	st        *State // nil while locked
+	reqs      map[string]*Request
+	order     []string
+	bot       *telegram.Bot
+	botStop   context.CancelFunc
+	pairCode  string
+	pairTill  time.Time
+	pairFails int
+	loginMu   sync.Mutex
+	recent    map[string][]time.Time
+	baseCtx   context.Context
+	cancel    context.CancelFunc
 }
 
 func New(opt Options) (*Core, error) {
@@ -316,10 +322,33 @@ func (c *Core) SetTelegramToken(ctx context.Context, token string) (string, stri
 	if err := c.saveLocked(); err != nil {
 		return "", "", err
 	}
-	c.pairCode, c.pairTill = randHex(8), c.opt.Now().Add(10*time.Minute)
+	c.pairCode, c.pairTill, c.pairFails = newPairCode(), c.opt.Now().Add(pairTTL), 0
 	c.startBotLocked()
 	c.log("telegram_set", "web", map[string]any{"bot": u})
 	return u, c.pairCode, nil
+}
+
+// newPairCode returns six characters with one symbol at a random position. The
+// alphabet skips lookalikes and characters Telegram treats as formatting.
+func newPairCode() string {
+	pick := func(set string) byte {
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(set))))
+		if err != nil {
+			panic(err)
+		}
+		return set[n.Int64()]
+	}
+	all := pairLetters + pairSymbols
+	code := make([]byte, 6)
+	for i := range code {
+		code[i] = pick(all)
+	}
+	pos, err := rand.Int(rand.Reader, big.NewInt(6))
+	if err != nil {
+		panic(err)
+	}
+	code[pos.Int64()] = pick(pairSymbols)
+	return string(code)
 }
 
 func (c *Core) NewPairCode() (string, error) {
@@ -328,7 +357,7 @@ func (c *Core) NewPairCode() (string, error) {
 	if c.bot == nil {
 		return "", errors.New("chưa cấu hình bot")
 	}
-	c.pairCode, c.pairTill = randHex(8), c.opt.Now().Add(10*time.Minute)
+	c.pairCode, c.pairTill, c.pairFails = newPairCode(), c.opt.Now().Add(pairTTL), 0
 	return c.pairCode, nil
 }
 
@@ -336,8 +365,16 @@ func (c *Core) NewPairCode() (string, error) {
 func (c *Core) Pair(code string, userID, chatID int64) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.st == nil || c.pairCode == "" || c.opt.Now().After(c.pairTill) ||
-		subtle.ConstantTimeCompare([]byte(code), []byte(c.pairCode)) != 1 {
+	if c.st == nil || c.pairCode == "" || c.opt.Now().After(c.pairTill) {
+		return false
+	}
+	if subtle.ConstantTimeCompare([]byte(code), []byte(c.pairCode)) != 1 {
+		// Six characters are only safe with very few guesses, and anyone on
+		// Telegram can message the bot.
+		if c.pairFails++; c.pairFails >= maxPairFails {
+			c.pairCode = ""
+			c.log("pair_code_burned", "telegram", nil)
+		}
 		return false
 	}
 	c.pairCode = ""

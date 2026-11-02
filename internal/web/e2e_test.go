@@ -654,6 +654,42 @@ func TestPreview(t *testing.T) {
 	}
 }
 
+func TestPairCodeIsShortAndBurnsAfterGuesses(t *testing.T) {
+	e := setup(t, time.Minute)
+	code, m := e.req("PUT", "/api/telegram", map[string]string{"token": botTok})
+	if code != 200 {
+		t.Fatalf("%d %v", code, m)
+	}
+	pair := m["code"].(string)
+	if len(pair) != 6 || !strings.ContainsAny(pair, "#$%&+=?!") || strings.ContainsAny(pair, "0O1lI_*`~ ") {
+		t.Fatalf("code %q", pair)
+	}
+	for i := 0; i < 3; i++ {
+		e.tg.text(stranger, stranger, "/pair guess"+fmt.Sprint(i))
+	}
+	e.tg.text(owner, owner, "/pair "+pair) // correct, but too late
+	waitFor(t, "code burned", func() bool {
+		es, _ := e.c.Audit.Tail(5)
+		for _, x := range es {
+			if x.Event == "pair_code_burned" {
+				return true
+			}
+		}
+		return false
+	})
+	time.Sleep(300 * time.Millisecond)
+	if e.c.TelegramStatus().Paired {
+		t.Fatal("paired with a burned code")
+	}
+	// Generating a new code from the web works again.
+	code, m = e.req("POST", "/api/telegram/pair", nil)
+	if code != 200 {
+		t.Fatalf("%d %v", code, m)
+	}
+	e.tg.text(owner, owner, "/pair "+m["code"].(string))
+	waitFor(t, "pairing", func() bool { return e.c.TelegramStatus().Paired })
+}
+
 func TestSetupDisabledWithoutToken(t *testing.T) {
 	dir := t.TempDir()
 	c, _ := core.New(core.Options{DataDir: dir, WorkFactor: 10})
