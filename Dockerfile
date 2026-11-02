@@ -16,7 +16,7 @@ RUN cargo build --release --locked --bin ucr \
 
 # `--target exec` adds the tools that exec profiles run.
 FROM alpine:3.23@sha256:ff7f0c727dd796aa36787bfcd9a64bf35a6ce72a73451b3359fde849b6703d63 AS exec
-RUN apk add --no-cache ca-certificates git openssh-client curl \
+RUN apk add --no-cache ca-certificates git openssh-client curl postgresql-client \
  && adduser -D -H -u 10001 ucanrun \
  && mkdir /data && chown 10001:10001 /data && chmod 700 /data
 COPY --from=build /ucr /usr/local/bin/ucr

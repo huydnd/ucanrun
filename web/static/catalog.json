@@ -339,5 +339,50 @@
     }
    }
   ]
+ },
+ {
+  "title": "PostgreSQL chỉ đọc",
+  "title_en": "PostgreSQL, read only",
+  "hint": "Cần image exec. Lưu secret postgres nhiều trường: host, port, user, database công khai, password riêng. Dùng user database chỉ có quyền SELECT.",
+  "hint_en": "Needs the exec image. Save a multi-field secret postgres: host, port, user and database public, password private. Use a database user that can only SELECT.",
+  "custom": true,
+  "actions": [
+   {
+    "title": "Chạy truy vấn",
+    "title_en": "Run a query",
+    "profile": {
+     "name": "postgres-query",
+     "description": "Chạy một truy vấn đọc trên PostgreSQL và trả kết quả",
+     "risk": "low",
+     "timeout_sec": 30,
+     "params": [
+      {
+       "name": "query",
+       "pattern": "(?s).{1,4000}",
+       "required": true
+      }
+     ],
+     "exec": {
+      "argv": [
+       "/usr/bin/psql",
+       "-X",
+       "--no-password",
+       "-v",
+       "ON_ERROR_STOP=1",
+       "-c",
+       "{{query}}"
+      ],
+      "env": {
+       "PGHOST": "{{secret:postgres.host}}",
+       "PGPORT": "{{secret:postgres.port}}",
+       "PGUSER": "{{secret:postgres.user}}",
+       "PGDATABASE": "{{secret:postgres.database}}",
+       "PGPASSWORD": "{{secret:postgres.password}}",
+       "PGOPTIONS": "-c default_transaction_read_only=on -c statement_timeout=20000"
+      }
+     }
+    }
+   }
+  ]
  }
 ]
