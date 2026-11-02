@@ -49,10 +49,10 @@ const CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; img-
 const GATE_CSP: &str = "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
 
 #[derive(RustEmbed)]
-#[folder = "../internal/web/static"]
+#[folder = "web/static"]
 pub(crate) struct Static;
 
-static GATE_PAGE: &[u8] = include_bytes!("../../../internal/web/gate.html");
+static GATE_PAGE: &[u8] = include_bytes!("../../web/gate.html");
 
 pub(crate) fn log_warn(msg: &str, kv: &[(&str, &str)]) {
     let mut s = format!("WARN {msg}");

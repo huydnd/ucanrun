@@ -215,8 +215,8 @@ fn public_url() -> Result<String, String> {
 /// Keeps keys out of core files and away from same-uid processes.
 fn harden() {
     // SAFETY: prctl with constant integer arguments.
-    let r = unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0) };
-    if r != 0 {
+    #[cfg(target_os = "linux")]
+    if unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0) } != 0 {
         let e = std::io::Error::last_os_error().to_string();
         log("WARN", "could not disable dumps", &[("err", &e)]);
     }

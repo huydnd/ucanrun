@@ -1,9 +1,9 @@
 /ucr
 /data/
+/target/
 .env
 *.age
 *.token
 
 # Golden fixtures use a throwaway test passphrase.
-!rs/testdata/golden/**
-/rs/target/
+!testdata/golden/**

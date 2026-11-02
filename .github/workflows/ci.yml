@@ -2,11 +2,16 @@ name: ci
 on: [push, pull_request]
 jobs:
   test:
-    runs-on: ubuntu-latest
-    container: golang:1.27.3-alpine
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
-      - run: apk add --no-cache git
       - uses: actions/checkout@v4
-      - run: go vet ./...
-      - run: test -z "$(gofmt -l cmd internal)"
-      - run: go test -count=1 ./...
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.99.1"
+          components: rustfmt, clippy
+      - run: cargo fmt --check
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked

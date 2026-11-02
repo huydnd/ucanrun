@@ -164,17 +164,17 @@ async function viewSecrets(body, editing) {
   const v_wrap = h("div", {hidden: multiMode}, v.el, h("label", {class: "check"}, toggle, h("span", null, "Nhiều dòng, như khoá SSH")), multi);
   const save = form(cur ? "Sửa secret" : "Lưu secret mới", [n], "Lưu", async () => {
     const hs = hosts.input.value.split(/[\s,]+/).map(x => x.trim().toLowerCase()).filter(Boolean);
-    const body = {description: desc.value.trim(), hosts: hs, allow_commands: cmd.checked};
-    if (multiMode) body.fields = rows.filter(r => r.name).map(r => ({name: r.name, public: r.public, value: r.value}));
-    else body.value = toggle.checked ? multi.value : v.input.value;
-    await api("PUT", "/api/secrets/" + encodeURIComponent(n.input.value.trim()), body);
+    const req = {description: desc.value.trim(), hosts: hs, allow_commands: cmd.checked};
+    if (multiMode) req.fields = rows.filter(r => r.name).map(r => ({name: r.name, public: r.public, value: r.value}));
+    else req.value = toggle.checked ? multi.value : v.input.value;
+    await api("PUT", "/api/secrets/" + encodeURIComponent(n.input.value.trim()), req);
     viewSecrets(body);
   }, h("div", null, v_wrap, fieldBox,
     h("label", null, h("span", null, "Dùng để làm gì"), desc, h("small", {class: "muted"}, "Agent đọc dòng này để biết khi nào dùng secret. Không ghi giá trị vào đây.")),
     hosts.el, h("small", {class: "muted"}, "Agent chỉ gửi được secret tới các máy chủ này, cách nhau bằng dấu phẩy. Dùng *.example.com cho mọi tên miền con. Để trống thì agent không dùng được."),
     execOn ? h("label", {class: "check"}, cmd, h("span", null, "Cho dùng trong lệnh agent tự soạn (luôn cần TOTP)")) : null,
     h("p", {class: "muted"}, "Giá trị chỉ ghi, không có cách xem lại trên giao diện.")));
-  save.insertBefore(modeSel, save.querySelector("label").nextSibling);
+  n.el.after(modeSel);
   if (cur) save.append(h("div", {class: "row"}, h("button", {onclick: () => viewSecrets(body)}, "Huỷ")));
   const addBox = cur ? save : h("details", {class: "card add", open: !list.length}, h("summary", null, tr("Thêm secret")), save);
   if (!cur) { save.classList.remove("card"); save.querySelector("h2").remove(); }

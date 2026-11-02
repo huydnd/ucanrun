@@ -47,6 +47,14 @@ Agent gọi công cụ MCP `list_secrets`, rồi `call` với header như `Autho
 - Mọi yêu cầu đều cần bạn duyệt, tin nhắn ghi rõ agent tự soạn.
 - Với image `exec`, `run_command` dùng được secret có đánh dấu "cho dùng trong lệnh", luôn cần TOTP.
 
+### Secret nhiều trường
+
+Thông tin đăng nhập database có máy chủ, cổng, user và mật khẩu. Khi lưu secret, chọn **Nhiều trường** và đánh dấu **Công khai** cho các trường agent được xem, như host, port, user, database. Agent viết `{{secret:db.host}}` hoặc `{{secret:db.password}}`.
+
+- Trường công khai hiện cho agent và đặt được ở mọi chỗ, kể cả URL và tham số lệnh.
+- Trường riêng theo các quy tắc ở trên và bị che trong kết quả.
+- `{{secret:db}}` không ghi trường sẽ bị từ chối.
+
 Muốn giới hạn chặt hơn, tab Nâng cao định nghĩa các hành động cố định, xem [hành động cố định](catalog.md).
 
 ## Mất điện thoại

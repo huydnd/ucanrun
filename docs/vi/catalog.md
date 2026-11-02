@@ -13,7 +13,7 @@ Máy chủ và đăng nhập luôn lấy từ kết nối, nên hành động kh
 
 Tab Profile, **Thêm nhanh**. Chọn dịch vụ, dán token một lần, tích các hành động agent được xin, bấm **Thêm**. **Dịch vụ khác** khai báo được mọi API dùng token.
 
-Danh sách sẵn là dữ liệu trong `internal/web/static/catalog.json`: GitHub, Gitea, Cloudflare, DeepSeek, Google AI, Notion, và một lệnh SSH đứng riêng (cần image `exec`, xem [ssh-sudo](ssh-sudo.md)).
+Danh sách sẵn là dữ liệu trong `web/static/catalog.json`: GitHub, Gitea, Cloudflare, DeepSeek, Google AI, Notion, và một lệnh SSH đứng riêng (cần image `exec`, xem [ssh-sudo](ssh-sudo.md)).
 
 ## Nhiều tài khoản cho một dịch vụ
 

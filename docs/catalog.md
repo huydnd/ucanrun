@@ -13,7 +13,7 @@ The host and the sign-in always come from the connection, so an action can never
 
 Profiles tab, **Quick add**. Pick a service, paste its token once, tick the actions agents may request, and tap **Add**. **Other service** sets up any token-based API.
 
-The built-in list is data in `internal/web/static/catalog.json`: GitHub, Gitea, Cloudflare, DeepSeek, Google AI, Notion, and a standalone SSH command (needs the `exec` image, see [ssh-sudo](ssh-sudo.md)). Every entry is validated by the test suite.
+The built-in list is data in `web/static/catalog.json`: GitHub, Gitea, Cloudflare, DeepSeek, Google AI, Notion, and a standalone SSH command (needs the `exec` image, see [ssh-sudo](ssh-sudo.md)). Every entry is validated by the test suite.
 
 ## Several accounts for one service
 
