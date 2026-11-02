@@ -3,8 +3,11 @@
 
 pub mod audit;
 pub mod backup;
+pub mod client;
 pub mod gojson;
+pub mod mcp;
 pub mod policy;
 pub mod state;
+pub mod telegram;
 pub mod totp;
 pub mod vault;
