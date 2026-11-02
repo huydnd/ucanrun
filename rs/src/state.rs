@@ -1,1 +1,218 @@
-//! TODO: port from the Go package, see PORT.md.
+//! Authenticated state file (port of `internal/core/state.go`).
+//!
+//! Profiles, connections and secret metadata are kept as generic JSON values
+//! until the policy types are wired in; only their map shape is fixed here.
+
+use std::collections::BTreeMap;
+use std::fmt;
+use std::path::Path;
+
+use hmac::{Hmac, Mac};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use sha2::Sha256;
+use subtle::ConstantTimeEq;
+
+pub const CURRENT_STATE_VERSION: i64 = 1;
+
+#[derive(Debug)]
+pub enum Error {
+    /// "state file failed authentication"
+    Tampered,
+    /// "state file version is newer than this binary"
+    TooNew,
+    Msg(String),
+    Io(std::io::Error),
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Error::Tampered => f.write_str("state file failed authentication"),
+            Error::TooNew => f.write_str("state file version is newer than this binary"),
+            Error::Msg(m) => f.write_str(m),
+            Error::Io(e) => e.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for Error {}
+
+impl From<std::io::Error> for Error {
+    fn from(e: std::io::Error) -> Self {
+        Error::Io(e)
+    }
+}
+
+pub type Result<T> = std::result::Result<T, Error>;
+
+/// Agent token. Only the SHA-256 of the value is stored.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Token {
+    pub id: String,
+    pub name: String,
+    pub hash: String,
+    /// Empty means all profiles.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub profiles: Vec<String>,
+    /// RFC 3339 timestamp, kept as written.
+    pub created: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TelegramCfg {
+    #[serde(default)]
+    pub user_id: i64,
+    #[serde(default)]
+    pub chat_id: i64,
+}
+
+type Map = BTreeMap<String, Value>;
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct State {
+    #[serde(default)]
+    pub version: i64,
+    #[serde(default)]
+    pub profiles: Map,
+    #[serde(default, skip_serializing_if = "Map::is_empty")]
+    pub connections: Map,
+    #[serde(default, skip_serializing_if = "Map::is_empty")]
+    pub secrets: Map,
+    #[serde(default)]
+    pub tokens: BTreeMap<String, Token>,
+    #[serde(default)]
+    pub telegram: TelegramCfg,
+    #[serde(default)]
+    pub totp_enabled: bool,
+    #[serde(default)]
+    pub last_totp_step: i64,
+    /// SHA-256 of single-use recovery codes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recovery_hashes: Vec<String>,
+    #[serde(default)]
+    pub audit_count: i64,
+    #[serde(default)]
+    pub audit_hash: String,
+}
+
+#[derive(Serialize)]
+struct SignedOut<'a> {
+    mac: String,
+    data: &'a serde_json::value::RawValue,
+}
+
+#[derive(Deserialize)]
+struct SignedIn<'a> {
+    mac: String,
+    #[serde(borrow)]
+    data: &'a serde_json::value::RawValue,
+}
+
+fn mac(key: &[u8], data: &[u8]) -> String {
+    let mut m = <Hmac<Sha256> as Mac>::new_from_slice(key).expect("hmac accepts any key length");
+    m.update(data);
+    hex::encode(m.finalize().into_bytes())
+}
+
+/// Writes the state signed with `key`.
+pub fn save(path: &Path, st: &State, key: &[u8]) -> Result<()> {
+    let data = serde_json::to_string(st).map_err(|e| Error::Msg(e.to_string()))?;
+    let raw = serde_json::value::RawValue::from_string(data.clone())
+        .map_err(|e| Error::Msg(e.to_string()))?;
+    let out = serde_json::to_vec(&SignedOut {
+        mac: mac(key, data.as_bytes()),
+        data: &raw,
+    })
+    .map_err(|e| Error::Msg(e.to_string()))?;
+    crate::vault::atomic_write(path, &out).map_err(|e| match e {
+        crate::vault::Error::Io(e) => Error::Io(e),
+        e => Error::Msg(e.to_string()),
+    })
+}
+
+/// Verifies the HMAC over the raw `data` bytes, then parses and migrates.
+pub fn load(path: &Path, key: &[u8]) -> Result<State> {
+    let raw = match std::fs::read(path) {
+        Ok(r) => r,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(Error::Tampered),
+        Err(e) => return Err(e.into()),
+    };
+    let f: SignedIn = serde_json::from_slice(&raw).map_err(|_| Error::Tampered)?;
+    let data = f.data.get();
+    if !bool::from(f.mac.as_bytes().ct_eq(mac(key, data.as_bytes()).as_bytes())) {
+        return Err(Error::Tampered);
+    }
+    let mut st: State = serde_json::from_str(data).map_err(|e| Error::Msg(e.to_string()))?;
+    if st.version < 0 {
+        return Err(Error::Tampered);
+    }
+    if st.version > CURRENT_STATE_VERSION {
+        return Err(Error::TooNew);
+    }
+    while st.version < CURRENT_STATE_VERSION {
+        // Migration 0 -> 1 only bumps the version.
+        st.version += 1;
+    }
+    Ok(st)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key() -> Vec<u8> {
+        vec![7; 32]
+    }
+
+    #[test]
+    fn roundtrip_and_tamper() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("state.json");
+        assert!(matches!(load(&p, &key()), Err(Error::Tampered)));
+        let mut st = State {
+            version: 1,
+            ..Default::default()
+        };
+        st.tokens.insert(
+            "t1".into(),
+            Token {
+                id: "t1".into(),
+                name: "n".into(),
+                hash: "h".into(),
+                profiles: vec![],
+                created: "2026-01-01T00:00:00Z".into(),
+            },
+        );
+        st.audit_count = 3;
+        save(&p, &st, &key()).unwrap();
+        assert_eq!(load(&p, &key()).unwrap(), st);
+        assert!(matches!(load(&p, &[8; 32]), Err(Error::Tampered)));
+        let s = std::fs::read_to_string(&p).unwrap();
+        std::fs::write(&p, s.replace("\"audit_count\":3", "\"audit_count\":4")).unwrap();
+        assert!(matches!(load(&p, &key()), Err(Error::Tampered)));
+        std::fs::write(&p, "garbage").unwrap();
+        assert!(matches!(load(&p, &key()), Err(Error::Tampered)));
+    }
+
+    #[test]
+    fn versions() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("state.json");
+        let st = State::default(); // version 0 migrates
+        save(&p, &st, &key()).unwrap();
+        assert_eq!(load(&p, &key()).unwrap().version, 1);
+        let st = State {
+            version: 2,
+            ..Default::default()
+        };
+        save(&p, &st, &key()).unwrap();
+        assert!(matches!(load(&p, &key()), Err(Error::TooNew)));
+        let st = State {
+            version: -1,
+            ..Default::default()
+        };
+        save(&p, &st, &key()).unwrap();
+        assert!(matches!(load(&p, &key()), Err(Error::Tampered)));
+    }
+}
