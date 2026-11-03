@@ -6,6 +6,24 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use crate::client::Client;
 
+/// Sent once at initialize, so the agent knows when to reach for ucanrun
+/// before it asks the user for a token.
+pub const INSTRUCTIONS: &str = "\
+ucanrun holds the user's secrets (API tokens, passwords, database logins) and \
+uses them for you after a human approves. You never see secret values.
+
+- When a task needs a token, password or login, call list_secrets first. Do not \
+ask the user for secret values and do not search files or the environment for them.
+- Use call for HTTP APIs: write {{secret:NAME}} or {{secret:NAME.FIELD}} in a \
+header. Use run_command only for secrets that allow commands. If list_profiles \
+has a fixed action that fits, prefer run.
+- Every request waits for the human to approve it on Telegram. Write a short, \
+specific reason: it is what they decide on.
+- If a request is denied or expires, tell the user and stop. Do not resend it \
+in a loop or reword it to get past a denial.
+- If no secret fits, say which secret and hosts are missing so the user can add \
+them in ucanrun. Output has secrets replaced by [REDACTED]; that is expected.";
+
 fn tools() -> Value {
     let map = json!({"type": "object", "additionalProperties": {"type": "string"}});
     json!([
@@ -91,7 +109,8 @@ pub async fn serve(c: Client) -> std::io::Result<()> {
                     .and_then(Value::as_str)
                     .unwrap_or("2025-06-18");
                 json!({"jsonrpc": "2.0", "id": id, "result": {"protocolVersion": v, "capabilities": {"tools": {}},
-                       "serverInfo": {"name": "ucanrun", "version": env!("CARGO_PKG_VERSION")}}})
+                       "serverInfo": {"name": "ucanrun", "version": env!("CARGO_PKG_VERSION")},
+                       "instructions": INSTRUCTIONS}})
             }
             "ping" => json!({"jsonrpc": "2.0", "id": id, "result": {}}),
             "tools/list" => json!({"jsonrpc": "2.0", "id": id, "result": {"tools": tools()}}),
