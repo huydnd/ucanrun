@@ -1756,6 +1756,8 @@ async fn mcp_over_stdio() {
     assert_eq!(s.matches('\n').count(), 5, "responses: {s}");
     for want in [
         r#""protocolVersion":"2025-06-18""#,
+        r#""instructions":"ucanrun holds the user's secrets"#,
+        "call list_secrets first",
         "get_request",
         "auto",
         r#"\"state\": \"done\""#,
