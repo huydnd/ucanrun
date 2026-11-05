@@ -1531,9 +1531,13 @@ async fn telegram_speaks_english_by_default() {
         caller: "claude".into(),
         reason: "why".into(),
         risk: "high".into(),
+        totp: true,
         hash: "ab".repeat(32),
         display: "GET https://x".into(),
         state: ReqState::Pending,
+        device: String::new(),
+        app: String::new(),
+        duration_ms: None,
         created: UNIX_EPOCH,
         expires: UNIX_EPOCH + Duration::from_secs(120),
         decided_by: String::new(),
@@ -1628,4 +1632,109 @@ async fn golden_datadir_opens() {
     c.login(pass, rc).unwrap();
     assert_eq!(c.recovery_left(), 7);
     assert!(audit::verify(&c.audit_path()).is_ok());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn approval_totp_is_on_by_default_and_needs_a_code_to_turn_off() {
+    let e = setup().await;
+    let (t, _) = e.token("claude", &[]);
+    let (sec, _) = e.enable_totp();
+    assert!(e.c.approval_totp());
+    let r =
+        e.c.submit(&t, "danger", params(&[("repo", "a")]), "")
+            .unwrap();
+    assert!(r.totp && e.c.needs_totp(&r.id));
+    assert!(matches!(
+        e.c.decide(&r.id, &r.hash, true, "web", "", ""),
+        Err(Error::NeedTotp)
+    ));
+
+    // A stolen session alone cannot weaken approvals.
+    assert!(matches!(
+        e.c.set_approval_totp(false, ""),
+        Err(Error::NeedTotp)
+    ));
+    assert!(matches!(
+        e.c.set_approval_totp(false, "000000"),
+        Err(Error::BadTotp)
+    ));
+    assert!(e.c.approval_totp());
+    e.c.set_approval_totp(false, &e.code_now(&sec)).unwrap();
+    assert!(!e.c.approval_totp());
+
+    // The pending request and new ones now approve without a code.
+    assert!(!e.c.needs_totp(&r.id));
+    e.c.decide(&r.id, &r.hash, true, "web", "", "").unwrap();
+    e.wait_state(&r.id, ReqState::Done).await;
+    let r2 =
+        e.c.submit(&t, "danger", params(&[("repo", "b")]), "")
+            .unwrap();
+    assert!(!r2.totp && r2.risk == "high");
+    assert!(lang::approval_text(&r2, true).starts_with("⚠️ RỦI RO CAO\n"));
+
+    // The choice survives a lock, and turning it back on needs no code.
+    e.c.lock("web");
+    e.c.login(
+        PASS.as_bytes(),
+        &totp::code(&sec, unix(e.now()) + 30).unwrap(),
+    )
+    .unwrap();
+    assert!(!e.c.approval_totp());
+    e.c.set_approval_totp(true, "").unwrap();
+    assert!(e.c.approval_totp());
+    let events: Vec<String> =
+        e.c.audit
+            .tail(100)
+            .unwrap()
+            .into_iter()
+            .filter(|x| x.event == "approval_totp")
+            .map(|x| x.fields["on"].to_string())
+            .collect();
+    assert_eq!(events, ["true", "false"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn run_log_records_who_where_what_and_how_long() {
+    let e = setup().await;
+    let (t, _) = e.token("claude", &[]);
+    let client = ClientInfo::new("laptop-1\u{202e}", "claude-code 2.1 <b>");
+    assert_eq!(client.device, "laptop-1");
+    assert_eq!(client.app, "claude-code 2.1 b");
+    let r =
+        e.c.submit_from(&t, &client, "create", params(&[("repo", "a")]), "make it")
+            .unwrap();
+    assert_eq!(
+        (r.device.as_str(), r.app.as_str()),
+        ("laptop-1", "claude-code 2.1 b")
+    );
+    e.c.decide(&r.id, &r.hash, true, "web", "", "").unwrap();
+    let done = e.wait_state(&r.id, ReqState::Done).await;
+    assert!(done.duration_ms.is_some());
+    let res =
+        e.c.audit
+            .tail(20)
+            .unwrap()
+            .into_iter()
+            .find(|x| x.event == "result")
+            .unwrap();
+    let f = &res.fields;
+    assert_eq!(res.actor, "web");
+    assert_eq!(f["agent"], "claude");
+    assert_eq!(f["device"], "laptop-1");
+    assert_eq!(f["app"], "claude-code 2.1 b");
+    assert_eq!(f["profile"], "create");
+    assert_eq!(f["secrets"], json!(["gitea"]));
+    assert_eq!(f["ok"], true);
+    assert!(f["duration_ms"].is_u64());
+    assert!(f["command"].as_str().unwrap().contains("‹secret:gitea›"));
+    assert!(!serde_json::to_string(f).unwrap().contains(SECRET));
+    let req =
+        e.c.audit
+            .tail(20)
+            .unwrap()
+            .into_iter()
+            .find(|x| x.event == "request")
+            .unwrap();
+    assert_eq!(req.fields["device"], "laptop-1");
+    assert!(audit::verify(&e.c.audit_path()).is_ok());
 }

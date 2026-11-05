@@ -31,6 +31,14 @@
 | Container | Không root, rootfs chỉ đọc, bỏ mọi capability. |
 | Audit | Chuỗi băm phát hiện sửa dòng; trạng thái có chữ ký lưu vị trí cuối khi lưu và khi khoá để phát hiện cắt bớt cuối file (các mục ghi sau lần lưu cuối chưa được phủ). |
 
+## TOTP khi duyệt
+
+Duyệt yêu cầu rủi ro cao, hoặc lệnh agent tự soạn, cần mã TOTP. Mặc định bật. **Cài đặt → TOTP khi duyệt** cho phép tắt; muốn tắt phải nhập mã TOTP hiện tại, và mục Sức khoẻ bảo mật sẽ hiện cảnh báo. Khi tắt, chỉ một lần bấm Duyệt là lệnh chạy, nên ai chiếm được Telegram hoặc phiên web của bạn cũng duyệt được. Đăng nhập vẫn cần TOTP.
+
+## Nhật ký lần chạy
+
+Mỗi lần chạy xong được ghi vào nhật ký audit: agent (tên token), phần mềm agent và tên máy do máy agent tự khai, các secret đã dùng, lệnh đúng như người duyệt thấy, kết quả và thời gian xử lý. **Nhật ký → Lần chạy** liệt kê và lọc được. Tên máy và phần mềm do phía agent tự khai; thứ xác định agent là token. Giá trị secret không bao giờ có trong nhật ký.
+
 ## Tự mở khoá khi khởi động
 
 Mặc định, khởi động lại thì kho khoá tới khi bạn đăng nhập, và agent nhận lỗi 423. `UCANRUN_UNLOCK_FILE` đọc mật khẩu chính từ file lúc khởi động. Web vẫn cần mật khẩu và TOTP.

@@ -35,6 +35,11 @@ impl Core {
     /// Reviews the current configuration. State is read under the lock, file
     /// work happens after releasing it.
     pub fn health(&self) -> Result<Vec<HealthItem>> {
+        let approval_totp_off = self
+            .inner()
+            .st
+            .as_ref()
+            .is_some_and(|s| s.approval_totp_off);
         let (totp_on, recovery, paired, cut, mut profiles, mut unscoped, meta) = {
             let g = self.inner();
             let st = g.st.as_ref().ok_or(Error::Locked)?;
@@ -97,6 +102,13 @@ impl Core {
                 "totp",
                 "bad",
                 "TOTP đang tắt. Đăng nhập chỉ có một lớp, và yêu cầu rủi ro cao không duyệt được.",
+            ));
+        }
+        if approval_totp_off {
+            out.push(item(
+                "approval_totp",
+                "warn",
+                "Duyệt yêu cầu rủi ro cao không cần mã TOTP. Ai chiếm được Telegram hoặc phiên web là duyệt được lệnh nguy hiểm.",
             ));
         }
         out.push(if paired {
