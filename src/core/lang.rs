@@ -43,6 +43,7 @@ pub(crate) fn translate(vi: bool, s: &str) -> String {
 struct Labels {
     head: &'static str,
     high: &'static str,
+    high_no_totp: &'static str,
     agent: &'static str,
     exp: &'static str,
     sec: &'static str,
@@ -57,6 +58,7 @@ struct Labels {
 const EN: Labels = Labels {
     head: "Approval request",
     high: "⚠️ HIGH RISK, needs TOTP",
+    high_no_totp: "⚠️ HIGH RISK",
     agent: "Agent",
     exp: "Expires in",
     sec: "seconds",
@@ -71,6 +73,7 @@ const EN: Labels = Labels {
 const VI: Labels = Labels {
     head: "Yêu cầu chạy lệnh",
     high: "⚠️ RỦI RO CAO, cần TOTP",
+    high_no_totp: "⚠️ RỦI RO CAO",
     agent: "Agent",
     exp: "Hết hạn sau",
     sec: "giây",
@@ -84,8 +87,10 @@ const VI: Labels = Labels {
 
 pub(crate) fn approval_text(r: &super::Request, vi: bool) -> String {
     let l = if vi { &VI } else { &EN };
-    let mut head = if r.risk == crate::policy::RISK_HIGH {
+    let mut head = if r.totp {
         l.high
+    } else if r.risk == crate::policy::RISK_HIGH {
+        l.high_no_totp
     } else {
         l.head
     }

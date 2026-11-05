@@ -106,10 +106,10 @@ async function viewRequests(body) {
     };
     return h("div", {class: "card"},
       h("h3", null, r.profile === "agent-call" ? tr("Agent tự soạn") : r.profile, " ", h("span", {class: "badge " + (r.risk === "high" ? "high" : "")}, r.risk === "high" ? "rủi ro cao" : "rủi ro thấp")),
-      h("div", {class: "muted"}, `Agent: ${r.caller} · Mã: ${r.hash.slice(0, 8)} · ${new Date(r.created).toLocaleTimeString()}`),
+      h("div", {class: "muted"}, `Agent: ${r.caller}${r.app ? " (" + r.app + ")" : ""}${r.device ? " · " + tr("Thiết bị") + ": " + r.device : ""} · Mã: ${r.hash.slice(0, 8)} · ${new Date(r.created).toLocaleTimeString()}`),
       h("pre", null, r.display),
       r.reason ? h("div", {class: "muted"}, "Lý do (agent tự khai, chưa kiểm chứng): " + r.reason) : null,
-      r.state === "pending" ? h("div", null, pick ? h("label", null, h("span", null, "Secret dùng cho lần này"), pick) : null, r.risk === "high" ? code : null,
+      r.state === "pending" ? h("div", null, pick ? h("label", null, h("span", null, "Secret dùng cho lần này"), pick) : null, r.totp ? code : null,
         h("div", {class: "row"}, h("button", {class: "primary", onclick: act(true)}, "Duyệt"), h("button", {class: "danger", onclick: act(false)}, "Từ chối")), err) : null,
       r.state !== "pending" ? h("div", {class: "muted"}, `Kết quả: ${r.state}` + (r.decided_by ? ` · ${r.decided_by}` : "") + (r.secret ? ` · secret ${r.secret}` : "")) : null,
       r.result ? h("pre", null, r.result.output) : null);
@@ -380,7 +380,7 @@ async function viewProfiles(body, keptImport) {
   const openTest = p => {
     const inputs = (p.params || []).map(q => { const f = field(q.name, {autocomplete: "off", spellcheck: "false"}); return [q.name, f]; });
     const pick = (p.secret_choices || []).length ? select(p.secret_choices[0], p.secret_choices.map(n => [n, n]), () => {}, "Chọn secret") : null;
-    const code = p.risk === "high" ? field("Mã TOTP", {inputmode: "numeric", maxlength: 6, autocomplete: "one-time-code"}) : null;
+    const code = p.risk === "high" && !(state.status && state.status.approval_totp === false) ? field("Mã TOTP", {inputmode: "numeric", maxlength: 6, autocomplete: "one-time-code"}) : null;
     const out = h("div");
     const card = form("Chạy thử: " + (p.description || p.name), inputs.map(x => x[1]).concat(code ? [code] : []), "Chạy ngay", async () => {
       out.replaceChildren(h("p", {class: "muted"}, tr("Đang chạy…")));
@@ -930,13 +930,37 @@ function totpCard(s, after) {
   return card;
 }
 
+// High risk approvals ask for TOTP unless the owner turns that off here.
+// Turning it off needs a current code, so an open session alone cannot.
+function approvalTotpCard(s) {
+  const err = h("div", {class: "err"});
+  const card = h("div", {class: "card"}, h("h2", null, "TOTP khi duyệt"));
+  const save = async (on, code) => {
+    err.textContent = "";
+    try { await api("PUT", "/api/approval-totp", {on, code}); state.status = await api("GET", "/api/status"); card.replaceWith(approvalTotpCard(state.status)); }
+    catch (e) { err.textContent = tr(e.message); }
+  };
+  if (s.approval_totp !== false) {
+    const code = field("Mã TOTP hiện tại", {inputmode: "numeric", maxlength: 6, autocomplete: "one-time-code"});
+    card.append(h("p", {class: "muted"}, "Đang bật: duyệt yêu cầu rủi ro cao và lệnh agent tự soạn phải nhập mã TOTP."),
+      h("details", null, h("summary", null, "Tắt TOTP khi duyệt"),
+        h("p", {class: "note"}, "Khi tắt, chỉ cần bấm Duyệt trên Telegram hoặc web là lệnh rủi ro cao được chạy. Ai chiếm được Telegram hoặc phiên web của bạn cũng làm được vậy. Đăng nhập vẫn cần TOTP."),
+        s.totp ? code.el : null,
+        h("div", {class: "row"}, h("button", {class: "danger", onclick: () => save(false, code.input.value)}, "Tắt"))), err);
+  } else {
+    card.append(h("p", {class: "note"}, "Đang tắt: yêu cầu rủi ro cao được duyệt chỉ bằng một lần bấm."),
+      h("div", {class: "row"}, h("button", {class: "primary", onclick: () => save(true, "")}, "Bật lại")), err);
+  }
+  return card;
+}
+
 function healthCard(items) {
   const bad = items.filter(i => i.level === "bad").length, warn = items.filter(i => i.level === "warn").length;
   const parts = [bad ? `${bad} lỗi` : "", warn ? `${warn} cảnh báo` : ""].filter(Boolean);
   const title = "Sức khoẻ bảo mật" + (parts.length ? ` (${parts.join(", ")})` : " (ổn)");
   return h("div", {class: "card"}, h("h2", null, title),
     h("ul", {class: "health"}, items.map(i => h("li", null, h("span", {class: "dot " + i.level, "aria-hidden": "true"}), h("span", null, i.message,
-      (i.names || []).map(n => [" ", h("code", null, n)]))))));
+      (i.names || []).flatMap(n => [" ", h("code", null, n)]))))));
 }
 
 async function viewSettings(body) {
@@ -944,7 +968,7 @@ async function viewSettings(body) {
   const o = field("Mật khẩu hiện tại", {type: "password", autocomplete: "current-password"});
   const n = field("Mật khẩu mới", {type: "password", autocomplete: "new-password"});
   const langSel = select(lang, [["vi", "Tiếng Việt"], ["en", "English"]], v => { try { localStorage.setItem("ucr_lang", v); } catch (_) {} location.reload(); }, "Ngôn ngữ");
-  fill(body, healthCard(health), h("div", {class: "card"}, h("h2", null, "Ngôn ngữ"), langSel), telegramCard(s), totpCard(s), form("Đổi mật khẩu chính", [o, n], "Đổi", async () => {
+  fill(body, healthCard(health), h("div", {class: "card"}, h("h2", null, "Ngôn ngữ"), langSel), telegramCard(s), totpCard(s), approvalTotpCard(s), form("Đổi mật khẩu chính", [o, n], "Đổi", async () => {
     await api("POST", "/api/passphrase", {old: o.input.value, new: n.input.value}); o.input.value = n.input.value = "";
   }));
 }
@@ -1001,9 +1025,36 @@ async function viewStart(body) {
   window.scrollTo(0, 0);
 }
 
+// One line per finished run; open it for the command and details.
+function runRow(r) {
+  const secs = r.duration_ms != null ? (r.duration_ms < 1000 ? `${r.duration_ms} ms` : `${(r.duration_ms / 1000).toFixed(1)} s`) : "";
+  const who = [r.agent, r.app ? `(${r.app})` : "", r.device ? "· " + r.device : ""].filter(Boolean).join(" ");
+  return h("details", {class: "hist"},
+    h("summary", null, h("span", {class: "badge " + (r.ok === true ? "ok" : r.ok === false ? "high" : "")}, r.ok === true ? "xong" : r.ok === false ? "lỗi" : "—"), " ",
+      h("b", null, r.profile === "agent-call" ? tr("Agent tự soạn") : (r.profile || "?")), " ",
+      h("span", {class: "muted"}, `${who || "?"} · ${new Date(r.time).toLocaleString()}${secs ? " · " + secs : ""}`)),
+    r.command ? h("pre", null, r.command) : null,
+    h("div", {class: "muted"}, [tr("Secret") + ": " + ((r.secrets || []).join(", ") || "—"),
+      tr("Duyệt bởi") + ": " + (r.approved_by || "—"),
+      `exit ${r.exit} · ${r.bytes} bytes`].join(" · ")));
+}
+
 async function viewAudit(body) {
-  const a = await api("GET", "/api/audit");
-  fill(body, h("div", {class: "card"}, h("h2", null, "Nhật ký"),
+  const [a, runs] = await Promise.all([api("GET", "/api/audit"), api("GET", "/api/runs")]);
+  const list = runs.runs || [];
+  const q = h("input", {type: "search", placeholder: "Lọc theo agent, thiết bị, secret, lệnh", "aria-label": "Lọc lần chạy"});
+  const box = h("div");
+  const draw = () => {
+    const t = q.value.trim().toLowerCase();
+    const shown = t ? list.filter(r => JSON.stringify(r).toLowerCase().includes(t)) : list;
+    box.replaceChildren(...(shown.length ? shown.map(runRow) : [h("p", {class: "muted"}, "Chưa có lần chạy nào.")]));
+  };
+  q.addEventListener("input", draw);
+  draw();
+  fill(body, h("div", {class: "card"}, h("h2", null, `Lần chạy (${list.length})`),
+      h("p", {class: "muted"}, "Mỗi lần chạy: agent, thiết bị (do máy agent tự khai), secret đã dùng, lệnh, kết quả và thời gian xử lý. Lấy từ nhật ký có chuỗi băm."),
+      q, box),
+    h("div", {class: "card"}, h("h2", null, "Nhật ký"),
     h("p", {class: a.chain_ok ? "muted" : "note"}, a.chain_ok ? `Chuỗi băm hợp lệ, ${a.valid_entries} mục.` : `Chuỗi băm bị hỏng sau mục ${a.valid_entries}.`),
     a.truncated ? h("p", {class: "note"}, "Nhật ký đã bị cắt bớt so với lần lưu trước.") : null,
     a.entries.map(e => h("div", {class: "spread"}, h("span", null, h("code", null, e.event), " ", e.actor || "", h("div", {class: "muted"}, e.fields ? JSON.stringify(e.fields) : "")), h("span", {class: "muted"}, new Date(e.time).toLocaleString())))));

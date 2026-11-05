@@ -456,6 +456,8 @@ impl Server {
             .route("/api/totp/confirm", ui(post(totp_confirm)))
             .route("/api/totp/recovery", ui(post(totp_recovery)))
             .route("/api/totp/reset", ui(post(totp_reset)))
+            .route("/api/approval-totp", ui(put(set_approval_totp)))
+            .route("/api/runs", ui(get(runs)))
             .fallback(unrouted)
             .layer(middleware::from_fn(csrf))
             .layer(middleware::from_fn_with_state(self.clone(), secure_headers))
@@ -627,6 +629,7 @@ async fn status(State(s): State<Arc<Server>>, h: HeaderMap) -> Response {
     if authed {
         out["telegram"] = json!(c.telegram_status());
         out["totp"] = json!(c.totp_enabled());
+        out["approval_totp"] = json!(c.approval_totp());
         out["exec"] = json!(c.exec_enabled());
         out["recovery_left"] = json!(c.recovery_left());
     }
@@ -1130,6 +1133,48 @@ async fn totp_confirm(State(s): State<Arc<Server>>, h: HeaderMap, b: Body) -> Re
     write_json(200, &json!({"recovery_codes": codes}))
 }
 
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct ApprovalTotpIn {
+    on: bool,
+    code: String,
+}
+
+async fn set_approval_totp(State(s): State<Arc<Server>>, h: HeaderMap, b: Body) -> Response {
+    need_auth!(s, h);
+    let input: ApprovalTotpIn = body!(b);
+    tryf!(s.core.set_approval_totp(input.on, &input.code));
+    write_json(200, &json!({"approval_totp": s.core.approval_totp()}))
+}
+
+/// How far back the run log looks, in audit lines.
+const RUN_SCAN: usize = 5000;
+const RUN_MAX: usize = 300;
+
+/// Finished runs, newest first, read from the audit log so they survive
+/// restarts and cannot be edited without breaking the chain.
+async fn runs(State(s): State<Arc<Server>>, h: HeaderMap) -> Response {
+    need_auth!(s, h);
+    let c = s.core.clone();
+    let res = blocking(move || {
+        let es = c.audit.tail(RUN_SCAN)?;
+        let rows: Vec<Value> = es
+            .into_iter()
+            .filter(|e| e.event == "result")
+            .take(RUN_MAX)
+            .map(|e| {
+                let mut v = Value::Object(e.fields);
+                v["time"] = json!(e.time);
+                v["approved_by"] = json!(e.actor);
+                v
+            })
+            .collect();
+        Ok::<_, audit::Error>(json!({"runs": rows}))
+    })
+    .await;
+    write_json(200, &tryf!(res))
+}
+
 async fn totp_recovery(State(s): State<Arc<Server>>, h: HeaderMap, b: Body) -> Response {
     need_auth!(s, h);
     let input: CodeIn = body!(b);
@@ -1196,11 +1241,15 @@ async fn agent_submit(State(s): State<Arc<Server>>, h: HeaderMap, b: Body) -> Re
         Err(r) => return *r,
     };
     let input: SubmitIn = body!(b);
+    let client = core::ClientInfo::new(
+        header_str(&h, "x-ucanrun-device"),
+        header_str(&h, "x-ucanrun-app"),
+    );
     let q = match &input.call {
-        Some(call) => s.core.submit_call(&t, call, &input.reason),
+        Some(call) => s.core.submit_call_from(&t, &client, call, &input.reason),
         None => s
             .core
-            .submit(&t, &input.profile, input.params, &input.reason),
+            .submit_from(&t, &client, &input.profile, input.params, &input.reason),
     };
     let mut q = tryf!(q);
     if input.wait_sec > 0 {

@@ -1736,7 +1736,7 @@ async fn mcp_over_stdio() {
     let e = setup(minute()).await;
     let cl = e.token("c", &[]).await;
     let input = [
-        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}"#,
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","clientInfo":{"name":"test-mcp","version":"9"}}}"#,
         r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
         r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#,
         r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_profiles","arguments":{}}}"#,
@@ -1768,6 +1768,17 @@ async fn mcp_over_stdio() {
     assert!(
         !s.contains(SECRET) && !s.contains("get_secret"),
         "mcp leaks"
+    );
+    let run =
+        e.c.audit
+            .tail(50)
+            .unwrap()
+            .into_iter()
+            .find(|x| x.event == "result")
+            .expect("a result in the audit log");
+    assert_eq!(
+        run.fields["app"], "test-mcp 9",
+        "MCP client name not recorded"
     );
 }
 
@@ -2647,4 +2658,57 @@ async fn cli_serve_and_health() {
     assert!(st.success(), "{st:?}");
     let o = ucr(&env, &["health"], None).await;
     assert!(!o.ok && o.stderr.starts_with("ucr: "));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn approval_totp_switch_and_run_log_over_http() {
+    let e = setup(minute()).await;
+    e.pair().await;
+    let sec = e.enable_totp().await;
+    let (_, st) = e.req("GET", "/api/status", Value::Null).await;
+    assert_eq!(st["approval_totp"], true, "on by default");
+    let (code, _) = e
+        .req("PUT", "/api/approval-totp", json!({"on": false}))
+        .await;
+    assert_ne!(code, 200, "turned off without a code");
+    let c = totp::code(&sec, unix_now()).unwrap();
+    let (code, m) = e
+        .req("PUT", "/api/approval-totp", json!({"on": false, "code": c}))
+        .await;
+    assert_eq!(code, 200, "{m}");
+    assert_eq!(m["approval_totp"], false);
+
+    // With TOTP off, the Telegram button alone approves a high risk request.
+    let mut cl = e.token("claude", &[]).await;
+    cl.app = "test-agent 1.0".into();
+    let r = cl
+        .run("danger", params(&[("repo", "a")]), "check", 0)
+        .await
+        .unwrap();
+    assert!(r.get("totp").is_none(), "{r}");
+    let btn = e.tg.last_button("RỦI RO CAO").await;
+    assert!(!e.tg.dump().contains("cần TOTP"));
+    e.tg.press(OWNER, OWNER, &btn);
+    e.wait(&sid(&r, "id"), ReqState::Done).await;
+
+    let (code, m) = e.req("GET", "/api/runs", Value::Null).await;
+    assert_eq!(code, 200, "{m}");
+    let row = &m["runs"][0];
+    assert_eq!(row["agent"], "claude");
+    assert_eq!(row["app"], "test-agent 1.0");
+    assert!(!row["device"].as_str().unwrap_or("").is_empty(), "{row}");
+    assert_eq!(row["profile"], "danger");
+    assert_eq!(row["secrets"], json!(["gitea"]));
+    assert_eq!(row["ok"], true);
+    assert_eq!(row["approved_by"], format!("telegram:{OWNER}"));
+    assert!(row["duration_ms"].is_u64() && row["time"].is_string());
+    assert!(row["command"].as_str().unwrap().contains("‹secret:gitea›"));
+    assert!(!m.to_string().contains(SECRET));
+
+    let anon = Http::new(&e.web);
+    let r = anon
+        .send("GET", "/api/runs", None, &[("X-Ucanrun", "1")])
+        .await;
+    assert_eq!(r.code, 401, "run log without session");
+    e.no_secret_anywhere();
 }

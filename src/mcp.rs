@@ -86,7 +86,7 @@ async fn call(c: &Client, p: &Value) -> Value {
 }
 
 /// Speaks newline-delimited JSON-RPC 2.0 until stdin closes.
-pub async fn serve(c: Client) -> std::io::Result<()> {
+pub async fn serve(mut c: Client) -> std::io::Result<()> {
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
     let mut out = tokio::io::stdout();
     while let Some(line) = lines.next_line().await? {
@@ -104,6 +104,13 @@ pub async fn serve(c: Client) -> std::io::Result<()> {
         let params = m.get("params").cloned().unwrap_or(json!({}));
         let resp = match m.get("method").and_then(Value::as_str).unwrap_or("") {
             "initialize" => {
+                if let Some(ci) = params.get("clientInfo") {
+                    let name = ci.get("name").and_then(Value::as_str).unwrap_or("");
+                    let ver = ci.get("version").and_then(Value::as_str).unwrap_or("");
+                    if !name.is_empty() {
+                        c.app = format!("{name} {ver}").trim().to_string();
+                    }
+                }
                 let v = params
                     .get("protocolVersion")
                     .and_then(Value::as_str)

@@ -32,6 +32,14 @@
 | Container | Not root, read-only root filesystem, no capabilities, no shell in the default image. |
 | Audit | A hash chain detects edited lines, and the signed state anchors the head on save and lock to detect truncation (entries after the last save are not covered). |
 
+## TOTP for approvals
+
+Approving a high risk request, or a command the agent wrote, asks for a TOTP code. This is on by default. **Settings → TOTP for approvals** turns it off; doing so needs a current TOTP code, and the security checklist then shows a warning. With it off, one tap on Approve runs the command, so anyone who takes over your Telegram account or a web session can approve. Signing in still needs TOTP.
+
+## Run log
+
+Every finished run is written to the audit log with the agent (token name), the agent software and host name the agent's machine reported, the secrets it used, the command as the approver saw it, the result and how long it took. **Log → Runs** lists them and can filter. The host name and software are self-declared by the agent side; the token is what identifies the agent. Secret values never appear in the log.
+
 ## Unlocking at start
 
 By default a restart locks the vault until you sign in, and agents get error 423. `UCANRUN_UNLOCK_FILE` reads the master password from a file at start instead. The web still needs the password and TOTP.

@@ -7,7 +7,31 @@ use serde_json::{Value, json};
 pub struct Client {
     pub url: String,
     pub token: String,
+    /// Agent software, sent for the run log. `ucr mcp` fills it from the
+    /// MCP handshake.
+    pub app: String,
+    device: String,
     http: reqwest::Client,
+}
+
+/// Header values must be visible ASCII; anything else would fail the request.
+fn header_safe(s: &str) -> String {
+    s.chars()
+        .filter(|c| c.is_ascii_graphic() || *c == ' ')
+        .take(64)
+        .collect()
+}
+
+/// This machine's host name, for the run log.
+fn host_name() -> String {
+    let mut buf = [0u8; 256];
+    // SAFETY: the buffer is valid for its length and gethostname writes at most that.
+    let r = unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len()) };
+    if r != 0 {
+        return String::new();
+    }
+    let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+    String::from_utf8_lossy(&buf[..end]).into_owned()
 }
 
 pub struct Check {
@@ -25,6 +49,8 @@ impl Client {
         Client {
             url: url.trim_end_matches('/').to_string(),
             token: token.to_string(),
+            app: "ucr".into(),
+            device: host_name(),
             http,
         }
     }
@@ -57,7 +83,9 @@ impl Client {
         let mut req = self
             .http
             .request(method, format!("{}{path}", self.url))
-            .bearer_auth(&self.token);
+            .bearer_auth(&self.token)
+            .header("X-Ucanrun-Device", header_safe(&self.device))
+            .header("X-Ucanrun-App", header_safe(&self.app));
         if let Some(b) = body {
             req = req.json(&b);
         }

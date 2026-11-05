@@ -19,7 +19,7 @@ use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, TryLockError, Weak};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use rand::Rng;
 use serde::{Serialize, Serializer};
@@ -47,6 +47,8 @@ const PAIR_TTL: Duration = Duration::from_secs(3 * 60);
 const PAIR_LETTERS: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
 const PAIR_SYMBOLS: &[u8] = b"#$%&+=?!";
 const MAX_HISTORY: usize = 200;
+/// Commands longer than this are cut in the run log; the hash still binds them.
+const MAX_LOG_COMMAND: usize = 2000;
 const RECOVERY_ALPHABET: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 
 #[derive(Debug)]
@@ -177,9 +179,20 @@ pub struct Request {
     #[serde(skip_serializing_if = "String::is_empty")]
     pub reason: String,
     pub risk: String,
+    /// Approval asks for a TOTP code.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub totp: bool,
     pub hash: String,
     pub display: String,
     pub state: ReqState,
+    /// Host name the agent's machine reported. Self-declared, not verified.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub device: String,
+    /// Agent software from the MCP handshake, such as `claude-code 2.1`.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub app: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
     #[serde(serialize_with = "ser_time")]
     pub created: SystemTime,
     #[serde(serialize_with = "ser_time")]
@@ -192,6 +205,56 @@ pub struct Request {
     pub secret: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<RunResult>,
+}
+
+/// What the agent's side says about itself. Both values are self-declared:
+/// the token is what identifies the agent.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ClientInfo {
+    pub device: String,
+    pub app: String,
+}
+
+impl ClientInfo {
+    pub fn new(device: &str, app: &str) -> ClientInfo {
+        ClientInfo {
+            device: clean_label(device),
+            app: clean_label(app),
+        }
+    }
+}
+
+/// Keeps a short, printable label; anything else could mislead the approver.
+fn clean_label(s: &str) -> String {
+    s.chars()
+        .filter(|c| c.is_ascii_alphanumeric() || " ._-/()+:@".contains(*c))
+        .take(64)
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
+/// The run log fields of a finished request: who asked, from where, with which
+/// secrets, and the command as the approver saw it (secrets never appear in it).
+fn run_fields(r: &Request, refs: &[String]) -> Value {
+    let mut secrets: Vec<String> = refs.to_vec();
+    if !r.secret.is_empty() && !secrets.contains(&r.secret) {
+        secrets.push(r.secret.clone());
+    }
+    secrets.sort();
+    secrets.dedup();
+    let mut f = json!({"profile": r.profile, "agent": r.caller,
+        "command": r.display.chars().take(MAX_LOG_COMMAND).collect::<String>()});
+    if !secrets.is_empty() {
+        f["secrets"] = json!(secrets);
+    }
+    if !r.device.is_empty() {
+        f["device"] = json!(r.device);
+    }
+    if !r.app.is_empty() {
+        f["app"] = json!(r.app);
+    }
+    f
 }
 
 fn ser_time<S: Serializer>(t: &SystemTime, s: S) -> std::result::Result<S::Ok, S::Error> {
@@ -920,6 +983,31 @@ impl Core {
         self.inner().st.as_ref().is_some_and(|s| s.totp_enabled)
     }
 
+    /// Whether approving a high risk request asks for a TOTP code. On by default.
+    pub fn approval_totp(&self) -> bool {
+        self.inner()
+            .st
+            .as_ref()
+            .is_none_or(|s| !s.approval_totp_off)
+    }
+
+    /// Turns the TOTP step of high risk approvals on or off. Turning it off
+    /// needs a current TOTP code, so a stolen session alone cannot weaken it.
+    /// Recovery codes do not count, as they cannot approve high risk either.
+    pub fn set_approval_totp(&self, on: bool, code: &str) -> Result<()> {
+        let mut g = self.inner();
+        let st = g.st.as_ref().ok_or(Error::Locked)?;
+        if st.approval_totp_off == !on {
+            return Ok(());
+        }
+        if !on && st.totp_enabled {
+            self.check_totp_locked(&mut g, code)?;
+        }
+        g.st.as_mut().ok_or(Error::Locked)?.approval_totp_off = !on;
+        self.log("approval_totp", "web", json!({"on": on}));
+        self.save_locked(&mut g)
+    }
+
     // --- Profiles and tokens ---
 
     pub fn profiles(&self) -> Result<Vec<Profile>> {
@@ -1169,8 +1257,20 @@ impl Core {
         params: BTreeMap<String, String>,
         reason: &str,
     ) -> Result<Request> {
+        self.submit_from(t, &ClientInfo::default(), profile, params, reason)
+    }
+
+    /// Like `submit`, recording the device and agent software for the run log.
+    pub fn submit_from(
+        &self,
+        t: &Token,
+        client: &ClientInfo,
+        profile: &str,
+        params: BTreeMap<String, String>,
+        reason: &str,
+    ) -> Result<Request> {
         let mut g = self.inner();
-        self.submit_locked(&mut g, t, profile, params, reason, true)
+        self.submit_locked(&mut g, t, client, profile, params, reason, true)
     }
 
     /// Lets the signed-in owner run a profile at once. The owner is the
@@ -1189,7 +1289,16 @@ impl Core {
         };
         let r = {
             let mut g = self.inner();
-            self.submit_locked(&mut g, &web, profile, params, "chạy thử từ web", false)?
+            let client = ClientInfo::new("", "web");
+            self.submit_locked(
+                &mut g,
+                &web,
+                &client,
+                profile,
+                params,
+                "chạy thử từ web",
+                false,
+            )?
         };
         if r.state == ReqState::Pending
             && let Err(e) = self.decide(&r.id, &r.hash, true, "web", code, secret)
@@ -1203,10 +1312,12 @@ impl Core {
         Ok(self.wait(&r.id, None).await.unwrap_or(r))
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn submit_locked(
         &self,
         g: &mut Inner,
         t: &Token,
+        client: &ClientInfo,
         profile: &str,
         params: BTreeMap<String, String>,
         reason: &str,
@@ -1224,12 +1335,23 @@ impl Core {
         let p = policy::resolve(stored, &st.connections)?;
         let a = p.render(&params)?;
         fields::check_refs(&a.secrets(), &st.secrets)?;
-        self.enqueue_locked(g, t, profile, params, p, a, reason, notify)
+        self.enqueue_locked(g, t, client, profile, params, p, a, reason, notify)
     }
 
     /// Queues a request the agent wrote itself. Only tokens without a profile
     /// limit may do this, because a limited token was meant to be narrow.
     pub fn submit_call(&self, t: &Token, call: &Call, reason: &str) -> Result<Request> {
+        self.submit_call_from(t, &ClientInfo::default(), call, reason)
+    }
+
+    /// Like `submit_call`, recording the device and agent software.
+    pub fn submit_call_from(
+        &self,
+        t: &Token,
+        client: &ClientInfo,
+        call: &Call,
+        reason: &str,
+    ) -> Result<Request> {
         let mut g = self.inner();
         let st = g.st.as_ref().ok_or(Error::Locked)?;
         if !t.profiles.is_empty() {
@@ -1256,6 +1378,7 @@ impl Core {
         self.enqueue_locked(
             &mut g,
             t,
+            client,
             policy::ADHOC_PROFILE,
             BTreeMap::new(),
             p,
@@ -1270,6 +1393,7 @@ impl Core {
         &self,
         g: &mut Inner,
         t: &Token,
+        client: &ClientInfo,
         profile: &str,
         params: BTreeMap<String, String>,
         p: Profile,
@@ -1309,9 +1433,14 @@ impl Core {
             caller: t.name.clone(),
             reason: clean_reason(reason),
             risk: p.risk.clone(),
+            totp: p.risk == policy::RISK_HIGH
+                && g.st.as_ref().is_some_and(|s| !s.approval_totp_off),
             hash: policy::hash(&p, &a, &t.name),
             display: a.display(),
             state: ReqState::Pending,
+            device: client.device.clone(),
+            app: client.app.clone(),
+            duration_ms: None,
             created: now,
             expires: now + self.opt.approval_ttl,
             decided_by: String::new(),
@@ -1337,7 +1466,13 @@ impl Core {
         } else {
             json!(req.params)
         };
-        let f = json!({"id": id, "profile": profile, "params": params, "hash": req.hash, "reason": req.reason});
+        let mut f = json!({"id": id, "profile": profile, "params": params, "hash": req.hash, "reason": req.reason});
+        if !req.device.is_empty() {
+            f["device"] = json!(req.device);
+        }
+        if !req.app.is_empty() {
+            f["app"] = json!(req.app);
+        }
         if let Err(e) = self.audit.append("request", &t.name, obj(f)) {
             eprintln!("ERROR audit append: {e}");
             self.finish_locked(g, &id, ReqState::Failed, "audit");
@@ -1395,7 +1530,9 @@ impl Core {
     }
 
     pub fn needs_totp(&self, id: &str) -> bool {
-        self.inner()
+        let g = self.inner();
+        let on = g.st.as_ref().is_some_and(|s| !s.approval_totp_off);
+        on && g
             .reqs
             .get(id)
             .is_some_and(|e| e.req.risk == policy::RISK_HIGH)
@@ -1456,7 +1593,8 @@ impl Core {
                 Ok(_) => {}
             }
         }
-        if risk == policy::RISK_HIGH {
+        let totp_on = g.st.as_ref().is_some_and(|s| !s.approval_totp_off);
+        if risk == policy::RISK_HIGH && totp_on {
             if !g.st.as_ref().is_some_and(|s| s.totp_enabled) {
                 return Err(Error::Msg(
                     "chưa bật TOTP nên chưa duyệt được yêu cầu rủi ro cao".into(),
@@ -1503,6 +1641,7 @@ impl Core {
         let vault = &self.vault;
         let get = |n: &str| fields::resolve(vault, n);
         let mut stop = self.shutdown.subscribe();
+        let started = Instant::now();
         let mut res = tokio::select! {
             r = policy::run_with(&action, get, &public) => r,
             _ = stop.wait_for(|v| *v) => RunResult { ok: false, exit: -1, output: "context canceled".into() },
@@ -1512,10 +1651,13 @@ impl Core {
             let list: Vec<&[u8]> = extra.iter().map(|v| v.as_bytes()).collect();
             res.output = policy::redact(&res.output, &list);
         }
+        let ms = started.elapsed().as_millis() as u64;
         let mut g = self.inner();
         let Some(e) = g.reqs.get_mut(&id) else { return };
         e.req.result = Some(res.clone());
+        e.req.duration_ms = Some(ms);
         let by = e.req.decided_by.clone();
+        let run = run_fields(&e.req, &refs);
         let s = if res.ok {
             ReqState::Done
         } else {
@@ -1523,11 +1665,12 @@ impl Core {
         };
         self.finish_locked(&mut g, &id, s, &by);
         let sum = Sha256::digest(res.output.as_bytes());
-        self.log(
-            "result",
-            &by,
-            json!({"id": id, "exit": res.exit, "bytes": res.output.len(), "sha256": hex::encode(&sum[..8])}),
-        );
+        let mut f = json!({"id": id, "exit": res.exit, "bytes": res.output.len(),
+            "sha256": hex::encode(&sum[..8]), "ok": res.ok, "duration_ms": ms});
+        if let (Some(m), Value::Object(r)) = (f.as_object_mut(), run) {
+            m.extend(r);
+        }
+        self.log("result", &by, f);
     }
 
     /// Denies overdue requests; silence is never approval.
