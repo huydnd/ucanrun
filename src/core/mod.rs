@@ -340,7 +340,14 @@ struct Inner {
     pair_till: SystemTime,
     pair_fails: u32,
     recent: HashMap<String, Vec<SystemTime>>,
+    /// Last web, Telegram or agent activity, for the idle auto lock.
+    last_active: SystemTime,
 }
+
+/// Bounds of the idle auto lock, in minutes.
+pub const AUTO_LOCK_MIN: i64 = 5;
+pub const AUTO_LOCK_MAX: i64 = 7 * 24 * 60;
+const MAX_TEMPLATES: usize = 50;
 
 pub struct Core {
     opt: Options,
@@ -484,6 +491,55 @@ fn clean_reason(s: &str) -> String {
     s
 }
 
+/// A saved template must be usable as is and must not hold a secret.
+fn check_template(t: &state::SecretTemplate) -> Result<()> {
+    let text = |s: &str, max: usize, what: &str| -> Result<()> {
+        if s.chars().count() > max
+            || s.chars()
+                .any(|c| c != '\n' && gourl::is_control_or_format(c))
+        {
+            return Err(Error::Msg(format!(
+                "{what} quá dài hoặc có ký tự điều khiển"
+            )));
+        }
+        Ok(())
+    };
+    if t.title.trim().is_empty() {
+        return Err(Error::Msg("mẫu cần có tên".into()));
+    }
+    text(&t.title, 60, "tên mẫu")?;
+    text(&t.hint, 200, "gợi ý")?;
+    if !t.name.is_empty() && (t.name.starts_with('_') || !vault::valid_name(&t.name)) {
+        return Err(Error::Vault(vault::Error::InvalidName));
+    }
+    for f in &t.fields {
+        if !f.public && !f.value.is_empty() {
+            return Err(Error::Msg(format!(
+                "mẫu không lưu giá trị của trường riêng {}",
+                gourl::quote(&f.name)
+            )));
+        }
+        text(&f.value, 200, "giá trị mặc định")?;
+    }
+    SecretMeta {
+        description: t.description.clone(),
+        hosts: t.hosts.clone(),
+        allow_commands: t.allow_commands,
+        totp: t.totp.clone(),
+        workspace: t.workspace.clone(),
+        fields: t
+            .fields
+            .iter()
+            .map(|f| policy::FieldMeta {
+                name: f.name.clone(),
+                public: f.public,
+            })
+            .collect(),
+    }
+    .validate()?;
+    Ok(())
+}
+
 fn allowed(t: &Token, profile: &str) -> bool {
     t.profiles.is_empty() || t.profiles.iter().any(|p| p == profile)
 }
@@ -547,6 +603,7 @@ impl Core {
                 pair_code: String::new(),
                 pair_till: UNIX_EPOCH,
                 pair_fails: 0,
+                last_active: UNIX_EPOCH,
                 recent: HashMap::new(),
             }),
             login_mu: Mutex::new(()),
@@ -668,6 +725,7 @@ impl Core {
         match r {
             Ok(st) => {
                 g.st = Some(st);
+                g.last_active = self.now();
                 Ok(())
             }
             Err(e) => {
@@ -1254,13 +1312,84 @@ impl Core {
     /// Resolves a bearer token to its record.
     pub fn authenticate(&self, val: &str) -> Result<Token> {
         let h = hex::encode(Sha256::digest(val.as_bytes()));
-        let g = self.inner();
+        let mut g = self.inner();
         let st = g.st.as_ref().ok_or(Error::Locked)?;
-        st.tokens
+        let t = st
+            .tokens
             .values()
             .find(|t| bool::from(t.hash.as_bytes().ct_eq(h.as_bytes())))
             .cloned()
-            .ok_or(Error::Forbidden)
+            .ok_or(Error::Forbidden)?;
+        g.last_active = self.now();
+        Ok(t)
+    }
+
+    /// Records owner activity, such as a signed-in web request.
+    pub fn touch(&self) {
+        let now = self.now();
+        self.inner().last_active = now;
+    }
+
+    pub fn auto_lock_min(&self) -> i64 {
+        self.inner().st.as_ref().map_or(0, |s| s.auto_lock_min)
+    }
+
+    /// Sets the idle auto lock: 0 turns it off.
+    pub fn set_auto_lock(&self, min: i64) -> Result<()> {
+        if min != 0 && !(AUTO_LOCK_MIN..=AUTO_LOCK_MAX).contains(&min) {
+            return Err(Error::Msg(format!(
+                "tự khoá phải từ {AUTO_LOCK_MIN} phút tới 7 ngày, hoặc tắt"
+            )));
+        }
+        let mut g = self.inner();
+        g.st.as_mut().ok_or(Error::Locked)?.auto_lock_min = min;
+        g.last_active = self.now();
+        self.log("auto_lock_set", "web", json!({"minutes": min}));
+        self.save_locked(&mut g)
+    }
+
+    pub fn templates(&self) -> Result<Vec<state::SecretTemplate>> {
+        Ok(self
+            .inner()
+            .st
+            .as_ref()
+            .ok_or(Error::Locked)?
+            .templates
+            .clone())
+    }
+
+    /// Adds a template, or replaces the one with the same id.
+    pub fn put_template(&self, mut t: state::SecretTemplate) -> Result<state::SecretTemplate> {
+        check_template(&t)?;
+        let mut g = self.inner();
+        let st = g.st.as_mut().ok_or(Error::Locked)?;
+        if t.id.is_empty() {
+            if st.templates.len() >= MAX_TEMPLATES {
+                return Err(Error::Msg(format!("tối đa {MAX_TEMPLATES} mẫu")));
+            }
+            t.id = rand_hex(4);
+            st.templates.push(t.clone());
+        } else {
+            let Some(slot) = st.templates.iter_mut().find(|x| x.id == t.id) else {
+                return Err(Error::NotFound);
+            };
+            *slot = t.clone();
+        }
+        self.log("template_put", "web", json!({"id": t.id, "title": t.title}));
+        self.save_locked(&mut g)?;
+        Ok(t)
+    }
+
+    pub fn delete_template(&self, id: &str) -> Result<()> {
+        let mut g = self.inner();
+        let st = g.st.as_mut().ok_or(Error::Locked)?;
+        let n = st.templates.len();
+        st.templates.retain(|x| x.id != id);
+        if st.templates.len() == n {
+            return Err(Error::NotFound);
+        }
+        self.log("template_delete", "web", json!({"id": id}));
+        self.save_locked(&mut g)
     }
 
     /// What a token may see, without templates or hosts.
@@ -1614,6 +1743,7 @@ impl Core {
         secret: &str,
     ) -> Result<String> {
         let mut g = self.inner();
+        g.last_active = self.now();
         let Some(e) = g.reqs.get(id) else {
             return Err(Error::Decided);
         };
@@ -1740,6 +1870,14 @@ impl Core {
             .collect();
         for id in due {
             self.finish_locked(&mut g, &id, ReqState::Expired, "ttl");
+        }
+        // Idle auto lock, never in the middle of a run.
+        let idle = g.st.as_ref().map_or(0, |s| s.auto_lock_min);
+        let busy = g.reqs.values().any(|e| e.req.state == ReqState::Running);
+        let quiet = now.duration_since(g.last_active).unwrap_or_default();
+        if idle > 0 && !busy && quiet >= Duration::from_secs(idle as u64 * 60) {
+            drop(g);
+            self.lock("auto_lock");
         }
     }
 

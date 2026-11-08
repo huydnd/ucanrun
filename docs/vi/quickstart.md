@@ -61,6 +61,11 @@ Thông tin đăng nhập database có máy chủ, cổng, user và mật khẩu.
 
 Muốn giới hạn chặt hơn, tab Nâng cao định nghĩa các hành động cố định, xem [hành động cố định](fixed-actions.md).
 
+## Cài đặt
+
+- **Tự khoá kho:** khoá kho sau 15 phút tới 24 giờ không có hoạt động (web, duyệt hay yêu cầu từ agent). Mặc định tắt. Khi khoá, agent nhận lỗi 423 cho tới khi bạn đăng nhập.
+- **Mẫu secret của bạn:** điền form secret, mở **Lưu thành mẫu**, lần sau cấu hình đó (tên, workspace, mô tả, máy chủ, các trường, mức TOTP) hiện đầu danh sách mẫu. Mẫu không bao giờ giữ giá trị secret hay giá trị trường riêng. Quản lý ở **Cài đặt**.
+
 ## Mất điện thoại
 
 Đăng nhập bằng mật khẩu chính và một mã khôi phục, nhập vào ô mã TOTP. Mỗi mã dùng một lần. Sau đó vào **Cài đặt** → **TOTP** → **Đổi điện thoại** để đăng ký thiết bị mới.

@@ -61,6 +61,11 @@ A database login has a host, a port, a user and a password. Choose **Several fie
 
 For tighter control, the Advanced tab defines fixed actions agents may only fill in, see [fixed actions](fixed-actions.md).
 
+## Settings
+
+- **Auto lock:** lock the vault after 15 minutes to 24 hours with no activity (web, approvals or agent requests). Off by default. A locked vault answers agents with error 423 until you sign in.
+- **Your secret templates:** fill in the secret form, open **Save as template**, and the setup (name, workspace, notes, hosts, fields, TOTP) shows first among the templates next time. Templates never keep a secret value or a private field value. Manage them under **Settings**.
+
 ## Lost your phone
 
 Sign in with the master password and a recovery code in the TOTP field. Each code works once. Then open **Settings**, **TOTP**, **Move to a new phone**.
