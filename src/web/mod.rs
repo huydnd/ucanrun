@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use axum::Router;
 use axum::body::Body;
 use axum::extract::{Path, Request, State};
-use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
+use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{MethodRouter, delete, get, post, put};
@@ -43,6 +43,9 @@ const READ_TIMEOUT: Duration = Duration::from_secs(30);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(130);
 
 const CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+/// The UI needs none of these browser features.
+const PERMISSIONS: &str = "camera=(), microphone=(), geolocation=(), payment=(), usb=(), \
+    serial=(), bluetooth=()";
 const GATE_CSP: &str = "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
 
 #[derive(RustEmbed)]
@@ -57,10 +60,37 @@ struct Session {
 }
 
 #[derive(Default)]
-struct Guard {
-    sessions: HashMap<String, Session>,
+struct Backoff {
     fails: u32,
     blocked: Option<Instant>,
+}
+
+impl Backoff {
+    fn throttled(&self) -> bool {
+        self.blocked.is_some_and(|b| Instant::now() < b)
+    }
+
+    fn record(&mut self, ok: bool) {
+        if ok {
+            *self = Backoff::default();
+            return;
+        }
+        self.fails += 1;
+        if self.fails >= 3 {
+            let d = Duration::from_secs(1 << (self.fails - 3).min(6));
+            self.blocked = Some(Instant::now() + d);
+        }
+    }
+}
+
+#[derive(Default)]
+struct Guard {
+    sessions: HashMap<String, Session>,
+    /// Password and TOTP checks.
+    login: Backoff,
+    /// The access gate. Kept apart so a stranger guessing the gate code
+    /// cannot lock the owner, who already has the gate cookie, out of login.
+    gate: Backoff,
 }
 
 /// Shared state of both routers. Set the public fields before wrapping it in
@@ -383,24 +413,22 @@ impl Server {
         self.guard().sessions.clear();
     }
 
-    /// One global backoff, because behind a proxy every client shares an
-    /// address and the attacker controls forwarded headers.
+    /// One global backoff per door, because behind a proxy every client
+    /// shares an address and the attacker controls forwarded headers.
     fn throttled(&self) -> bool {
-        self.guard().blocked.is_some_and(|b| Instant::now() < b)
+        self.guard().login.throttled()
     }
 
     fn record_login(&self, ok: bool) {
-        let mut g = self.guard();
-        if ok {
-            g.fails = 0;
-            g.blocked = None;
-            return;
-        }
-        g.fails += 1;
-        if g.fails >= 3 {
-            let d = Duration::from_secs(1 << (g.fails - 3).min(6));
-            g.blocked = Some(Instant::now() + d);
-        }
+        self.guard().login.record(ok);
+    }
+
+    fn gate_throttled(&self) -> bool {
+        self.guard().gate.throttled()
+    }
+
+    fn record_gate(&self, ok: bool) {
+        self.guard().gate.record(ok);
     }
 
     fn gate_open(&self, h: &HeaderMap) -> bool {
@@ -460,6 +488,7 @@ impl Server {
             .route("/v1/requests", post(agent_submit).fallback(not_allowed_h))
             .route("/v1/requests/{id}", get(agent_get).fallback(not_allowed_h))
             .fallback(not_found_h)
+            .layer(middleware::from_fn(agent_headers))
             .layer(middleware::from_fn(write_timeout))
             .with_state(self.clone())
     }
@@ -512,6 +541,22 @@ async fn secure_headers(State(s): State<Arc<Server>>, req: Request, next: Next) 
         HeaderValue::from_static("no-referrer"),
     );
     h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    h.insert(
+        HeaderName::from_static("permissions-policy"),
+        HeaderValue::from_static(PERMISSIONS),
+    );
+    r
+}
+
+/// The agent API returns request results; no cache should keep them.
+async fn agent_headers(req: Request, next: Next) -> Response {
+    let mut r = next.run(req).await;
+    let h = r.headers_mut();
+    h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    h.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
     r
 }
 
@@ -537,6 +582,7 @@ fn gate_deny(code: StatusCode) -> Response {
             (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
             (header::REFERRER_POLICY, "no-referrer"),
             (header::CACHE_CONTROL, "no-store"),
+            (HeaderName::from_static("permissions-policy"), PERMISSIONS),
         ],
         GATE_PAGE,
     )
@@ -553,7 +599,7 @@ async fn gate(State(s): State<Arc<Server>>, req: Request, next: Next) -> Respons
     if req.method() != Method::POST || req.uri().path() != "/gate" {
         return gate_deny(StatusCode::UNAUTHORIZED);
     }
-    if s.throttled() {
+    if s.gate_throttled() {
         return gate_deny(StatusCode::TOO_MANY_REQUESTS);
     }
     let site = header_str(req.headers(), "sec-fetch-site").to_string();
@@ -580,10 +626,10 @@ async fn gate(State(s): State<Arc<Server>>, req: Request, next: Next) -> Respons
     }
     let want = gate_value(&s.gate_token);
     if !bool::from(gate_value(&code).as_bytes().ct_eq(want.as_bytes())) {
-        s.record_login(false);
+        s.record_gate(false);
         return gate_deny(StatusCode::UNAUTHORIZED);
     }
-    s.record_login(true);
+    s.record_gate(true);
     let mut r = (StatusCode::SEE_OTHER, [(header::LOCATION, "/")]).into_response();
     set_cookie(
         &mut r,

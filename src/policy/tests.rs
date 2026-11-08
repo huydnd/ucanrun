@@ -513,3 +513,86 @@ fn needs_totp_follows_risk_and_each_secret() {
         "unknown follows risk"
     );
 }
+
+#[test]
+fn approval_screen_shows_control_and_bidi_characters_escaped() {
+    let a = Action {
+        exec: Some(ExecSpec {
+            argv: vec!["/usr/bin/psql".into()],
+            env: [(
+                "A".to_string(),
+                "x\nstdin: harmless\u{202e}gnp.exe".to_string(),
+            )]
+            .into(),
+            stdin: "line1\nline2".into(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let d = a.display();
+    assert_eq!(d.lines().count(), 3, "{d}");
+    assert!(d.contains("x\\nstdin: harmless\\u{202e}gnp.exe"), "{d}");
+    assert!(d.contains("stdin: line1\\nline2"), "{d}");
+    let b = Action {
+        http: Some(HttpSpec {
+            method: "POST".into(),
+            url: "https://a.example/".into(),
+            body: "{\n  \"x\": \"\u{2066}y\"\n}".into(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let d = b.display();
+    assert!(
+        d.contains("{\n  \"x\": \"\\u{2066}y\"\n}"),
+        "body keeps lines: {d}"
+    );
+}
+
+#[test]
+fn header_values_with_control_characters_are_refused() {
+    for v in ["a\r\nX-Evil: 1", "a\u{202e}b", "a\0b"] {
+        let p = Profile {
+            name: "h".into(),
+            risk: RISK_LOW.into(),
+            http: Some(HttpSpec {
+                method: "GET".into(),
+                url: "https://a.example/".into(),
+                headers: [("X".to_string(), v.to_string())].into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert!(p.validate().is_err(), "{v:?} accepted");
+    }
+}
+
+#[test]
+fn wildcard_hosts_mean_the_default_port() {
+    let mut m = BTreeMap::new();
+    m.insert(
+        "t".to_string(),
+        SecretMeta {
+            hosts: vec!["*.example.com".into(), "*.other.test:8443".into()],
+            ..Default::default()
+        },
+    );
+    let call = |url: &str| {
+        from_call(
+            &Call {
+                http: Some(HttpSpec {
+                    method: "GET".into(),
+                    url: url.into(),
+                    headers: [("A".to_string(), "{{secret:t}}".to_string())].into(),
+                    ..Default::default()
+                }),
+                exec: None,
+            },
+            &m,
+        )
+    };
+    assert!(call("https://api.example.com/").is_ok());
+    assert!(call("https://api.example.com:9999/").is_err());
+    assert!(call("https://x.other.test:8443/").is_ok());
+    assert!(call("https://x.other.test/").is_err());
+}

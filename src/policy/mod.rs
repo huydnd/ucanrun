@@ -246,6 +246,14 @@ impl Profile {
                 if k.contains("{{") {
                     return err("template is not allowed in a header name");
                 }
+                // HTTP forbids them anyway; on the approval screen they could
+                // add fake lines or reorder text.
+                if v.chars().any(gourl::is_control_or_format) {
+                    return err(format!(
+                        "header {} contains a control character",
+                        gourl::quote(k)
+                    ));
+                }
                 texts.push(v);
             }
         }
@@ -604,10 +612,15 @@ impl Action {
     /// anything the agent wrote, and never contains a secret value.
     pub fn display(&self) -> String {
         let choice = format!("{{{{secret:{CHOICE_REF}}}}}");
-        let mask = |s: &str| {
+        // Values the agent wrote must not add lines or reorder text on the
+        // approval screen, so control and bidi characters are shown escaped.
+        // Only the body keeps its line breaks.
+        let mask_with = |s: &str, lines: bool| {
             let s = s.replace(&choice, "‹secret bạn chọn khi duyệt›");
-            TMPL_RE.replace_all(&s, "‹secret:$2›").into_owned()
+            let s = TMPL_RE.replace_all(&s, "‹secret:$2›").into_owned();
+            visible(&s, lines)
         };
+        let mask = |s: &str| mask_with(s, false);
         let mut b = String::new();
         if let Some(h) = &self.http {
             b.push_str(&format!("{} {}", h.method, mask(&h.url)));
@@ -615,7 +628,7 @@ impl Action {
                 b.push_str(&format!("\n{k}: {}", mask(v)));
             }
             if !h.body.is_empty() {
-                b.push_str(&format!("\n\n{}", mask(&h.body)));
+                b.push_str(&format!("\n\n{}", mask_with(&h.body, true)));
             }
         }
         if let Some(e) = &self.exec {
@@ -664,6 +677,24 @@ pub fn hash(p: &Profile, a: &Action, caller: &str) -> String {
     let v = serde_json::json!({ "P": p, "A": a, "C": caller });
     let b = serde_json::to_vec(&v).unwrap_or_default();
     hex::encode(Sha256::digest(b))
+}
+
+/// Escapes control and format characters, keeping line breaks if `lines`.
+fn visible(s: &str, lines: bool) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '\n' if lines => out.push('\n'),
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            '\r' => out.push_str("\\r"),
+            c if gourl::is_control_or_format(c) => {
+                out.push_str(&format!("\\u{{{:04x}}}", c as u32))
+            }
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 /// Replaces secret placeholders. Used only by the executor.

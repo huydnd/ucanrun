@@ -107,8 +107,13 @@ impl SecretMeta {
         let host = u.host.to_lowercase();
         let name = u.hostname().to_lowercase();
         self.hosts.iter().any(|h| {
+            // A wildcard, like an exact name, means the default port unless
+            // the entry names one.
             if let Some(suffix) = h.strip_prefix("*.") {
-                return name.ends_with(&format!(".{suffix}"));
+                if suffix.contains(':') {
+                    return host.ends_with(&format!(".{suffix}"));
+                }
+                return name.ends_with(&format!(".{suffix}")) && u.port().is_empty();
             }
             *h == host || (*h == name && u.port().is_empty())
         })
