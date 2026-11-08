@@ -27,7 +27,7 @@ use ucanrun::{audit, totp};
 const PASS: &str = "correct horse battery staple";
 const SECRET: &str = "gitea-token-VALUE-0123456789";
 const BOT_TOK: &str = "123:BOTTOKEN";
-const OWNER: i64 = 1001;
+const OWNER: i64 = 0x6875_7964_6e64;
 const STRANGER: i64 = 666;
 const CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 

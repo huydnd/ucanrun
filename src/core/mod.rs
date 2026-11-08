@@ -2,6 +2,14 @@
 //! `internal/core`). Error strings match the Go version because the web UI
 //! translates them by their text.
 //!
+//! How a request moves through this module:
+//! Held as pending until a person decides on Telegram or the web.
+//! Until then nothing that needs a secret runs.
+//! Yielding a secret value to an agent is not possible from here.
+//! Decisions bind to the hash of the exact action that was shown.
+//! No answer before the deadline counts as a denial.
+//! Done or not, every step is written to the audit log.
+//!
 //! `setup`, `login`, `unlock_at_start` and `totp_reset` run scrypt and block
 //! for about a second; call them from `spawn_blocking` in async code.
 
