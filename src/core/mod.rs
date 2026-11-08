@@ -488,6 +488,29 @@ fn allowed(t: &Token, profile: &str) -> bool {
     t.profiles.is_empty() || t.profiles.iter().any(|p| p == profile)
 }
 
+/// Whether a token limited to workspaces may use this secret reference.
+/// Unknown secrets fall in the default workspace.
+pub(crate) fn in_scope(t: &Token, r: &str, meta: &BTreeMap<String, SecretMeta>) -> bool {
+    if t.workspaces.is_empty() {
+        return true;
+    }
+    let ws = meta
+        .get(policy::secret_of(r, meta))
+        .map_or("", |m| m.workspace.as_str());
+    t.workspaces.iter().any(|w| w == ws)
+}
+
+/// Every secret a profile may touch, including the ones chosen on approval.
+fn profile_secrets(p: &Profile) -> Vec<String> {
+    let mut v: Vec<String> = action_of(p)
+        .secrets()
+        .into_iter()
+        .filter(|n| n != policy::CHOICE_REF)
+        .collect();
+    v.extend(p.secret_choices.iter().cloned());
+    v
+}
+
 fn action_of(p: &Profile) -> Action {
     Action {
         http: p.http.clone(),
@@ -1079,7 +1102,8 @@ impl Core {
             "secret_meta",
             "web",
             json!({"name": name, "hosts": hosts, "commands": m.allow_commands,
-                "totp": if m.totp.is_empty() { Value::Null } else { json!(m.totp) }}),
+                "totp": if m.totp.is_empty() { Value::Null } else { json!(m.totp) },
+                "workspace": if m.workspace.is_empty() { Value::Null } else { json!(m.workspace) }}),
         );
         st.secrets.insert(name.to_string(), m);
         self.save_locked(&mut g)
@@ -1172,6 +1196,21 @@ impl Core {
 
     /// Returns the value once; only its hash is kept.
     pub fn create_token(&self, name: &str, profiles: Vec<String>) -> Result<String> {
+        self.create_token_in(name, profiles, vec![])
+    }
+
+    /// Like `create_token`, limited to the secrets of some workspaces.
+    pub fn create_token_in(
+        &self,
+        name: &str,
+        profiles: Vec<String>,
+        mut workspaces: Vec<String>,
+    ) -> Result<String> {
+        for w in &workspaces {
+            policy::valid_workspace(w)?;
+        }
+        workspaces.sort();
+        workspaces.dedup();
         let name = name.trim();
         if name.is_empty() || name.len() > 64 {
             return Err(Error::Msg("tên token không hợp lệ".into()));
@@ -1191,10 +1230,15 @@ impl Core {
                 name: name.to_string(),
                 hash: hex::encode(Sha256::digest(val.as_bytes())),
                 profiles,
+                workspaces: workspaces.clone(),
                 created: rfc3339_nano(self.now()),
             },
         );
-        self.log("token_create", "web", json!({"id": id, "name": name}));
+        let mut f = json!({"id": id, "name": name});
+        if !workspaces.is_empty() {
+            f["workspaces"] = json!(workspaces);
+        }
+        self.log("token_create", "web", f);
         self.save_locked(&mut g)?;
         Ok(val)
     }
@@ -1221,10 +1265,19 @@ impl Core {
 
     /// What a token may see, without templates or hosts.
     pub fn profiles_for(&self, t: &Token) -> Result<Vec<Profile>> {
+        let (meta, conns) = {
+            let g = self.inner();
+            let st = g.st.as_ref().ok_or(Error::Locked)?;
+            (st.secrets.clone(), st.connections.clone())
+        };
         Ok(self
             .profiles()?
             .into_iter()
             .filter(|p| allowed(t, &p.name))
+            .filter(|p| {
+                let full = policy::resolve(p, &conns).unwrap_or_else(|_| p.clone());
+                profile_secrets(&full).iter().all(|n| in_scope(t, n, &meta))
+            })
             .map(|p| Profile {
                 name: p.name,
                 description: p.description,
@@ -1322,6 +1375,17 @@ impl Core {
             return Err(Error::ExecOff);
         }
         let p = policy::resolve(stored, &st.connections)?;
+        if !profile_secrets(&p)
+            .iter()
+            .all(|n| in_scope(t, n, &st.secrets))
+        {
+            self.log(
+                "request_forbidden",
+                &t.name,
+                json!({"profile": profile, "why": "workspace"}),
+            );
+            return Err(Error::Forbidden);
+        }
         let a = p.render(&params)?;
         fields::check_refs(&a.secrets(), &st.secrets)?;
         self.enqueue_locked(g, t, client, profile, params, p, a, reason, notify)
@@ -1354,10 +1418,13 @@ impl Core {
         if call.exec.is_some() && !self.opt.allow_exec {
             return Err(Error::ExecOff);
         }
+        // Secrets outside the token's workspaces do not exist for it.
         let mut meta = BTreeMap::new();
         if let Ok(l) = self.vault.list() {
             for m in l {
-                if let Some(x) = st.secrets.get(&m.name) {
+                if let Some(x) = st.secrets.get(&m.name)
+                    && (t.workspaces.is_empty() || t.workspaces.contains(&x.workspace))
+                {
                     meta.insert(m.name, x.clone());
                 }
             }

@@ -25,6 +25,8 @@ pub struct SecretInfo {
     pub allow_commands: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub fields: Vec<FieldInfo>,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub workspace: String,
 }
 
 /// A field of a multi-field secret. Only public fields carry their value.
@@ -283,6 +285,9 @@ impl Core {
         let exec = self.opt.allow_exec;
         for s in self.vault.list()? {
             let Some(m) = meta.get(&s.name) else { continue };
+            if !super::in_scope(t, &s.name, &meta) {
+                continue;
+            }
             if m.hosts.is_empty() && !(m.allow_commands && exec) {
                 continue;
             }
@@ -311,6 +316,7 @@ impl Core {
                 hosts: m.hosts.clone(),
                 allow_commands: m.allow_commands && exec,
                 fields,
+                workspace: m.workspace.clone(),
             });
         }
         Ok(out)

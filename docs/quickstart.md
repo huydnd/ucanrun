@@ -47,6 +47,10 @@ The agent calls the MCP tool `list_secrets`, then `call` with a header such as `
 - You approve every request; the message says the agent wrote it.
 - With the `exec` image, `run_command` can use secrets marked "allow in commands". These count as high risk, so they need TOTP unless every secret used is set to "No TOTP".
 
+### Workspaces
+
+A secret can belong to a workspace, such as Work or Personal; leave it empty for Shared. The Secrets tab filters and groups by workspace. When you create an agent token you can limit it to some workspaces: secrets elsewhere do not exist for that agent, and fixed actions that use them are hidden and refused.
+
 ### Secrets with several fields
 
 A database login has a host, a port, a user and a password. Choose **Several fields** when saving the secret, and mark the fields agents may see, such as host, port, user and database, as **Public**. The agent then writes `{{secret:db.host}}` or `{{secret:db.password}}`.

@@ -12,7 +12,7 @@ mod tests;
 
 pub use adhoc::{
     ADHOC_PROFILE, Call, FieldMeta, SecretMeta, TOTP_ALWAYS, TOTP_NEVER, from_call, needs_totp,
-    public_fn, split_ref,
+    public_fn, secret_of, split_ref, valid_workspace,
 };
 pub use connection::{Auth, Connection, resolve};
 pub use exec::{RunResult, redact, run, run_with};

@@ -47,6 +47,10 @@ Agent gọi công cụ MCP `list_secrets`, rồi `call` với header như `Autho
 - Mọi yêu cầu đều cần bạn duyệt, tin nhắn ghi rõ agent tự soạn.
 - Với image `exec`, `run_command` dùng được secret có đánh dấu "cho dùng trong lệnh". Lệnh này tính là rủi ro cao, nên cần TOTP trừ khi mọi secret dùng đều đặt "Không cần TOTP".
 
+### Workspace
+
+Mỗi secret có thể thuộc một workspace, ví dụ Công việc hay Cá nhân; để trống là Chung. Tab Secret lọc và nhóm theo workspace. Khi tạo token cho agent, bạn có thể giới hạn vài workspace: secret ở chỗ khác coi như không tồn tại với agent đó, và hành động cố định dùng chúng bị ẩn và bị từ chối.
+
 ### Secret nhiều trường
 
 Thông tin đăng nhập database có máy chủ, cổng, user và mật khẩu. Khi lưu secret, chọn **Nhiều trường** và đánh dấu **Công khai** cho các trường agent được xem, như host, port, user, database. Agent viết `{{secret:db.host}}` hoặc `{{secret:db.password}}`.

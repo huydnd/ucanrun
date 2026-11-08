@@ -27,7 +27,7 @@ them in ucanrun. Output has secrets replaced by [REDACTED]; that is expected.";
 fn tools() -> Value {
     let map = json!({"type": "object", "additionalProperties": {"type": "string"}});
     json!([
-        {"name": "list_secrets", "description": "List the secrets you may use: name, what it is for, the hosts it may be sent to, and for secrets with fields, the field names (public fields include their value). Secret values are never shown.",
+        {"name": "list_secrets", "description": "List the secrets you may use: name, what it is for, the hosts it may be sent to, its workspace, and for secrets with fields, the field names (public fields include their value). Secret values are never shown.",
          "inputSchema": {"type": "object", "properties": {}}},
         {"name": "call", "description": "Make an HTTP request that needs a secret. Put {{secret:NAME}} or {{secret:NAME.FIELD}} in a header value, for example Authorization: Bearer {{secret:github_token}}. The URL host must be one the secret allows. Private secrets are not allowed in the URL or body; public fields are. A human approves the exact request on Telegram, then ucanrun sends it and returns the response with secrets redacted. Waits up to 110 s.",
          "inputSchema": {"type": "object", "required": ["method", "url"], "properties": {

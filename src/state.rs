@@ -53,6 +53,10 @@ pub struct Token {
     /// Empty means all profiles.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub profiles: Vec<String>,
+    /// Workspaces whose secrets the token may use. Empty means all; "" is
+    /// the default workspace.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workspaces: Vec<String>,
     /// RFC 3339 timestamp, kept as written.
     pub created: String,
 }
@@ -177,6 +181,7 @@ mod tests {
                 name: "n".into(),
                 hash: "h".into(),
                 profiles: vec![],
+                workspaces: vec![],
                 created: "2026-01-01T00:00:00Z".into(),
             },
         );

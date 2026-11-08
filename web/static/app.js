@@ -131,6 +131,10 @@ async function viewRequests(body) {
 // Picks the English variant of a data field when the UI is in English.
 const L = (o, k) => lang === "en" && o[k + "_en"] || o[k];
 
+// Workspaces group secrets; "" is the default one, shown as "Chung".
+const wsLabel = w => w || tr("Chung");
+const workspacesOf = list => [...new Set(list.map(s => s.workspace || ""))].sort((a, b) => a === "" ? -1 : b === "" ? 1 : a.localeCompare(b));
+
 async function secretTemplates() {
   if (!state.templates) state.templates = await fetch("secret-templates.json").then(r => r.ok ? r.json() : []).catch(() => []);
   return state.templates;
@@ -166,6 +170,11 @@ async function viewSecrets(body, editing, tpl) {
   const modeSel = choiceGroup("secretkind", multiMode ? "multi" : "one", [{value: "one", title: "Một giá trị", help: "Token, API key"}, {value: "multi", title: "Nhiều trường", help: "Đăng nhập database, máy chủ"}],
     v => { multiMode = v === "multi"; fieldBox.hidden = !multiMode; v_wrap.hidden = multiMode; });
   const execOn = !!(state.status && state.status.exec);
+  const known = workspacesOf(list).filter(Boolean);
+  const ws = field("Workspace", {autocomplete: "off", spellcheck: "false", placeholder: tr("Chung"), list: "ws-names", maxlength: 32});
+  ws.input.value = cur ? (cur.workspace || "") : state.secretWs && state.secretWs !== "*" ? state.secretWs : "";
+  const wsBox = h("div", null, ws.el, h("datalist", {id: "ws-names"}, known.map(w => h("option", {value: w}))),
+    h("small", {class: "muted"}, "Nhóm secret theo việc, ví dụ Công việc, Cá nhân. Để trống là Chung. Token của agent có thể chỉ được dùng một số workspace."));
   if (cur) {
     n.input.value = cur.name; n.input.readOnly = true;
     desc.value = cur.description || ""; hosts.input.value = (cur.hosts || []).join(", "); cmd.checked = !!cur.allow_commands;
@@ -192,7 +201,7 @@ async function viewSecrets(body, editing, tpl) {
   const v_wrap = h("div", {hidden: multiMode}, v.el, h("label", {class: "check"}, toggle, h("span", null, "Nhiều dòng, như khoá SSH")), multi);
   const save = form(cur ? "Sửa secret" : "Lưu secret mới", [n], "Lưu", async () => {
     const hs = hosts.input.value.split(/[\s,]+/).map(x => x.trim().toLowerCase()).filter(Boolean);
-    const req = {description: desc.value.trim(), hosts: hs, allow_commands: cmd.checked, totp: totpMode, code: totpCode.input.value};
+    const req = {description: desc.value.trim(), hosts: hs, allow_commands: cmd.checked, totp: totpMode, code: totpCode.input.value, workspace: ws.input.value.trim()};
     if (multiMode) req.fields = rows.filter(r => r.name).map(r => ({name: r.name, public: r.public, value: r.value}));
     else req.value = toggle.checked ? multi.value : v.input.value;
     await api("PUT", "/api/secrets/" + encodeURIComponent(n.input.value.trim()), req);
@@ -204,7 +213,7 @@ async function viewSecrets(body, editing, tpl) {
     totpBox,
     h("p", {class: "muted"}, "Giá trị chỉ ghi, không có cách xem lại trên giao diện.")));
   // Read top to bottom: name, kind, value, notes, hosts, TOTP.
-  save.querySelector("h2").after(n.el, modeSel);
+  save.querySelector("h2").after(n.el, wsBox, modeSel);
   if (cur) save.append(h("div", {class: "row"}, h("button", {onclick: () => viewSecrets(body)}, "Huỷ")));
   // Templates fill the form for common services; the value is the only thing left to type.
   const tile = t => {
@@ -221,17 +230,45 @@ async function viewSecrets(body, editing, tpl) {
     h("div", {class: "tiles compact"}, templates.map(tile)),
     h("h3", null, tpl ? "Điền giá trị" : "Hoặc tự điền"), save);
   if (!cur) { save.classList.remove("card"); save.querySelector("h2").remove(); }
+  // One row per secret: what it is for, where it may go, and how it is approved.
+  const row = s => h("div", {class: "spread secret"}, h("span", null, h("code", null, s.name),
+      s.description ? h("div", null, s.description) : h("div", {class: "note"}, "Chưa có mô tả, agent sẽ không biết dùng vào việc gì."),
+      s.fields && s.fields.length ? h("div", {class: "muted"}, s.fields.map(f => f.public ? `${f.name}=${f.value || ""}` : `${f.name}=•••`).join("  ")) : null,
+      h("div", {class: "chips"},
+        s.hosts && s.hosts.length ? s.hosts.map(x => h("span", {class: "chip"}, "→ " + x)) : h("span", {class: "chip dim"}, "agent không dùng trực tiếp"),
+        s.allow_commands ? h("span", {class: "chip"}, "dùng trong lệnh") : null,
+        s.totp === "always" ? h("span", {class: "chip high"}, "luôn cần TOTP") : s.totp === "never" ? h("span", {class: "chip warn"}, "không cần TOTP") : null)),
+    h("span", {class: "acts"}, h("button", {onclick: () => { viewSecrets(body, s.name); window.scrollTo(0, 0); }}, "Sửa"),
+      h("button", {class: "danger", onclick: async () => {
+        if (confirm(tr(`Xoá secret ${s.name}?`))) { await api("DELETE", "/api/secrets/" + encodeURIComponent(s.name)); viewSecrets(body); }
+      }}, "Xoá")));
+  const groups = workspacesOf(list);
+  if (state.secretWs && state.secretWs !== "*" && !groups.includes(state.secretWs)) state.secretWs = "*";
+  const pick = state.secretWs || "*";
+  const q = h("input", {type: "search", placeholder: "Tìm theo tên hoặc mô tả", "aria-label": "Tìm secret"});
+  q.value = state.secretQ || "";
+  const listBox = h("div");
+  const drawList = () => {
+    state.secretQ = q.value;
+    const t = q.value.trim().toLowerCase();
+    const shown = list.filter(x => (pick === "*" || (x.workspace || "") === pick) && (!t || (x.name + " " + (x.description || "")).toLowerCase().includes(t)));
+    if (!list.length) return fill(listBox, h("p", {class: "muted"}, "Chưa có secret. Chọn một mẫu ở trên để bắt đầu."));
+    if (!shown.length) return fill(listBox, h("p", {class: "muted"}, "Không có secret nào khớp."));
+    const by = workspacesOf(shown);
+    fill(listBox, by.map(w => {
+      const items = shown.filter(x => (x.workspace || "") === w);
+      return h("div", {class: "group"}, groups.length > 1 && pick === "*" ? h("h3", null, wsLabel(w), h("span", {class: "count"}, String(items.length))) : null, items.map(row));
+    }));
+  };
+  q.addEventListener("input", drawList);
+  const chip = (v, label, count) => h("button", {class: "chip-btn" + (pick === v ? " on" : ""), type: "button", "aria-pressed": pick === v ? "true" : "false",
+    onclick: () => { state.secretWs = v; viewSecrets(body); }}, label, h("span", {class: "count"}, String(count)));
+  const bar = groups.length > 1 || list.length > 6 ? h("div", {class: "toolbar"},
+    groups.length > 1 ? h("div", {class: "chips"}, chip("*", tr("Tất cả"), list.length), groups.map(w => chip(w, wsLabel(w), list.filter(x => (x.workspace || "") === w).length))) : null,
+    q) : null;
+  drawList();
   fill(body, cur ? save : addBox,
-    h("div", {class: "card"}, h("h2", null, `Secret (${list.length})`),
-      list.length ? list.map(s => h("div", {class: "spread"}, h("span", null, h("code", null, s.name),
-          s.description ? h("div", null, s.description) : h("div", {class: "note"}, "Chưa có mô tả, agent sẽ không biết dùng vào việc gì."),
-          s.fields && s.fields.length ? h("div", {class: "muted"}, s.fields.map(f => f.public ? `${f.name}=${f.value || ""}` : `${f.name}=•••`).join("  ")) : null,
-          h("div", {class: "muted"}, (s.hosts && s.hosts.length ? "→ " + s.hosts.join(", ") : tr("agent không dùng trực tiếp")) + (s.allow_commands ? " · " + tr("dùng trong lệnh") : ""),
-            s.totp === "always" ? [" ", h("span", {class: "badge high"}, "luôn cần TOTP")] : s.totp === "never" ? [" ", h("span", {class: "badge"}, "không cần TOTP")] : null)),
-        h("span", null, h("button", {onclick: () => { viewSecrets(body, s.name); window.scrollTo(0, 0); }}, "Sửa"), " ",
-          h("button", {class: "danger", onclick: async () => {
-            if (confirm(tr(`Xoá secret ${s.name}?`))) { await api("DELETE", "/api/secrets/" + encodeURIComponent(s.name)); viewSecrets(body); }
-          }}, "Xoá")))) : h("p", {class: "muted"}, "Chưa có secret.")));
+    h("div", {class: "card"}, h("h2", null, `Secret (${list.length})`), bar, listBox));
 }
 
 // --- Profile builder ---
@@ -831,7 +868,7 @@ function agentGuide(id, token, done) {
 }
 
 function agentTokenForm(profiles, onCreated) {
-  let id = "claude", touched = false, mode = "all", picked = [];
+  let id = "claude", touched = false, mode = "all", picked = [], wsMode = "all", wsPicked = [], wsKnown = [];
   const name = h("input", {autocomplete: "off", spellcheck: "false", "aria-label": "Tên agent"}); name.value = id;
   name.addEventListener("input", () => { touched = true; });
   const scope = h("div"), err = h("div", {class: "err", role: "alert"});
@@ -843,15 +880,24 @@ function agentTokenForm(profiles, onCreated) {
         h("span", null, h("span", null, p.description || p.name), " ", h("code", null, p.name))))) : null);
   };
   drawScope();
+  // Limit which secrets the agent can see and use, by workspace.
+  const wsScope = h("div");
+  const drawWs = () => fill(wsScope, h("h3", {class: "gap"}, "Giới hạn workspace"),
+    choiceGroup("wsscope", wsMode, [{value: "all", title: "Mọi workspace", help: "Agent thấy mọi secret được phép"}, {value: "some", title: "Chỉ các workspace đã chọn", help: "Secret ở workspace khác coi như không tồn tại"}], v => { wsMode = v; drawWs(); }),
+    wsMode === "some" ? h("div", {class: "picklist"}, wsKnown.map(w => h("label", {class: "check"},
+      h("input", {type: "checkbox", checked: wsPicked.includes(w), onchange: e => { wsPicked = e.target.checked ? wsPicked.concat(w) : wsPicked.filter(x => x !== w); }}),
+      h("span", null, wsLabel(w))))) : null);
+  api("GET", "/api/secrets").then(l => { wsKnown = workspacesOf(l); if (wsKnown.length > 1) drawWs(); }).catch(() => {});
   return h("div", {class: "card"}, h("h2", null, "Tạo token cho agent"),
     h("h3", null, "Agent bạn dùng"), agentPicker(id, v => { id = v; if (!touched) name.value = v; }),
     h("label", null, h("span", null, "Tên agent"), name),
-    h("h3", {class: "gap"}, "Giới hạn profile"), scope,
+    h("h3", {class: "gap"}, "Giới hạn profile"), scope, wsScope,
     h("div", {class: "row"}, h("button", {class: "primary", onclick: async () => {
       err.textContent = "";
       if (mode === "some" && !picked.length) { err.textContent = tr("Hãy chọn ít nhất một profile."); return; }
+      if (wsMode === "some" && !wsPicked.length) { err.textContent = tr("Hãy chọn ít nhất một workspace."); return; }
       try {
-        const r = await api("POST", "/api/tokens", {name: name.value, profiles: mode === "some" ? picked : []});
+        const r = await api("POST", "/api/tokens", {name: name.value, profiles: mode === "some" ? picked : [], workspaces: wsMode === "some" ? wsPicked : []});
         onCreated(id, r.token);
       } catch (e) { err.textContent = tr(e.message); }
     }}, "Tạo")), err);
@@ -864,7 +910,7 @@ async function viewTokens(body) {
   const addTok = h("details", {class: "card add", open: !list.length}, h("summary", null, tr("Tạo token cho agent")), tf);
   fill(body,
     h("div", {class: "card"}, h("h2", null, `Token (${list.length})`),
-    list.length ? list.map(t => h("div", {class: "spread"}, h("span", null, h("code", null, t.name), h("div", {class: "muted"}, (t.profiles && t.profiles.length ? t.profiles.join(", ") : tr("mọi profile")) + " · " + new Date(t.created).toLocaleString())),
+    list.length ? list.map(t => h("div", {class: "spread"}, h("span", null, h("code", null, t.name), h("div", {class: "muted"}, (t.profiles && t.profiles.length ? t.profiles.join(", ") : tr("mọi profile")) + " · " + (t.workspaces && t.workspaces.length ? "workspace " + t.workspaces.map(wsLabel).join(", ") : tr("mọi workspace")) + " · " + new Date(t.created).toLocaleString())),
       h("button", {class: "danger", onclick: async () => { if (confirm(tr(`Thu hồi token ${t.name}?`))) { await api("DELETE", "/api/tokens/" + t.id); viewTokens(body); } }}, "Thu hồi"))) : h("p", {class: "muted"}, "Chưa có token.")), addTok);
 }
 

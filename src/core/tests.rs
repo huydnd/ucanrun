@@ -1766,3 +1766,100 @@ async fn run_log_records_who_where_what_and_how_long() {
     assert_eq!(req.fields["device"], "laptop-1");
     assert!(audit::verify(&e.c.audit_path()).is_ok());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn tokens_limited_to_workspaces_see_and_use_only_their_secrets() {
+    let e = setup().await;
+    let host = e.url.trim_start_matches("http://").to_string();
+    let ws = |w: &str| SecretMeta {
+        hosts: vec![host.clone()],
+        workspace: w.into(),
+        ..Default::default()
+    };
+    e.c.set_secret_meta("gitea", ws("Công việc")).unwrap();
+    e.c.put_secret("home", b"home-secret-value-123").unwrap();
+    e.c.set_secret_meta("home", ws("")).unwrap();
+    assert!(
+        SecretMeta {
+            workspace: " x".into(),
+            ..Default::default()
+        }
+        .validate()
+        .is_err()
+    );
+    assert!(
+        SecretMeta {
+            workspace: "a".repeat(33),
+            ..Default::default()
+        }
+        .validate()
+        .is_err()
+    );
+    assert!(
+        e.c.create_token_in("bad", vec![], vec!["a,b".into()])
+            .is_err()
+    );
+
+    let all =
+        e.c.authenticate(&e.c.create_token("all", vec![]).unwrap())
+            .unwrap();
+    let work =
+        e.c.authenticate(
+            &e.c.create_token_in("work", vec![], vec!["Công việc".into()])
+                .unwrap(),
+        )
+        .unwrap();
+    let home =
+        e.c.authenticate(
+            &e.c.create_token_in("home", vec![], vec!["".into()])
+                .unwrap(),
+        )
+        .unwrap();
+    let names = |t: &Token| -> Vec<String> {
+        e.c.secrets_for(t)
+            .unwrap()
+            .into_iter()
+            .map(|s| s.name)
+            .collect()
+    };
+    assert_eq!(names(&all), ["gitea", "home"]);
+    assert_eq!(names(&work), ["gitea"]);
+    assert_eq!(names(&home), ["home"]);
+    assert_eq!(e.c.secrets_for(&work).unwrap()[0].workspace, "Công việc");
+
+    // Fixed profiles that use gitea are hidden from and refused to "home".
+    let listed: Vec<String> =
+        e.c.profiles_for(&home)
+            .unwrap()
+            .into_iter()
+            .map(|p| p.name)
+            .collect();
+    assert!(listed.is_empty(), "{listed:?}");
+    assert!(matches!(
+        e.c.submit(&home, "create", params(&[("repo", "a")]), ""),
+        Err(Error::Forbidden)
+    ));
+    assert!(
+        e.c.submit(&work, "create", params(&[("repo", "a")]), "")
+            .is_ok()
+    );
+
+    // Agent-written calls: a secret outside the workspaces does not exist.
+    let call = |s: &str| Call {
+        http: Some(policy::HttpSpec {
+            method: "GET".into(),
+            url: format!("{}/x", e.url),
+            headers: [("A".to_string(), format!("{{{{secret:{s}}}}}"))].into(),
+            ..Default::default()
+        }),
+        exec: None,
+    };
+    let err =
+        e.c.submit_call(&home, &call("gitea"), "")
+            .unwrap_err()
+            .to_string();
+    assert!(err.contains("unknown secret"), "{err}");
+    assert!(e.c.submit_call(&home, &call("home"), "").is_ok());
+    assert!(e.c.submit_call(&work, &call("home"), "").is_err());
+    assert!(e.c.submit_call(&all, &call("home"), "").is_ok());
+}

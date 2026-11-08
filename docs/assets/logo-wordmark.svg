@@ -1,6 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 64" role="img" aria-label="ucanrun">
-  <rect width="64" height="64" rx="14" fill="#1f6f54"/>
+  <style>@media (prefers-color-scheme:dark){text{fill:#d6deeb}rect{stroke:#1d3b53;stroke-width:2}}</style>
+  <rect width="64" height="64" rx="14" fill="#011627"/>
   <path d="M32 10 50 16.5V30c0 11.6-7.6 20.6-18 24.5C21.6 50.6 14 41.6 14 30V16.5Z" fill="#fff"/>
-  <path d="M27 22.5 42 32 27 41.5Z" fill="#1f6f54"/>
-  <text x="80" y="43" font-family="system-ui,-apple-system,Segoe UI,Roboto,sans-serif" font-size="32" font-weight="600" fill="#1f6f54">ucanrun</text>
+  <path d="M27 22.5 42 32 27 41.5Z" fill="#011627"/>
+  <text x="80" y="43" font-family="system-ui,-apple-system,Segoe UI,Roboto,sans-serif" font-size="32" font-weight="600" fill="#011627">ucanrun</text>
 </svg>

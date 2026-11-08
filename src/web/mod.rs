@@ -786,6 +786,8 @@ struct SecretRow {
     fields: Vec<FieldInfo>,
     #[serde(skip_serializing_if = "String::is_empty")]
     totp: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    workspace: String,
 }
 
 async fn list_secrets(State(s): State<Arc<Server>>, h: HeaderMap) -> Response {
@@ -823,6 +825,7 @@ async fn list_secrets(State(s): State<Arc<Server>>, h: HeaderMap) -> Response {
                 allow_commands: x.allow_commands,
                 fields,
                 totp: x.totp,
+                workspace: x.workspace,
             });
         }
         Ok(out)
@@ -850,6 +853,7 @@ struct PutSecretIn {
     hosts: Vec<String>,
     allow_commands: bool,
     fields: Option<Vec<FieldIn>>,
+    workspace: String,
     /// "", "always" or "never".
     totp: String,
     /// A current TOTP code, needed to set totp to "never".
@@ -874,6 +878,7 @@ async fn put_secret(
         allow_commands: input.allow_commands,
         fields: vec![],
         totp: input.totp,
+        workspace: input.workspace.trim().to_string(),
     };
     tryf!(meta.validate());
     let c = s.core.clone();
@@ -1014,12 +1019,16 @@ async fn tokens(State(s): State<Arc<Server>>, h: HeaderMap) -> Response {
 struct TokenIn {
     name: String,
     profiles: Vec<String>,
+    workspaces: Vec<String>,
 }
 
 async fn create_token(State(s): State<Arc<Server>>, h: HeaderMap, b: Body) -> Response {
     need_auth!(s, h);
     let input: TokenIn = body!(b);
-    let v = tryf!(s.core.create_token(&input.name, input.profiles));
+    let v = tryf!(
+        s.core
+            .create_token_in(&input.name, input.profiles, input.workspaces)
+    );
     write_json(200, &json!({"token": v}))
 }
 
