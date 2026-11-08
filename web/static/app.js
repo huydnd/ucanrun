@@ -48,7 +48,8 @@ async function boot() {
   if (!s.authed) return renderLogin(s.locked);
   const {steps} = await loadSteps();
   state.incomplete = steps.some(x => !x.done);
-  if (state.incomplete && !state.opened && !steps.every(x => x.done || skipped().includes(x.key))) state.tab = "start";
+  state.overview = steps.every(x => x.done || skipped().includes(x.key));
+  if (!state.opened) state.tab = "start";
   state.opened = true;
   renderShell();
 }
@@ -77,8 +78,10 @@ const tabs = {start: "Bắt đầu", requests: "Yêu cầu", secrets: "Secret", 
 
 function renderShell() {
   const body = h("main");
-  const nav = h("nav", null, Object.entries(tabs).filter(([k]) => k !== "start" || state.incomplete).map(([k, v]) =>
-    h("button", {class: state.tab === k ? "on" : "", "data-req": k === "requests" ? "1" : null, onclick: () => { state.tab = k; renderShell(); }}, v)));
+  // Once setup is done, the first tab becomes an overview.
+  const label = (k, v) => k === "start" && state.overview ? "Tổng quan" : v;
+  const nav = h("nav", null, Object.entries(tabs).map(([k, v]) =>
+    h("button", {class: state.tab === k ? "on" : "", "data-req": k === "requests" ? "1" : null, onclick: () => { state.tab = k; renderShell(); }}, label(k, v))));
   const waiting = h("span", {class: "count"});
   api("GET", "/api/requests").then(l => { const n = l.filter(r => r.state === "pending").length; if (n) { waiting.textContent = n; nav.querySelector("[data-req]").append(" ", waiting); } }).catch(() => {});
   app.replaceChildren(h("header", null, h("img", {class: "brand", src: "logo.svg", alt: "", width: 28, height: 28}), h("b", null, "ucanrun"), nav,
@@ -1006,15 +1009,18 @@ function totpCard(s, after) {
 function autoLockCard(s) {
   const err = h("div", {class: "err", role: "alert"});
   const cur = s.auto_lock_min || 0;
-  const opts = [[0, "Không tự khoá", ""], [15, "15 phút", ""], [60, "1 giờ", ""], [240, "4 giờ", ""], [1440, "24 giờ", ""]];
-  if (!opts.some(o => o[0] === cur)) opts.push([cur, `${cur} phút`, ""]);
+  const opts = [[0, "Không tự khoá"], [5, "5 phút"], [10, "10 phút"], [15, "15 phút"], [30, "30 phút"], [45, "45 phút"], [60, "1 giờ"], [120, "2 giờ"],
+    [240, "4 giờ"], [480, "8 giờ"], [720, "12 giờ"], [1440, "24 giờ"], [4320, "3 ngày"], [10080, "7 ngày"]];
+  if (!opts.some(o => o[0] === cur)) opts.push([cur, `${cur} phút`]);
+  const saved = h("span", {class: "muted"});
+  const sel = select(String(cur), opts.map(([v, t]) => [String(v), tr(t)]), async v => {
+    err.textContent = ""; saved.textContent = "";
+    try { await api("PUT", "/api/settings", {auto_lock_min: Number(v)}); state.status = await api("GET", "/api/status"); saved.textContent = tr("Đã lưu"); }
+    catch (e) { err.textContent = tr(e.message); }
+  }, "Tự khoá sau");
   return h("div", {class: "card"}, h("h2", null, "Tự khoá kho"),
     h("p", {class: "muted"}, "Khoá kho khi không có hoạt động nào: không mở web, không duyệt, không có yêu cầu từ agent. Khi khoá, agent nhận lỗi 423 cho tới khi bạn đăng nhập. Nếu chọn Không tự khoá, kho chỉ khoá khi bạn bấm Khoá kho hoặc server khởi động lại."),
-    choiceGroup("autolock", String(cur), opts.map(([v, t, help]) => ({value: String(v), title: t, help})), async v => {
-      err.textContent = "";
-      try { await api("PUT", "/api/settings", {auto_lock_min: Number(v)}); state.status = await api("GET", "/api/status"); }
-      catch (e) { err.textContent = tr(e.message); }
-    }), err);
+    h("label", null, h("span", null, "Tự khoá sau"), sel), saved, err);
 }
 
 // Templates the owner saved from the secret form.
@@ -1079,11 +1085,14 @@ async function viewStart(body) {
     !x.done && x !== cur ? h("button", {class: "stepgo", onclick: () => open(x.key)}, "Làm bước này") : null)));
   const head = h("div", {class: "card"}, h("h2", null, "Bắt đầu"), list);
   clearInterval(state.timer);
-  if (!cur) {
-    head.append(h("p", null, tr(steps.every(x => x.done) ? "Đã thiết lập xong." : "Các bước còn lại có thể làm sau trong Cài đặt.")),
-      h("div", {class: "row"}, h("button", {class: "primary", onclick: () => { state.tab = "requests"; renderShell(); }}, "Vào trang yêu cầu")));
-    fill(body, head); window.scrollTo(0, 0); return;
+  // Keep the tab name in step with what the page shows.
+  const overview = !cur;
+  if (overview !== !!state.overview) {
+    state.overview = overview;
+    const b = document.querySelector('nav button');
+    if (b) b.textContent = tr(overview ? "Tổng quan" : tabs.start);
   }
+  if (overview) return viewOverview(body, s, steps, list);
   const skipBtn = h("div", {class: "row skip-row"}, h("button", {onclick: () => { skip(cur.key); state.startStep = null; redraw(); }}, "Bỏ qua, làm sau"));
   const watchPairing = () => { clearInterval(state.timer); state.timer = setInterval(async () => {
     const n = await api("GET", "/api/status").catch(() => null);
@@ -1103,6 +1112,48 @@ async function viewStart(body) {
     panel = agentTokenForm(profiles, (id, token) => { fill(body, head, agentGuide(id, token, () => { state.startStep = null; redraw(); })); window.scrollTo(0, 0); });
   }
   fill(body, head, panel, skipBtn);
+  window.scrollTo(0, 0);
+}
+
+// The landing page once setup is done: what is stored, what waits, what ran.
+async function viewOverview(body, s, steps, stepList) {
+  const done = steps.filter(x => x.done).length, all = done === steps.length;
+  const [secrets, tokens, profiles, reqs, runs, health] = await Promise.all([api("GET", "/api/secrets"), api("GET", "/api/tokens"), api("GET", "/api/profiles"),
+    api("GET", "/api/requests"), api("GET", "/api/runs").catch(() => ({runs: []})), api("GET", "/api/health").catch(() => [])]);
+  const go = tab => () => { state.tab = tab; renderShell(); };
+  const pending = reqs.filter(r => r.state === "pending");
+  const ws = workspacesOf(secrets);
+  const recent = (runs.runs || []).slice(0, 5);
+  const day = Date.now() - 864e5;
+  const today = (runs.runs || []).filter(r => new Date(r.time).getTime() > day);
+  const failed = today.filter(r => r.ok === false).length;
+  const bad = health.filter(i => i.level === "bad").length, warn = health.filter(i => i.level === "warn").length;
+  const stat = (n, label, sub, tab, tone) => h("button", {class: "stat" + (tone ? " " + tone : ""), type: "button", onclick: go(tab)},
+    h("span", {class: "num"}, String(n)), h("span", {class: "lbl"}, label), sub ? h("small", {class: "muted"}, sub) : null);
+  const lockLabel = m => !m ? tr("Không tự khoá") : m % 1440 === 0 ? `${m / 1440} ${tr("ngày")}` : m % 60 === 0 ? `${m / 60} ${tr("giờ")}` : `${m} ${tr("phút")}`;
+  const line = (ok, text, tab) => h("li", null, h("span", {class: "dot " + (ok === true ? "ok" : ok === false ? "bad" : "warn"), "aria-hidden": "true"}),
+    h("span", null, text), tab ? h("button", {class: "link", onclick: go(tab)}, "Xem") : null);
+  fill(body,
+    pending.length ? h("div", {class: "card attention"}, h("h2", null, `Đang chờ duyệt (${pending.length})`),
+      pending.slice(0, 3).map(r => h("div", {class: "muted"}, h("b", null, r.profile === "agent-call" ? tr("Agent tự soạn") : r.profile), " · ", r.caller, r.reason ? " · " + r.reason : "")),
+      h("div", {class: "row"}, h("button", {class: "primary", onclick: go("requests")}, "Mở trang duyệt"))) : null,
+    h("div", {class: "stats"},
+      stat(secrets.length, tr("Secret"), ws.length > 1 ? `${ws.length} workspace` : "", "secrets"),
+      stat(tokens.length, tr("Token agent"), "", "tokens"),
+      stat(today.length, tr("Lần chạy 24 giờ qua"), failed ? `${failed} ${tr("lỗi")}` : "", "audit", failed ? "warn" : ""),
+      stat(pending.length, tr("Đang chờ duyệt"), "", "requests", pending.length ? "attn" : "")),
+    h("div", {class: "card"}, h("h2", null, "Trạng thái"),
+      h("ul", {class: "health"},
+        line(!!(s.telegram && s.telegram.paired), s.telegram && s.telegram.paired ? tr("Telegram đã nối.") : tr("Chưa nối Telegram."), "settings"),
+        line(!!s.totp, s.totp ? tr(`TOTP đang bật, còn ${s.recovery_left} mã khôi phục.`) : tr("TOTP đang tắt."), "settings"),
+        line(s.auto_lock_min ? true : null, `${tr("Tự khoá kho")}: ${lockLabel(s.auto_lock_min)}.`, "settings"),
+        line(bad ? false : warn ? null : true, bad || warn ? `${tr("Sức khoẻ bảo mật")}: ${bad} ${tr("lỗi")}, ${warn} ${tr("cảnh báo")}.` : tr("Sức khoẻ bảo mật ổn."), "settings"),
+        line(true, `${profiles.length} ${tr("hành động cố định")}${s.exec ? " · " + tr("chạy lệnh đang bật") : ""}.`, "profiles"))),
+    h("div", {class: "card"}, h("h2", null, "Lần chạy gần đây"),
+      recent.length ? recent.map(runRow) : h("p", {class: "muted"}, "Chưa có lần chạy nào."),
+      h("div", {class: "row"}, h("button", {onclick: go("audit")}, "Xem nhật ký"), h("button", {onclick: go("secrets")}, "Thêm secret"), h("button", {onclick: go("tokens")}, "Tạo token"))),
+    h("details", {class: "card setup", open: !all}, h("summary", null, all ? tr("Thiết lập ban đầu: đã xong") : `${tr("Thiết lập ban đầu")}: ${done}/${steps.length}`), stepList,
+      all ? null : h("p", {class: "muted"}, "Các bước còn lại có thể làm bất cứ lúc nào.")));
   window.scrollTo(0, 0);
 }
 
