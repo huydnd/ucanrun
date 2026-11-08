@@ -2768,3 +2768,46 @@ async fn workspaces_over_http() {
     let all = e.token("all", &[]).await;
     assert_eq!(all.secrets().await.unwrap()[0]["workspace"], "Công việc");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn settings_and_custom_templates_over_http() {
+    let e = setup(minute()).await;
+    let (_, st) = e.req("GET", "/api/status", Value::Null).await;
+    assert_eq!(st["auto_lock_min"], 0);
+    let (code, _) = e
+        .req("PUT", "/api/settings", json!({"auto_lock_min": 2}))
+        .await;
+    assert_eq!(code, 400);
+    let (code, m) = e
+        .req("PUT", "/api/settings", json!({"auto_lock_min": 60}))
+        .await;
+    assert_eq!((code, m["auto_lock_min"].as_i64()), (200, Some(60)));
+    let (_, st) = e.req("GET", "/api/status", Value::Null).await;
+    assert_eq!(st["auto_lock_min"], 60);
+
+    let tpl = json!({"title": "Router nhà", "hint": "Đăng nhập router", "name": "router",
+        "description": "Router admin. Header Authorization: Basic ...", "hosts": ["192.168.1.1"],
+        "fields": [{"name": "user", "public": true, "value": "admin"}, {"name": "password", "public": false}],
+        "workspace": "Nhà"});
+    let (code, saved) = e.req("PUT", "/api/templates", tpl.clone()).await;
+    assert_eq!(code, 200, "{saved}");
+    let (_, list) = e.req("GET", "/api/templates", Value::Null).await;
+    assert_eq!(list[0]["title"], "Router nhà");
+    assert_eq!(list[0]["fields"][0]["value"], "admin");
+    let mut leak = tpl.clone();
+    leak["fields"][1]["value"] = json!("p4ss");
+    let (code, _) = e.req("PUT", "/api/templates", leak).await;
+    assert_eq!(code, 400, "a private value was saved in a template");
+    let id = saved["id"].as_str().unwrap();
+    let (code, _) = e
+        .req("DELETE", &format!("/api/templates/{id}"), Value::Null)
+        .await;
+    assert_eq!(code, 200);
+    let (_, list) = e.req("GET", "/api/templates", Value::Null).await;
+    assert_eq!(list, json!([]));
+    let anon = Http::new(&e.web);
+    let r = anon
+        .send("GET", "/api/templates", None, &[("X-Ucanrun", "1")])
+        .await;
+    assert_eq!(r.code, 401);
+}

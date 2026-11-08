@@ -1863,3 +1863,88 @@ async fn tokens_limited_to_workspaces_see_and_use_only_their_secrets() {
     assert!(e.c.submit_call(&work, &call("home"), "").is_err());
     assert!(e.c.submit_call(&all, &call("home"), "").is_ok());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn vault_locks_itself_after_the_idle_time() {
+    let e = setup().await;
+    assert_eq!(e.c.auto_lock_min(), 0);
+    assert!(e.c.set_auto_lock(3).is_err());
+    assert!(e.c.set_auto_lock(AUTO_LOCK_MAX + 1).is_err());
+    e.c.set_auto_lock(15).unwrap();
+    // Activity within the window keeps it open.
+    e.offset.store(14 * 60, Ordering::SeqCst);
+    e.c.expire_now();
+    assert!(!e.c.locked());
+    e.c.touch();
+    e.offset.store(28 * 60, Ordering::SeqCst);
+    e.c.expire_now();
+    assert!(!e.c.locked(), "locked although touched 14 minutes ago");
+    // An agent request counts as activity too.
+    let (_, v) = e.token("claude", &[]);
+    e.offset.store(40 * 60, Ordering::SeqCst);
+    e.c.authenticate(&v).unwrap();
+    e.offset.store(54 * 60, Ordering::SeqCst);
+    e.c.expire_now();
+    assert!(!e.c.locked());
+    e.offset.store(56 * 60, Ordering::SeqCst);
+    e.c.expire_now();
+    assert!(e.c.locked(), "still open after 16 idle minutes");
+    let last = e.c.audit.tail(1).unwrap();
+    assert_eq!(
+        (last[0].event.as_str(), last[0].actor.as_str()),
+        ("lock", "auto_lock")
+    );
+    // The setting survives unlocking.
+    e.c.login(PASS.as_bytes(), "").unwrap();
+    assert_eq!(e.c.auto_lock_min(), 15);
+    e.c.set_auto_lock(0).unwrap();
+    e.offset.store(10 * 24 * 3600, Ordering::SeqCst);
+    e.c.expire_now();
+    assert!(!e.c.locked(), "off means never");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn custom_templates_hold_no_secret_values() {
+    let e = setup().await;
+    let t = |f: Vec<crate::state::TemplateField>| crate::state::SecretTemplate {
+        title: "Máy chủ báo cáo".into(),
+        name: "report_db".into(),
+        description: "Postgres báo cáo".into(),
+        fields: f,
+        workspace: "Công việc".into(),
+        ..Default::default()
+    };
+    let field = |n: &str, public: bool, v: &str| crate::state::TemplateField {
+        name: n.into(),
+        public,
+        value: v.into(),
+    };
+    let bad =
+        e.c.put_template(t(vec![field("password", false, "hunter2")]));
+    assert!(bad.unwrap_err().to_string().contains("trường riêng"));
+    assert!(
+        e.c.put_template(crate::state::SecretTemplate::default())
+            .is_err(),
+        "no title"
+    );
+    let saved =
+        e.c.put_template(t(vec![
+            field("host", true, "db.local"),
+            field("password", false, ""),
+        ]))
+        .unwrap();
+    assert!(!saved.id.is_empty());
+    let mut changed = saved.clone();
+    changed.title = "Báo cáo".into();
+    e.c.put_template(changed).unwrap();
+    assert_eq!(e.c.templates().unwrap()[0].title, "Báo cáo");
+    let mut ghost = saved.clone();
+    ghost.id = "nope".into();
+    assert!(matches!(e.c.put_template(ghost), Err(Error::NotFound)));
+    e.c.delete_template(&saved.id).unwrap();
+    assert!(e.c.templates().unwrap().is_empty());
+    assert!(matches!(
+        e.c.delete_template(&saved.id),
+        Err(Error::NotFound)
+    ));
+}

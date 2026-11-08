@@ -141,7 +141,10 @@ async function secretTemplates() {
 }
 
 async function viewSecrets(body, editing, tpl) {
-  const [list, templates] = await Promise.all([api("GET", "/api/secrets"), secretTemplates()]);
+  if (!editing && !tpl && state.pendingTpl) { tpl = state.pendingTpl; state.pendingTpl = null; }
+  const [list, builtin, mine] = await Promise.all([api("GET", "/api/secrets"), secretTemplates(), api("GET", "/api/templates").catch(() => [])]);
+  // The owner's own templates come first.
+  const templates = mine.map(t => Object.assign({}, t, {custom: true})).concat(builtin);
   const cur = editing ? list.find(x => x.name === editing) : null;
   const n = field("Tên", {autocomplete: "off", spellcheck: "false", placeholder: "github_token"});
   const v = field(cur ? "Giá trị mới (để trống nếu giữ nguyên)" : "Giá trị", {type: "password", autocomplete: "off"});
@@ -153,7 +156,7 @@ async function viewSecrets(body, editing, tpl) {
   // A secret is one value, or several named fields such as a database login.
   let multiMode = !!(cur && cur.fields && cur.fields.length || tpl && tpl.fields);
   const rows = cur ? (cur.fields || []).map(f => ({name: f.name, public: !!f.public, value: "", had: true}))
-    : tpl && tpl.fields ? tpl.fields.map(f => ({name: f.name, public: !!f.public, value: "", hint: f.value})) : [];
+    : tpl && tpl.fields ? tpl.fields.map(f => ({name: f.name, public: !!f.public, value: tpl.custom && f.public ? f.value || "" : "", hint: f.value})) : [];
   if (!rows.length) rows.push({name: "host", public: true, value: ""}, {name: "user", public: true, value: ""}, {name: "password", public: false, value: ""});
   const fieldBox = h("div", {hidden: !multiMode});
   const drawFields = () => fill(fieldBox, h("small", {class: "muted"}, "Trường công khai (máy chủ, cổng, user, tên database) agent thấy được giá trị và dùng ở mọi vị trí. Trường kín như password chỉ đi vào header hoặc biến môi trường."),
@@ -181,6 +184,7 @@ async function viewSecrets(body, editing, tpl) {
   } else if (tpl) {
     // A template fills everything except the value.
     n.input.value = tpl.name || ""; desc.value = L(tpl, "description") || ""; hosts.input.value = (tpl.hosts || []).join(", ");
+    if (tpl.workspace) ws.input.value = tpl.workspace;
     cmd.checked = !!tpl.allow_commands && execOn;
     if (tpl.placeholder) v.input.placeholder = tpl.placeholder;
     if (tpl.multiline) { toggle.checked = true; multi.hidden = false; v.el.hidden = true; }
@@ -214,6 +218,23 @@ async function viewSecrets(body, editing, tpl) {
     h("p", {class: "muted"}, "Giá trị chỉ ghi, không có cách xem lại trên giao diện.")));
   // Read top to bottom: name, kind, value, notes, hosts, TOTP.
   save.querySelector("h2").after(n.el, wsBox, modeSel);
+  // Keep this setup as a template: everything except the value.
+  const tTitle = field("Tên mẫu", {autocomplete: "off", maxlength: 60});
+  const tHint = field("Gợi ý (tuỳ chọn)", {autocomplete: "off", maxlength: 200});
+  const tOut = h("div", {class: "err", role: "alert"});
+  tTitle.input.value = cur ? cur.name : tpl ? L(tpl, "title") : "";
+  save.append(h("details", {class: "save-tpl"}, h("summary", null, "Lưu thành mẫu"),
+    h("p", {class: "muted"}, "Mẫu giữ tên, workspace, mô tả, máy chủ, các trường và mức TOTP. Giá trị secret và giá trị của trường riêng không được lưu."),
+    tTitle.el, tHint.el,
+    h("div", {class: "row"}, h("button", {type: "button", onclick: async () => {
+      tOut.className = "err"; tOut.textContent = "";
+      const hs = hosts.input.value.split(/[\s,]+/).map(x => x.trim().toLowerCase()).filter(Boolean);
+      const t = {title: tTitle.input.value.trim(), hint: tHint.input.value.trim(), name: n.input.value.trim(), description: desc.value.trim(), hosts: hs,
+        fields: multiMode ? rows.filter(r => r.name).map(r => ({name: r.name, public: r.public, value: r.public ? r.value : ""})) : [],
+        multiline: !multiMode && toggle.checked, allow_commands: cmd.checked, totp: totpMode, workspace: ws.input.value.trim()};
+      try { await api("PUT", "/api/templates", t); tOut.className = "muted"; tOut.textContent = tr("Đã lưu mẫu."); }
+      catch (e) { tOut.textContent = tr(e.message); }
+    }}, "Lưu mẫu")), tOut));
   if (cur) save.append(h("div", {class: "row"}, h("button", {onclick: () => viewSecrets(body)}, "Huỷ")));
   // Templates fill the form for common services; the value is the only thing left to type.
   const tile = t => {
@@ -221,7 +242,7 @@ async function viewSecrets(body, editing, tpl) {
     return h("button", {class: "tile pick" + (tpl && tpl.id === t.id ? " on" : ""), type: "button", onclick: () => {
       if (have) viewSecrets(body, t.name);
       else viewSecrets(body, null, t).then(() => { const f = body.querySelector("details.add"); if (f) { f.scrollIntoView({block: "start"}); const i = f.querySelector(t.name ? "input[type=password], textarea:not([hidden])" : "input"); if (i) i.focus(); } });
-    }}, h("b", null, L(t, "title")), h("small", {class: "muted"}, L(t, "hint")),
+    }}, h("b", null, L(t, "title"), t.custom ? [" ", h("span", {class: "badge"}, "của bạn")] : null), h("small", {class: "muted"}, L(t, "hint") || (t.name ? t.name : "")),
       have ? h("span", {class: "badge"}, "đã có, bấm để sửa") : t.exec && !execOn ? h("span", {class: "badge"}, "cần image exec") : null);
   };
   const addBox = cur ? save : h("details", {class: "card add", open: !list.length || !!tpl},
@@ -981,6 +1002,38 @@ function totpCard(s, after) {
   return card;
 }
 
+// The vault locks itself after this long without any activity.
+function autoLockCard(s) {
+  const err = h("div", {class: "err", role: "alert"});
+  const cur = s.auto_lock_min || 0;
+  const opts = [[0, "Không tự khoá", ""], [15, "15 phút", ""], [60, "1 giờ", ""], [240, "4 giờ", ""], [1440, "24 giờ", ""]];
+  if (!opts.some(o => o[0] === cur)) opts.push([cur, `${cur} phút`, ""]);
+  return h("div", {class: "card"}, h("h2", null, "Tự khoá kho"),
+    h("p", {class: "muted"}, "Khoá kho khi không có hoạt động nào: không mở web, không duyệt, không có yêu cầu từ agent. Khi khoá, agent nhận lỗi 423 cho tới khi bạn đăng nhập. Nếu chọn Không tự khoá, kho chỉ khoá khi bạn bấm Khoá kho hoặc server khởi động lại."),
+    choiceGroup("autolock", String(cur), opts.map(([v, t, help]) => ({value: String(v), title: t, help})), async v => {
+      err.textContent = "";
+      try { await api("PUT", "/api/settings", {auto_lock_min: Number(v)}); state.status = await api("GET", "/api/status"); }
+      catch (e) { err.textContent = tr(e.message); }
+    }), err);
+}
+
+// Templates the owner saved from the secret form.
+async function myTemplatesCard() {
+  const box = h("div");
+  const card = h("div", {class: "card"}, h("h2", null, "Mẫu secret của bạn"),
+    h("p", {class: "muted"}, "Mở form ở tab Secret, điền như mong muốn rồi bấm Lưu thành mẫu. Mẫu hiện trước các mẫu có sẵn."), box);
+  const draw = async () => {
+    const list = await api("GET", "/api/templates").catch(() => []);
+    fill(box, list.length ? list.map(t => h("div", {class: "spread"}, h("span", null, h("b", null, t.title), " ", t.name ? h("code", null, t.name) : null,
+        h("div", {class: "muted"}, [t.workspace ? wsLabel(t.workspace) : tr("Chung"), t.hint].filter(Boolean).join(" · "))),
+      h("span", {class: "acts"}, h("button", {onclick: () => { state.pendingTpl = Object.assign({}, t, {custom: true}); state.tab = "secrets"; renderShell(); window.scrollTo(0, 0); }}, "Dùng"),
+        h("button", {class: "danger", onclick: async () => { if (confirm(tr(`Xoá mẫu ${t.title}?`))) { await api("DELETE", "/api/templates/" + encodeURIComponent(t.id)); draw(); } }}, "Xoá"))))
+      : h("p", {class: "muted"}, "Chưa có mẫu nào."));
+  };
+  await draw();
+  return card;
+}
+
 function healthCard(items) {
   const bad = items.filter(i => i.level === "bad").length, warn = items.filter(i => i.level === "warn").length;
   const parts = [bad ? `${bad} lỗi` : "", warn ? `${warn} cảnh báo` : ""].filter(Boolean);
@@ -995,7 +1048,8 @@ async function viewSettings(body) {
   const o = field("Mật khẩu hiện tại", {type: "password", autocomplete: "current-password"});
   const n = field("Mật khẩu mới", {type: "password", autocomplete: "new-password"});
   const langSel = select(lang, [["vi", "Tiếng Việt"], ["en", "English"]], v => { try { localStorage.setItem("ucr_lang", v); } catch (_) {} location.reload(); }, "Ngôn ngữ");
-  fill(body, healthCard(health), h("div", {class: "card"}, h("h2", null, "Ngôn ngữ"), langSel), telegramCard(s), totpCard(s), form("Đổi mật khẩu chính", [o, n], "Đổi", async () => {
+  const tplCard = await myTemplatesCard();
+  fill(body, healthCard(health), h("div", {class: "card"}, h("h2", null, "Ngôn ngữ"), langSel), autoLockCard(s), tplCard, telegramCard(s), totpCard(s), form("Đổi mật khẩu chính", [o, n], "Đổi", async () => {
     await api("POST", "/api/passphrase", {old: o.input.value, new: n.input.value}); o.input.value = n.input.value = "";
   }));
 }

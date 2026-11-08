@@ -399,6 +399,8 @@ impl Server {
             return false;
         }
         se.seen = now;
+        drop(g);
+        self.core.touch();
         true
     }
 
@@ -471,6 +473,9 @@ impl Server {
             .route("/api/totp/recovery", ui(post(totp_recovery)))
             .route("/api/totp/reset", ui(post(totp_reset)))
             .route("/api/runs", ui(get(runs)))
+            .route("/api/settings", ui(put(put_settings)))
+            .route("/api/templates", ui(get(templates).put(put_template)))
+            .route("/api/templates/{id}", ui(delete(delete_template)))
             .fallback(unrouted)
             .layer(middleware::from_fn(csrf))
             .layer(middleware::from_fn_with_state(self.clone(), secure_headers))
@@ -655,6 +660,7 @@ async fn status(State(s): State<Arc<Server>>, h: HeaderMap) -> Response {
         out["telegram"] = json!(c.telegram_status());
         out["totp"] = json!(c.totp_enabled());
         out["exec"] = json!(c.exec_enabled());
+        out["auto_lock_min"] = json!(c.auto_lock_min());
         out["recovery_left"] = json!(c.recovery_left());
     }
     write_json(200, &out)
@@ -1175,6 +1181,40 @@ async fn totp_confirm(State(s): State<Arc<Server>>, h: HeaderMap, b: Body) -> Re
     let input: CodeIn = body!(b);
     let codes = tryf!(s.core.totp_confirm(&input.code));
     write_json(200, &json!({"recovery_codes": codes}))
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct SettingsIn {
+    auto_lock_min: i64,
+}
+
+async fn put_settings(State(s): State<Arc<Server>>, h: HeaderMap, b: Body) -> Response {
+    need_auth!(s, h);
+    let input: SettingsIn = body!(b);
+    tryf!(s.core.set_auto_lock(input.auto_lock_min));
+    write_json(200, &json!({"auto_lock_min": s.core.auto_lock_min()}))
+}
+
+async fn templates(State(s): State<Arc<Server>>, h: HeaderMap) -> Response {
+    need_auth!(s, h);
+    write_json(200, &tryf!(s.core.templates()))
+}
+
+async fn put_template(State(s): State<Arc<Server>>, h: HeaderMap, b: Body) -> Response {
+    need_auth!(s, h);
+    let input: crate::state::SecretTemplate = body!(b);
+    write_json(200, &tryf!(s.core.put_template(input)))
+}
+
+async fn delete_template(
+    State(s): State<Arc<Server>>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    need_auth!(s, h);
+    tryf!(s.core.delete_template(&id));
+    ok_json()
 }
 
 /// How far back the run log looks, in audit lines.

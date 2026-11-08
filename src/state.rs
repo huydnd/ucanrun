@@ -94,6 +94,53 @@ pub struct State {
     pub audit_count: i64,
     #[serde(default)]
     pub audit_hash: String,
+    /// Minutes without any activity before the vault locks itself; 0 never.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub auto_lock_min: i64,
+    /// The owner's own secret templates. They hold no secret values, because
+    /// this file is signed, not encrypted.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub templates: Vec<SecretTemplate>,
+}
+
+fn is_zero(n: &i64) -> bool {
+    *n == 0
+}
+
+/// A template the owner saved: everything to prefill the secret form except
+/// the value. Only public fields may carry a default value.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SecretTemplate {
+    pub id: String,
+    pub title: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub hint: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub description: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub hosts: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub fields: Vec<TemplateField>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub multiline: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub allow_commands: bool,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub totp: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub workspace: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TemplateField {
+    pub name: String,
+    pub public: bool,
+    /// Default value, public fields only.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub value: String,
 }
 
 #[derive(Serialize)]
