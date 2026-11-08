@@ -1936,6 +1936,7 @@ fn secret_templates_are_valid() {
                 allow_commands: t["allow_commands"].as_bool().unwrap_or(false),
                 totp: t["totp"].as_str().unwrap_or("").into(),
                 fields,
+                workspace: String::new(),
             };
             if let Err(e) = m.validate() {
                 panic!("{id} {d}: {e}");
@@ -2731,4 +2732,39 @@ async fn agent_api_is_not_cached_and_ui_limits_features() {
     assert_eq!(r.header("cache-control"), "no-store");
     let r = e.hc.send("GET", "/", None, &[]).await;
     assert!(r.header("permissions-policy").contains("camera=()"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn workspaces_over_http() {
+    let e = setup(minute()).await;
+    let host = e.target_url.trim_start_matches("http://").to_string();
+    let (code, m) = e
+        .req(
+            "PUT",
+            "/api/secrets/gitea",
+            json!({"description": "d", "hosts": [host], "workspace": "Công việc"}),
+        )
+        .await;
+    assert_eq!(code, 200, "{m}");
+    let (code, _) = e
+        .req("PUT", "/api/secrets/gitea", json!({"workspace": "a,b"}))
+        .await;
+    assert_eq!(code, 400);
+    let (_, list) = e.req("GET", "/api/secrets", Value::Null).await;
+    assert_eq!(list[0]["workspace"], "Công việc");
+    let (code, m) = e
+        .req(
+            "POST",
+            "/api/tokens",
+            json!({"name": "home", "profiles": [], "workspaces": [""]}),
+        )
+        .await;
+    assert_eq!(code, 200, "{m}");
+    let home = Client::new(&e.agent, m["token"].as_str().unwrap());
+    let v = home.secrets().await.unwrap();
+    assert_eq!(v, json!([]), "home token sees work secrets: {v}");
+    let (_, toks) = e.req("GET", "/api/tokens", Value::Null).await;
+    assert_eq!(toks[0]["workspaces"], json!([""]));
+    let all = e.token("all", &[]).await;
+    assert_eq!(all.secrets().await.unwrap()[0]["workspace"], "Công việc");
 }

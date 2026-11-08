@@ -37,8 +37,33 @@ pub struct SecretMeta {
     /// risk level (high risk needs it), `always` or `never`.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub totp: String,
+    /// Optional group, such as "Công việc". Empty is the shared default.
+    /// A token limited to workspaces sees and uses only their secrets.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub workspace: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub fields: Vec<FieldMeta>,
+}
+
+/// A workspace name: up to 32 visible characters, no surrounding spaces.
+/// Empty is the default workspace.
+pub fn valid_workspace(w: &str) -> Result<(), Error> {
+    if w.chars().count() > 32
+        || w.trim() != w
+        || w.chars()
+            .any(|c| gourl::is_control_or_format(c) || c == ',')
+    {
+        return err(format!(
+            "bad workspace name {}, use up to 32 characters",
+            gourl::quote(w)
+        ));
+    }
+    Ok(())
+}
+
+/// The secret a reference such as `db.host` belongs to.
+pub fn secret_of<'a>(r: &'a str, meta: &BTreeMap<String, SecretMeta>) -> &'a str {
+    split_ref(r, &|n| meta.contains_key(n)).0
 }
 
 pub const TOTP_ALWAYS: &str = "always";
@@ -84,6 +109,7 @@ impl SecretMeta {
         if !matches!(self.totp.as_str(), "" | TOTP_ALWAYS | TOTP_NEVER) {
             return err("totp must be empty, always or never");
         }
+        valid_workspace(&self.workspace)?;
         for h in &self.hosts {
             if !HOST_RE.is_match(h) {
                 return err(format!(
