@@ -1201,13 +1201,24 @@ async fn gate_blocks_everything_without_code() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn gate_failures_share_the_login_backoff() {
-    let e = bare(minute()).await;
+async fn gate_failures_back_off_without_locking_out_login() {
+    let e = setup(minute()).await;
     let mut s = Server::new(e.c.clone(), "", e.dir.join("audit.jsonl"), false);
     s.gate_token = "the right code".into();
     let (url, _) = start(s).await;
-    let anon = Http::new(&url);
     let form = [("content-type", "application/x-www-form-urlencoded")];
+    // The owner passed the gate earlier and keeps the cookie.
+    let owner = Http::new(&url);
+    let r = owner
+        .send(
+            "POST",
+            "/gate",
+            Some(b"code=the+right+code".to_vec()),
+            &form,
+        )
+        .await;
+    assert_eq!(r.code, 303);
+    let anon = Http::new(&url);
     let mut codes = vec![];
     for _ in 0..4 {
         codes.push(
@@ -1226,6 +1237,11 @@ async fn gate_failures_share_the_login_backoff() {
         )
         .await;
     assert_eq!(r.code, 429, "right code during the backoff");
+    // A stranger at the gate must not lock the owner out of signing in.
+    let (code, m) = owner
+        .req("POST", "/api/login", Some(json!({"passphrase": PASS})))
+        .await;
+    assert_eq!(code, 200, "owner login blocked by gate failures: {m}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -2697,4 +2713,22 @@ async fn secret_totp_setting_and_run_log_over_http() {
         .await;
     assert_eq!(r.code, 401, "run log without session");
     e.no_secret_anywhere();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn agent_api_is_not_cached_and_ui_limits_features() {
+    let e = setup(minute()).await;
+    let cl = e.token("c", &[]).await;
+    let r = Http::new(&e.agent)
+        .send(
+            "GET",
+            "/v1/profiles",
+            None,
+            &[("authorization", &format!("Bearer {}", cl.token))],
+        )
+        .await;
+    assert_eq!(r.code, 200);
+    assert_eq!(r.header("cache-control"), "no-store");
+    let r = e.hc.send("GET", "/", None, &[]).await;
+    assert!(r.header("permissions-policy").contains("camera=()"));
 }

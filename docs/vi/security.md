@@ -14,6 +14,8 @@
 - Người duyệt bấm mà không đọc. Hãy đọc dòng lệnh, đừng đọc lý do. Lý do là agent tự viết.
 - Dịch vụ đích bị lộ hoặc token có quyền quá rộng.
 - Máy chủ bị chiếm root.
+- **Lệnh đã duyệt làm gì với secret của nó.** Lệnh có thể gửi biến môi trường tới bất kỳ máy nào, ví dụ `curl -d @/proc/self/environ`; container không chặn kết nối ra ngoài. Chỉ duyệt khi hiểu hết lệnh, và chỉ bật "cho dùng trong lệnh" cho secret thật sự cần.
+- **`http://` không mã hoá.** Secret được phép gửi tới một máy chủ thì cũng được gửi qua `http://` tới máy đó. Chỉ khai báo máy chủ dùng HTTPS hoặc nằm trong mạng riêng.
 
 ## Các lớp bảo vệ
 

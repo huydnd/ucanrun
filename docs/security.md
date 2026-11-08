@@ -14,6 +14,8 @@
 - An approver who taps without reading. Read the command, not the reason. The agent writes the reason.
 - A compromised destination service, or a token with too much scope.
 - Root on the host.
+- **What an approved command does with its secrets.** A command can send its environment to any host, for example `curl -d @/proc/self/environ`; the container does not limit outgoing traffic. Approve commands only when you understand all of them, and keep "allow in commands" for secrets that need it.
+- **Plain `http://`.** A secret allowed for a host is also sent to `http://` on that host, unencrypted. List only hosts reached over HTTPS or inside a private network.
 
 ## Layers
 
