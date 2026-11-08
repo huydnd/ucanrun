@@ -22,7 +22,7 @@
 | Gate | Without the access code every web path returns 401, except `/healthz`. |
 | Vault | One `age` file per secret. The key is wrapped with the master password using scrypt and is only in RAM while unlocked. |
 | State | Profiles and tokens are HMAC-signed with a key derived from the vault. A modified file refuses to unlock. |
-| Agent calls | A secret goes only to the hosts its owner listed, only in headers, and every call needs approval. Commands need a per-secret flag, the exec image and TOTP. |
+| Agent calls | A secret goes only to the hosts its owner listed, only in headers, and every call needs approval. Commands need a per-secret flag and the exec image, and count as high risk. |
 | Params | Escaped by position. Blocks `..`, control and bidi characters, and values that start a command line option. |
 | Approval | Bound to a hash of the action, expires in 2 minutes, silence means no. |
 | Choosing a secret | Only the approver chooses, from a declared list, recorded in the audit log. |
@@ -34,7 +34,15 @@
 
 ## TOTP for approvals
 
-Approving a high risk request, or a command the agent wrote, asks for a TOTP code. This is on by default. **Settings → TOTP for approvals** turns it off; doing so needs a current TOTP code, and the security checklist then shows a warning. With it off, one tap on Approve runs the command, so anyone who takes over your Telegram account or a web session can approve. Signing in still needs TOTP.
+Each secret has a **TOTP when approving** setting:
+
+| Setting | Approval needs a TOTP code when |
+|---|---|
+| By risk level (default) | the action is high risk, or a command the agent wrote |
+| Always ask for TOTP | any request uses this secret, even low risk; it also stops auto approval |
+| No TOTP | never for this secret |
+
+A request needs TOTP if any secret it uses is set to *Always*, or if it is high risk and not every secret it uses is set to *No TOTP*. High risk with no secret at all still needs TOTP. Setting a secret to *No TOTP* needs a current TOTP code, and the security checklist lists such secrets. With *No TOTP*, anyone who takes over your Telegram account or a web session can approve; signing in still needs TOTP. A request keeps the rule it was queued with.
 
 ## Run log
 

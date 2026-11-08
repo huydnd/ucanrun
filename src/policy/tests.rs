@@ -484,3 +484,32 @@ async fn run_http_sends_a_user_agent() {
     let r = run(&mk(vec![("User-Agent", "Custom/1")]), getter).await;
     assert_eq!(r.output, "HTTP 200\ncustom/1");
 }
+
+#[test]
+fn needs_totp_follows_risk_and_each_secret() {
+    let mut m = BTreeMap::new();
+    let set = |totp: &str| SecretMeta {
+        totp: totp.into(),
+        ..Default::default()
+    };
+    m.insert("plain".to_string(), set(""));
+    m.insert("free".to_string(), set(TOTP_NEVER));
+    m.insert("db".to_string(), set(TOTP_ALWAYS));
+    let v = |s: &[&str]| s.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+    assert!(needs_totp(RISK_HIGH, &v(&[]), &m), "high risk, no secret");
+    assert!(!needs_totp(RISK_LOW, &v(&["plain"]), &m));
+    assert!(needs_totp(RISK_HIGH, &v(&["plain"]), &m));
+    assert!(!needs_totp(RISK_HIGH, &v(&["free"]), &m));
+    assert!(
+        needs_totp(RISK_HIGH, &v(&["free", "plain"]), &m),
+        "one secret keeps it"
+    );
+    assert!(
+        needs_totp(RISK_LOW, &v(&["db.password"]), &m),
+        "field of an always secret"
+    );
+    assert!(
+        needs_totp(RISK_HIGH, &v(&["unknown"]), &m),
+        "unknown follows risk"
+    );
+}

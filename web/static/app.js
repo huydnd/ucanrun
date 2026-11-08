@@ -161,10 +161,23 @@ async function viewSecrets(body, editing) {
     desc.value = cur.description || ""; hosts.input.value = (cur.hosts || []).join(", "); cmd.checked = !!cur.allow_commands;
   }
   const execOn = !!(state.status && state.status.exec);
+  // TOTP when approving requests that use this secret.
+  const totpWas = cur ? (cur.totp || "") : "";
+  let totpMode = totpWas;
+  const totpCode = field("Mã TOTP hiện tại, để xác nhận tắt", {inputmode: "numeric", maxlength: 6, autocomplete: "one-time-code"});
+  const showCode = () => { totpCode.el.hidden = !(totpMode === "never" && totpWas !== "never" && state.status && state.status.totp); };
+  const totpBox = h("div", null, h("h3", null, "TOTP khi duyệt"),
+    choiceGroup("secrettotp", totpMode, [
+      {value: "", title: "Theo mức rủi ro", help: "Cần TOTP khi việc rủi ro cao hoặc lệnh agent tự soạn. Mặc định."},
+      {value: "always", title: "Luôn cần TOTP", help: "Mọi lần dùng secret này, kể cả việc rủi ro thấp hay tự duyệt."},
+      {value: "never", title: "Không cần TOTP", help: "Chỉ một lần bấm Duyệt. Dùng cho secret ít quan trọng."}],
+      v => { totpMode = v; showCode(); }),
+    totpCode.el);
+  showCode();
   const v_wrap = h("div", {hidden: multiMode}, v.el, h("label", {class: "check"}, toggle, h("span", null, "Nhiều dòng, như khoá SSH")), multi);
   const save = form(cur ? "Sửa secret" : "Lưu secret mới", [n], "Lưu", async () => {
     const hs = hosts.input.value.split(/[\s,]+/).map(x => x.trim().toLowerCase()).filter(Boolean);
-    const req = {description: desc.value.trim(), hosts: hs, allow_commands: cmd.checked};
+    const req = {description: desc.value.trim(), hosts: hs, allow_commands: cmd.checked, totp: totpMode, code: totpCode.input.value};
     if (multiMode) req.fields = rows.filter(r => r.name).map(r => ({name: r.name, public: r.public, value: r.value}));
     else req.value = toggle.checked ? multi.value : v.input.value;
     await api("PUT", "/api/secrets/" + encodeURIComponent(n.input.value.trim()), req);
@@ -172,9 +185,11 @@ async function viewSecrets(body, editing) {
   }, h("div", null, v_wrap, fieldBox,
     h("label", null, h("span", null, "Dùng để làm gì"), desc, h("small", {class: "muted"}, "Agent đọc dòng này để biết khi nào dùng secret. Không ghi giá trị vào đây.")),
     hosts.el, h("small", {class: "muted"}, "Agent chỉ gửi được secret tới các máy chủ này, cách nhau bằng dấu phẩy. Dùng *.example.com cho mọi tên miền con. Để trống thì agent không dùng được."),
-    execOn ? h("label", {class: "check"}, cmd, h("span", null, "Cho dùng trong lệnh agent tự soạn (luôn cần TOTP)")) : null,
+    execOn ? h("label", {class: "check"}, cmd, h("span", null, "Cho dùng trong lệnh agent tự soạn")) : null,
+    totpBox,
     h("p", {class: "muted"}, "Giá trị chỉ ghi, không có cách xem lại trên giao diện.")));
-  n.el.after(modeSel);
+  // Read top to bottom: name, kind, value, notes, hosts, TOTP.
+  save.querySelector("h2").after(n.el, modeSel);
   if (cur) save.append(h("div", {class: "row"}, h("button", {onclick: () => viewSecrets(body)}, "Huỷ")));
   const addBox = cur ? save : h("details", {class: "card add", open: !list.length}, h("summary", null, tr("Thêm secret")), save);
   if (!cur) { save.classList.remove("card"); save.querySelector("h2").remove(); }
@@ -183,7 +198,8 @@ async function viewSecrets(body, editing) {
       list.length ? list.map(s => h("div", {class: "spread"}, h("span", null, h("code", null, s.name),
           s.description ? h("div", null, s.description) : h("div", {class: "note"}, "Chưa có mô tả, agent sẽ không biết dùng vào việc gì."),
           s.fields && s.fields.length ? h("div", {class: "muted"}, s.fields.map(f => f.public ? `${f.name}=${f.value || ""}` : `${f.name}=•••`).join("  ")) : null,
-          h("div", {class: "muted"}, (s.hosts && s.hosts.length ? "→ " + s.hosts.join(", ") : tr("agent không dùng trực tiếp")) + (s.allow_commands ? " · " + tr("dùng trong lệnh") : ""))),
+          h("div", {class: "muted"}, (s.hosts && s.hosts.length ? "→ " + s.hosts.join(", ") : tr("agent không dùng trực tiếp")) + (s.allow_commands ? " · " + tr("dùng trong lệnh") : ""),
+            s.totp === "always" ? [" ", h("span", {class: "badge high"}, "luôn cần TOTP")] : s.totp === "never" ? [" ", h("span", {class: "badge"}, "không cần TOTP")] : null)),
         h("span", null, h("button", {onclick: () => { viewSecrets(body, s.name); window.scrollTo(0, 0); }}, "Sửa"), " ",
           h("button", {class: "danger", onclick: async () => {
             if (confirm(tr(`Xoá secret ${s.name}?`))) { await api("DELETE", "/api/secrets/" + encodeURIComponent(s.name)); viewSecrets(body); }
@@ -380,7 +396,8 @@ async function viewProfiles(body, keptImport) {
   const openTest = p => {
     const inputs = (p.params || []).map(q => { const f = field(q.name, {autocomplete: "off", spellcheck: "false"}); return [q.name, f]; });
     const pick = (p.secret_choices || []).length ? select(p.secret_choices[0], p.secret_choices.map(n => [n, n]), () => {}, "Chọn secret") : null;
-    const code = p.risk === "high" && !(state.status && state.status.approval_totp === false) ? field("Mã TOTP", {inputmode: "numeric", maxlength: 6, autocomplete: "one-time-code"}) : null;
+    // Whether TOTP is needed depends on the secrets too, so offer the field.
+    const code = field(p.risk === "high" ? "Mã TOTP" : "Mã TOTP (nếu secret yêu cầu)", {inputmode: "numeric", maxlength: 6, autocomplete: "one-time-code"});
     const out = h("div");
     const card = form("Chạy thử: " + (p.description || p.name), inputs.map(x => x[1]).concat(code ? [code] : []), "Chạy ngay", async () => {
       out.replaceChildren(h("p", {class: "muted"}, tr("Đang chạy…")));
@@ -742,7 +759,7 @@ function renderBuilder(body, d, secrets, conns = []) {
   const approvalBox = h("div");
   const drawApproval = () => fill(approvalBox, choiceGroup("approval", d.approval, [
     {value: "ask", title: "Luôn hỏi tôi", help: "Bấm Duyệt trên Telegram"},
-    {value: "totp", title: "Hỏi và cần mã TOTP", help: "Cho việc xoá, thay đổi quan trọng"},
+    {value: "totp", title: "Hỏi và cần mã TOTP", help: "Cho việc xoá, thay đổi quan trọng. Bỏ qua TOTP nếu mọi secret dùng đều đặt Không cần TOTP."},
     {value: "auto", title: "Tự chạy, không hỏi", help: "Chỉ dùng cho việc đọc vô hại"},
   ], v => { d.approval = v; refresh(); }));
   const step6 = h("section", {class: "card"}, h("h3", null, "5. Ai duyệt"), approvalBox);
@@ -930,30 +947,6 @@ function totpCard(s, after) {
   return card;
 }
 
-// High risk approvals ask for TOTP unless the owner turns that off here.
-// Turning it off needs a current code, so an open session alone cannot.
-function approvalTotpCard(s) {
-  const err = h("div", {class: "err"});
-  const card = h("div", {class: "card"}, h("h2", null, "TOTP khi duyệt"));
-  const save = async (on, code) => {
-    err.textContent = "";
-    try { await api("PUT", "/api/approval-totp", {on, code}); state.status = await api("GET", "/api/status"); card.replaceWith(approvalTotpCard(state.status)); }
-    catch (e) { err.textContent = tr(e.message); }
-  };
-  if (s.approval_totp !== false) {
-    const code = field("Mã TOTP hiện tại", {inputmode: "numeric", maxlength: 6, autocomplete: "one-time-code"});
-    card.append(h("p", {class: "muted"}, "Đang bật: duyệt yêu cầu rủi ro cao và lệnh agent tự soạn phải nhập mã TOTP."),
-      h("details", null, h("summary", null, "Tắt TOTP khi duyệt"),
-        h("p", {class: "note"}, "Khi tắt, chỉ cần bấm Duyệt trên Telegram hoặc web là lệnh rủi ro cao được chạy. Ai chiếm được Telegram hoặc phiên web của bạn cũng làm được vậy. Đăng nhập vẫn cần TOTP."),
-        s.totp ? code.el : null,
-        h("div", {class: "row"}, h("button", {class: "danger", onclick: () => save(false, code.input.value)}, "Tắt"))), err);
-  } else {
-    card.append(h("p", {class: "note"}, "Đang tắt: yêu cầu rủi ro cao được duyệt chỉ bằng một lần bấm."),
-      h("div", {class: "row"}, h("button", {class: "primary", onclick: () => save(true, "")}, "Bật lại")), err);
-  }
-  return card;
-}
-
 function healthCard(items) {
   const bad = items.filter(i => i.level === "bad").length, warn = items.filter(i => i.level === "warn").length;
   const parts = [bad ? `${bad} lỗi` : "", warn ? `${warn} cảnh báo` : ""].filter(Boolean);
@@ -968,7 +961,7 @@ async function viewSettings(body) {
   const o = field("Mật khẩu hiện tại", {type: "password", autocomplete: "current-password"});
   const n = field("Mật khẩu mới", {type: "password", autocomplete: "new-password"});
   const langSel = select(lang, [["vi", "Tiếng Việt"], ["en", "English"]], v => { try { localStorage.setItem("ucr_lang", v); } catch (_) {} location.reload(); }, "Ngôn ngữ");
-  fill(body, healthCard(health), h("div", {class: "card"}, h("h2", null, "Ngôn ngữ"), langSel), telegramCard(s), totpCard(s), approvalTotpCard(s), form("Đổi mật khẩu chính", [o, n], "Đổi", async () => {
+  fill(body, healthCard(health), h("div", {class: "card"}, h("h2", null, "Ngôn ngữ"), langSel), telegramCard(s), totpCard(s), form("Đổi mật khẩu chính", [o, n], "Đổi", async () => {
     await api("POST", "/api/passphrase", {old: o.input.value, new: n.input.value}); o.input.value = n.input.value = "";
   }));
 }

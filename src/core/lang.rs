@@ -44,6 +44,7 @@ struct Labels {
     head: &'static str,
     high: &'static str,
     high_no_totp: &'static str,
+    needs_totp: &'static str,
     agent: &'static str,
     exp: &'static str,
     sec: &'static str,
@@ -59,6 +60,7 @@ const EN: Labels = Labels {
     head: "Approval request",
     high: "⚠️ HIGH RISK, needs TOTP",
     high_no_totp: "⚠️ HIGH RISK",
+    needs_totp: "🔐 Needs TOTP",
     agent: "Agent",
     exp: "Expires in",
     sec: "seconds",
@@ -74,6 +76,7 @@ const VI: Labels = Labels {
     head: "Yêu cầu chạy lệnh",
     high: "⚠️ RỦI RO CAO, cần TOTP",
     high_no_totp: "⚠️ RỦI RO CAO",
+    needs_totp: "🔐 Cần mã TOTP",
     agent: "Agent",
     exp: "Hết hạn sau",
     sec: "giây",
@@ -87,14 +90,13 @@ const VI: Labels = Labels {
 
 pub(crate) fn approval_text(r: &super::Request, vi: bool) -> String {
     let l = if vi { &VI } else { &EN };
-    let mut head = if r.totp {
-        l.high
-    } else if r.risk == crate::policy::RISK_HIGH {
-        l.high_no_totp
-    } else {
-        l.head
-    }
-    .to_string();
+    let high = r.risk == crate::policy::RISK_HIGH;
+    let mut head = match (high, r.totp) {
+        (true, true) => l.high.to_string(),
+        (true, false) => l.high_no_totp.to_string(),
+        (false, true) => format!("{} · {}", l.head, l.needs_totp),
+        (false, false) => l.head.to_string(),
+    };
     if r.profile == crate::policy::ADHOC_PROFILE {
         // The agent wrote this one, so the command is the only thing to trust.
         head.push_str(l.adhoc);

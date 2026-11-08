@@ -34,7 +34,7 @@ fn tools() -> Value {
             "method": {"type": "string", "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"]},
             "url": {"type": "string"}, "headers": map, "body": {"type": "string"},
             "reason": {"type": "string", "description": "Short reason shown to the approver."}}}},
-        {"name": "run_command", "description": "Run a program with secrets, only for secrets that allow commands and only when the server enables it. argv[0] is an absolute path; there is no shell. Put private {{secret:NAME}} or {{secret:NAME.FIELD}} values in env, stdin or files, never in argv; public fields may go in argv. Needs approval with TOTP.",
+        {"name": "run_command", "description": "Run a program with secrets, only for secrets that allow commands and only when the server enables it. argv[0] is an absolute path; there is no shell. Put private {{secret:NAME}} or {{secret:NAME.FIELD}} values in env, stdin or files, never in argv; public fields may go in argv. Needs human approval, usually with TOTP.",
          "inputSchema": {"type": "object", "required": ["argv"], "properties": {
             "argv": {"type": "array", "items": {"type": "string"}}, "env": map, "stdin": {"type": "string"}, "files": map,
             "reason": {"type": "string"}}}},

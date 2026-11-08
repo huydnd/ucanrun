@@ -10,7 +10,10 @@ pub mod gourl;
 #[cfg(test)]
 mod tests;
 
-pub use adhoc::{ADHOC_PROFILE, Call, FieldMeta, SecretMeta, from_call, public_fn, split_ref};
+pub use adhoc::{
+    ADHOC_PROFILE, Call, FieldMeta, SecretMeta, TOTP_ALWAYS, TOTP_NEVER, from_call, needs_totp,
+    public_fn, split_ref,
+};
 pub use connection::{Auth, Connection, resolve};
 pub use exec::{RunResult, redact, run, run_with};
 

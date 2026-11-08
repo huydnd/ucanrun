@@ -33,7 +33,15 @@
 
 ## TOTP khi duyệt
 
-Duyệt yêu cầu rủi ro cao, hoặc lệnh agent tự soạn, cần mã TOTP. Mặc định bật. **Cài đặt → TOTP khi duyệt** cho phép tắt; muốn tắt phải nhập mã TOTP hiện tại, và mục Sức khoẻ bảo mật sẽ hiện cảnh báo. Khi tắt, chỉ một lần bấm Duyệt là lệnh chạy, nên ai chiếm được Telegram hoặc phiên web của bạn cũng duyệt được. Đăng nhập vẫn cần TOTP.
+Mỗi secret có lựa chọn **TOTP khi duyệt**:
+
+| Lựa chọn | Duyệt cần mã TOTP khi |
+|---|---|
+| Theo mức rủi ro (mặc định) | việc rủi ro cao, hoặc lệnh agent tự soạn |
+| Luôn cần TOTP | mọi yêu cầu dùng secret này, kể cả rủi ro thấp; và không tự duyệt nữa |
+| Không cần TOTP | không bao giờ, với secret này |
+
+Một yêu cầu cần TOTP nếu có secret nào đặt *Luôn cần*, hoặc nếu việc rủi ro cao mà không phải mọi secret đều đặt *Không cần*. Việc rủi ro cao không dùng secret nào vẫn cần TOTP. Đặt *Không cần TOTP* phải nhập mã TOTP hiện tại, và mục Sức khoẻ bảo mật liệt kê các secret đó. Với *Không cần TOTP*, ai chiếm được Telegram hoặc phiên web là duyệt được; đăng nhập vẫn cần TOTP. Yêu cầu đang chờ giữ nguyên quy tắc lúc được tạo.
 
 ## Nhật ký lần chạy
 

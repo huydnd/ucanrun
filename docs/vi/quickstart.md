@@ -45,7 +45,7 @@ Agent gọi công cụ MCP `list_secrets`, rồi `call` với header như `Autho
 - Máy chủ trong URL phải nằm trong danh sách secret cho phép.
 - Secret chỉ đặt trong header, không trong URL hay body.
 - Mọi yêu cầu đều cần bạn duyệt, tin nhắn ghi rõ agent tự soạn.
-- Với image `exec`, `run_command` dùng được secret có đánh dấu "cho dùng trong lệnh", luôn cần TOTP.
+- Với image `exec`, `run_command` dùng được secret có đánh dấu "cho dùng trong lệnh". Lệnh này tính là rủi ro cao, nên cần TOTP trừ khi mọi secret dùng đều đặt "Không cần TOTP".
 
 ### Secret nhiều trường
 

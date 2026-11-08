@@ -35,11 +35,6 @@ impl Core {
     /// Reviews the current configuration. State is read under the lock, file
     /// work happens after releasing it.
     pub fn health(&self) -> Result<Vec<HealthItem>> {
-        let approval_totp_off = self
-            .inner()
-            .st
-            .as_ref()
-            .is_some_and(|s| s.approval_totp_off);
         let (totp_on, recovery, paired, cut, mut profiles, mut unscoped, meta) = {
             let g = self.inner();
             let st = g.st.as_ref().ok_or(Error::Locked)?;
@@ -104,12 +99,20 @@ impl Core {
                 "TOTP đang tắt. Đăng nhập chỉ có một lớp, và yêu cầu rủi ro cao không duyệt được.",
             ));
         }
-        if approval_totp_off {
-            out.push(item(
-                "approval_totp",
+        let mut no_totp: Vec<String> = meta
+            .iter()
+            .filter(|(_, m)| m.totp == policy::TOTP_NEVER)
+            .map(|(n, _)| n.clone())
+            .collect();
+        no_totp.sort();
+        if !no_totp.is_empty() {
+            let mut i = item(
+                "secret_totp",
                 "warn",
-                "Duyệt yêu cầu rủi ro cao không cần mã TOTP. Ai chiếm được Telegram hoặc phiên web là duyệt được lệnh nguy hiểm.",
-            ));
+                "Secret được duyệt không cần TOTP, kể cả việc rủi ro cao. Ai chiếm được Telegram hoặc phiên web là duyệt được.",
+            );
+            i.names = no_totp;
+            out.push(i);
         }
         out.push(if paired {
             item("telegram", "ok", "Telegram đã nối.")
