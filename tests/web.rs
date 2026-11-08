@@ -2661,24 +2661,34 @@ async fn cli_serve_and_health() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn approval_totp_switch_and_run_log_over_http() {
+async fn secret_totp_setting_and_run_log_over_http() {
     let e = setup(minute()).await;
     e.pair().await;
     let sec = e.enable_totp().await;
-    let (_, st) = e.req("GET", "/api/status", Value::Null).await;
-    assert_eq!(st["approval_totp"], true, "on by default");
-    let (code, _) = e
-        .req("PUT", "/api/approval-totp", json!({"on": false}))
-        .await;
-    assert_ne!(code, 200, "turned off without a code");
+    let put = |code: &str| {
+        json!({"description": "Token thử", "hosts": [], "allow_commands": false,
+               "totp": "never", "code": code})
+    };
+    let (code, _) = e.req("PUT", "/api/secrets/gitea", put("")).await;
+    assert_ne!(code, 200, "TOTP waived without a code");
+    let (code, _) = e.req("PUT", "/api/secrets/gitea", put("000000")).await;
+    assert_ne!(code, 200, "TOTP waived with a wrong code");
+    let (_, list) = e.req("GET", "/api/secrets", Value::Null).await;
+    assert!(
+        list[0].get("totp").is_none(),
+        "refused change was saved: {list}"
+    );
     let c = totp::code(&sec, unix_now()).unwrap();
-    let (code, m) = e
-        .req("PUT", "/api/approval-totp", json!({"on": false, "code": c}))
-        .await;
+    let (code, m) = e.req("PUT", "/api/secrets/gitea", put(&c)).await;
     assert_eq!(code, 200, "{m}");
-    assert_eq!(m["approval_totp"], false);
+    let (_, list) = e.req("GET", "/api/secrets", Value::Null).await;
+    assert_eq!(list[0]["totp"], "never");
+    let (code, m) = e
+        .req("PUT", "/api/secrets/gitea", json!({"totp": "sometimes"}))
+        .await;
+    assert_eq!(code, 400, "{m}");
 
-    // With TOTP off, the Telegram button alone approves a high risk request.
+    // The Telegram button alone now approves a high risk request using gitea.
     let mut cl = e.token("claude", &[]).await;
     cl.app = "test-agent 1.0".into();
     let r = cl

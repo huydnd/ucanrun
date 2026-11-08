@@ -983,29 +983,17 @@ impl Core {
         self.inner().st.as_ref().is_some_and(|s| s.totp_enabled)
     }
 
-    /// Whether approving a high risk request asks for a TOTP code. On by default.
-    pub fn approval_totp(&self) -> bool {
-        self.inner()
-            .st
-            .as_ref()
-            .is_none_or(|s| !s.approval_totp_off)
-    }
-
-    /// Turns the TOTP step of high risk approvals on or off. Turning it off
-    /// needs a current TOTP code, so a stolen session alone cannot weaken it.
-    /// Recovery codes do not count, as they cannot approve high risk either.
-    pub fn set_approval_totp(&self, on: bool, code: &str) -> Result<()> {
+    /// Checks a change of a secret's TOTP setting before anything is written.
+    /// Waiving TOTP needs a current code, so an open session alone cannot
+    /// weaken approvals. Recovery codes do not count here.
+    pub fn authorize_secret_totp(&self, name: &str, mode: &str, code: &str) -> Result<()> {
         let mut g = self.inner();
         let st = g.st.as_ref().ok_or(Error::Locked)?;
-        if st.approval_totp_off == !on {
-            return Ok(());
-        }
-        if !on && st.totp_enabled {
+        let old = st.secrets.get(name).map_or("", |m| m.totp.as_str());
+        if mode == policy::TOTP_NEVER && old != policy::TOTP_NEVER && st.totp_enabled {
             self.check_totp_locked(&mut g, code)?;
         }
-        g.st.as_mut().ok_or(Error::Locked)?.approval_totp_off = !on;
-        self.log("approval_totp", "web", json!({"on": on}));
-        self.save_locked(&mut g)
+        Ok(())
     }
 
     // --- Profiles and tokens ---
@@ -1090,7 +1078,8 @@ impl Core {
         self.log(
             "secret_meta",
             "web",
-            json!({"name": name, "hosts": hosts, "commands": m.allow_commands}),
+            json!({"name": name, "hosts": hosts, "commands": m.allow_commands,
+                "totp": if m.totp.is_empty() { Value::Null } else { json!(m.totp) }}),
         );
         st.secrets.insert(name.to_string(), m);
         self.save_locked(&mut g)
@@ -1433,8 +1422,12 @@ impl Core {
             caller: t.name.clone(),
             reason: clean_reason(reason),
             risk: p.risk.clone(),
-            totp: p.risk == policy::RISK_HIGH
-                && g.st.as_ref().is_some_and(|s| !s.approval_totp_off),
+            totp: {
+                let mut names = a.secrets();
+                names.extend(p.secret_choices.iter().cloned());
+                let meta = g.st.as_ref().map(|s| &s.secrets);
+                meta.is_some_and(|m| policy::needs_totp(&p.risk, &names, m))
+            },
             hash: policy::hash(&p, &a, &t.name),
             display: a.display(),
             state: ReqState::Pending,
@@ -1478,7 +1471,8 @@ impl Core {
             self.finish_locked(g, &id, ReqState::Failed, "audit");
             return Err(Error::Msg("cannot record the request".into()));
         }
-        if p.auto_approve {
+        // A secret that always needs TOTP also stops auto approval.
+        if p.auto_approve && !req.totp {
             self.start_locked(g, &id, "auto");
             return Ok(g.reqs[&id].req.clone());
         }
@@ -1530,12 +1524,7 @@ impl Core {
     }
 
     pub fn needs_totp(&self, id: &str) -> bool {
-        let g = self.inner();
-        let on = g.st.as_ref().is_some_and(|s| !s.approval_totp_off);
-        on && g
-            .reqs
-            .get(id)
-            .is_some_and(|e| e.req.risk == policy::RISK_HIGH)
+        self.inner().reqs.get(id).is_some_and(|e| e.req.totp)
     }
 
     /// Maps a Telegram button index to a secret name.
@@ -1572,7 +1561,7 @@ impl Core {
             self.finish_locked(&mut g, id, ReqState::Denied, actor);
             return Ok("Đã từ chối".into());
         }
-        let (choices, risk) = (e.req.choices.clone(), e.req.risk.clone());
+        let (choices, need_totp) = (e.req.choices.clone(), e.req.totp);
         if !choices.is_empty() {
             if !choices.iter().any(|n| n == secret) {
                 return Err(Error::Msg("hãy chọn một secret trong danh sách".into()));
@@ -1593,8 +1582,7 @@ impl Core {
                 Ok(_) => {}
             }
         }
-        let totp_on = g.st.as_ref().is_some_and(|s| !s.approval_totp_off);
-        if risk == policy::RISK_HIGH && totp_on {
+        if need_totp {
             if !g.st.as_ref().is_some_and(|s| s.totp_enabled) {
                 return Err(Error::Msg(
                     "chưa bật TOTP nên chưa duyệt được yêu cầu rủi ro cao".into(),

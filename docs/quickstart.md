@@ -45,7 +45,7 @@ The agent calls the MCP tool `list_secrets`, then `call` with a header such as `
 - The URL host must be one the secret allows.
 - Secrets go in headers only, never in the URL or body.
 - You approve every request; the message says the agent wrote it.
-- With the `exec` image, `run_command` can use secrets marked "allow in commands". These always need TOTP.
+- With the `exec` image, `run_command` can use secrets marked "allow in commands". These count as high risk, so they need TOTP unless every secret used is set to "No TOTP".
 
 ### Secrets with several fields
 

@@ -83,10 +83,6 @@ pub struct State {
     pub totp_enabled: bool,
     #[serde(default)]
     pub last_totp_step: i64,
-    /// The owner chose to approve high risk requests without a TOTP code.
-    /// Absent means TOTP is required, so older files keep the safe default.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub approval_totp_off: bool,
     /// SHA-256 of single-use recovery codes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub recovery_hashes: Vec<String>,

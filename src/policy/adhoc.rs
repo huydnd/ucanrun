@@ -30,11 +30,34 @@ pub struct SecretMeta {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub hosts: Vec<String>,
     /// Lets agents use the secret in commands they write. The host cannot be
-    /// checked for a command, so these always need TOTP.
+    /// checked for a command, so these count as high risk.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub allow_commands: bool,
+    /// TOTP when approving a request that uses this secret: empty follows the
+    /// risk level (high risk needs it), `always` or `never`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub totp: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub fields: Vec<FieldMeta>,
+}
+
+pub const TOTP_ALWAYS: &str = "always";
+pub const TOTP_NEVER: &str = "never";
+
+/// Whether approving a request needs a TOTP code. A secret set to `always`
+/// forces it; otherwise high risk needs it unless every secret involved is
+/// set to `never`. High risk with no secret at all still needs it.
+pub fn needs_totp(risk: &str, secrets: &[String], meta: &BTreeMap<String, SecretMeta>) -> bool {
+    let mode = |n: &String| -> &str {
+        let m = meta
+            .get(n.as_str())
+            .or_else(|| n.rsplit_once('.').and_then(|(base, _)| meta.get(base)));
+        m.map_or("", |m| m.totp.as_str())
+    };
+    if secrets.iter().any(|n| mode(n) == TOTP_ALWAYS) {
+        return true;
+    }
+    risk == RISK_HIGH && (secrets.is_empty() || secrets.iter().any(|n| mode(n) != TOTP_NEVER))
 }
 
 static HOST_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -57,6 +80,9 @@ impl SecretMeta {
         }
         if self.hosts.len() > 20 {
             return err("at most 20 hosts");
+        }
+        if !matches!(self.totp.as_str(), "" | TOTP_ALWAYS | TOTP_NEVER) {
+            return err("totp must be empty, always or never");
         }
         for h in &self.hosts {
             if !HOST_RE.is_match(h) {

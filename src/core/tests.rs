@@ -1635,62 +1635,90 @@ async fn golden_datadir_opens() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn approval_totp_is_on_by_default_and_needs_a_code_to_turn_off() {
+async fn totp_is_set_per_secret() {
     let e = setup().await;
     let (t, _) = e.token("claude", &[]);
     let (sec, _) = e.enable_totp();
-    assert!(e.c.approval_totp());
+    let meta = |totp: &str| SecretMeta {
+        totp: totp.into(),
+        ..Default::default()
+    };
+
+    // Default: follows the risk level.
     let r =
         e.c.submit(&t, "danger", params(&[("repo", "a")]), "")
             .unwrap();
     assert!(r.totp && e.c.needs_totp(&r.id));
+    let low =
+        e.c.submit(&t, "create", params(&[("repo", "a")]), "")
+            .unwrap();
+    assert!(!low.totp);
     assert!(matches!(
         e.c.decide(&r.id, &r.hash, true, "web", "", ""),
         Err(Error::NeedTotp)
     ));
 
-    // A stolen session alone cannot weaken approvals.
+    // Waiving TOTP for a secret needs a current code.
     assert!(matches!(
-        e.c.set_approval_totp(false, ""),
+        e.c.authorize_secret_totp("gitea", "never", ""),
         Err(Error::NeedTotp)
     ));
     assert!(matches!(
-        e.c.set_approval_totp(false, "000000"),
+        e.c.authorize_secret_totp("gitea", "never", "000000"),
         Err(Error::BadTotp)
     ));
-    assert!(e.c.approval_totp());
-    e.c.set_approval_totp(false, &e.code_now(&sec)).unwrap();
-    assert!(!e.c.approval_totp());
-
-    // The pending request and new ones now approve without a code.
-    assert!(!e.c.needs_totp(&r.id));
-    e.c.decide(&r.id, &r.hash, true, "web", "", "").unwrap();
-    e.wait_state(&r.id, ReqState::Done).await;
+    e.c.authorize_secret_totp("gitea", "never", &e.code_now(&sec))
+        .unwrap();
+    e.c.set_secret_meta("gitea", meta("never")).unwrap();
+    // Already "never": saving notes again asks for nothing.
+    e.c.authorize_secret_totp("gitea", "never", "").unwrap();
     let r2 =
         e.c.submit(&t, "danger", params(&[("repo", "b")]), "")
             .unwrap();
     assert!(!r2.totp && r2.risk == "high");
     assert!(lang::approval_text(&r2, true).starts_with("⚠️ RỦI RO CAO\n"));
+    e.c.decide(&r2.id, &r2.hash, true, "web", "", "").unwrap();
+    e.wait_state(&r2.id, ReqState::Done).await;
+    // A request queued before the change keeps what it was shown with.
+    assert!(e.c.needs_totp(&r.id));
 
-    // The choice survives a lock, and turning it back on needs no code.
-    e.c.lock("web");
-    e.c.login(
-        PASS.as_bytes(),
-        &totp::code(&sec, unix(e.now()) + 30).unwrap(),
-    )
-    .unwrap();
-    assert!(!e.c.approval_totp());
-    e.c.set_approval_totp(true, "").unwrap();
-    assert!(e.c.approval_totp());
-    let events: Vec<String> =
+    // "always" needs TOTP even for low risk, and stops auto approval.
+    e.c.authorize_secret_totp("gitea", "always", "").unwrap();
+    e.c.set_secret_meta("gitea", meta("always")).unwrap();
+    let r3 =
+        e.c.submit(&t, "auto", params(&[("repo", "c")]), "")
+            .unwrap();
+    assert_eq!(r3.state, ReqState::Pending, "auto approved past TOTP");
+    assert!(r3.totp && r3.risk == "low");
+    assert!(lang::approval_text(&r3, true).starts_with("Yêu cầu chạy lệnh · 🔐 Cần mã TOTP"));
+    assert!(matches!(
+        e.c.decide(&r3.id, &r3.hash, true, "web", "", ""),
+        Err(Error::NeedTotp)
+    ));
+    let health = e.c.health().unwrap();
+    assert!(!health.iter().any(|i| i.key == "secret_totp"));
+    e.c.set_secret_meta("gitea", meta("never")).unwrap();
+    let health = e.c.health().unwrap();
+    let w = health.iter().find(|i| i.key == "secret_totp").unwrap();
+    assert_eq!(
+        (w.level.as_str(), w.names.clone()),
+        ("warn", vec!["gitea".to_string()])
+    );
+    assert!(
         e.c.audit
-            .tail(100)
+            .tail(50)
             .unwrap()
-            .into_iter()
-            .filter(|x| x.event == "approval_totp")
-            .map(|x| x.fields["on"].to_string())
-            .collect();
-    assert_eq!(events, ["true", "false"]);
+            .iter()
+            .any(|x| x.event == "secret_meta" && x.fields["totp"] == "never")
+    );
+    assert!(
+        SecretMeta {
+            totp: "sometimes".into(),
+            ..Default::default()
+        }
+        .validate()
+        .is_err()
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

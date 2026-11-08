@@ -456,7 +456,6 @@ impl Server {
             .route("/api/totp/confirm", ui(post(totp_confirm)))
             .route("/api/totp/recovery", ui(post(totp_recovery)))
             .route("/api/totp/reset", ui(post(totp_reset)))
-            .route("/api/approval-totp", ui(put(set_approval_totp)))
             .route("/api/runs", ui(get(runs)))
             .fallback(unrouted)
             .layer(middleware::from_fn(csrf))
@@ -629,7 +628,6 @@ async fn status(State(s): State<Arc<Server>>, h: HeaderMap) -> Response {
     if authed {
         out["telegram"] = json!(c.telegram_status());
         out["totp"] = json!(c.totp_enabled());
-        out["approval_totp"] = json!(c.approval_totp());
         out["exec"] = json!(c.exec_enabled());
         out["recovery_left"] = json!(c.recovery_left());
     }
@@ -760,6 +758,8 @@ struct SecretRow {
     allow_commands: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     fields: Vec<FieldInfo>,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    totp: String,
 }
 
 async fn list_secrets(State(s): State<Arc<Server>>, h: HeaderMap) -> Response {
@@ -796,6 +796,7 @@ async fn list_secrets(State(s): State<Arc<Server>>, h: HeaderMap) -> Response {
                 hosts: x.hosts,
                 allow_commands: x.allow_commands,
                 fields,
+                totp: x.totp,
             });
         }
         Ok(out)
@@ -823,6 +824,10 @@ struct PutSecretIn {
     hosts: Vec<String>,
     allow_commands: bool,
     fields: Option<Vec<FieldIn>>,
+    /// "", "always" or "never".
+    totp: String,
+    /// A current TOTP code, needed to set totp to "never".
+    code: String,
 }
 
 /// Write-only by design: no endpoint ever returns a private value.
@@ -842,10 +847,14 @@ async fn put_secret(
         hosts: input.hosts,
         allow_commands: input.allow_commands,
         fields: vec![],
+        totp: input.totp,
     };
     tryf!(meta.validate());
     let c = s.core.clone();
     let res = blocking(move || -> core::Result<Option<Response>> {
+        // Checked before anything is written, so a refused change leaves the
+        // value untouched too.
+        c.authorize_secret_totp(&name, &meta.totp, &input.code)?;
         if let Some(fields) = input.fields {
             meta.fields = fields
                 .iter()
@@ -1131,20 +1140,6 @@ async fn totp_confirm(State(s): State<Arc<Server>>, h: HeaderMap, b: Body) -> Re
     let input: CodeIn = body!(b);
     let codes = tryf!(s.core.totp_confirm(&input.code));
     write_json(200, &json!({"recovery_codes": codes}))
-}
-
-#[derive(Deserialize, Default)]
-#[serde(default)]
-struct ApprovalTotpIn {
-    on: bool,
-    code: String,
-}
-
-async fn set_approval_totp(State(s): State<Arc<Server>>, h: HeaderMap, b: Body) -> Response {
-    need_auth!(s, h);
-    let input: ApprovalTotpIn = body!(b);
-    tryf!(s.core.set_approval_totp(input.on, &input.code));
-    write_json(200, &json!({"approval_totp": s.core.approval_totp()}))
 }
 
 /// How far back the run log looks, in audit lines.
