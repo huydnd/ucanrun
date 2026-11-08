@@ -121,7 +121,7 @@ Agent:   ucr profiles | run PROFILE k=v --reason "..." | doctor | mcp
 |---|---|
 | Dữ liệu và cổng mạng | `UCANRUN_DATA`, `UCANRUN_WEB_ADDR`, `UCANRUN_AGENT_ADDR` |
 | Truy cập web | `UCANRUN_PUBLIC_URL`, `UCANRUN_GATE_TOKEN`, `UCANRUN_GATE=off` |
-| Tính năng | `UCANRUN_ENABLE_EXEC`, `UCANRUN_LANG`, `UCANRUN_APPROVAL_TTL`, `UCANRUN_UNLOCK_FILE`, `UCANRUN_CATALOG_DIR` |
+| Tính năng | `UCANRUN_ENABLE_EXEC`, `UCANRUN_LANG`, `UCANRUN_APPROVAL_TTL`, `UCANRUN_UNLOCK_FILE` |
 | Phía agent | `UCANRUN_URL`, `UCANRUN_TOKEN` |
 
 **Agent API:**

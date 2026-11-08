@@ -128,8 +128,16 @@ async function viewRequests(body) {
     rest.length ? h("div", {class: "card"}, h("h2", null, "Gần đây"), rest.slice(0, 30).map(row)) : null);
 }
 
-async function viewSecrets(body, editing) {
-  const list = await api("GET", "/api/secrets");
+// Picks the English variant of a data field when the UI is in English.
+const L = (o, k) => lang === "en" && o[k + "_en"] || o[k];
+
+async function secretTemplates() {
+  if (!state.templates) state.templates = await fetch("secret-templates.json").then(r => r.ok ? r.json() : []).catch(() => []);
+  return state.templates;
+}
+
+async function viewSecrets(body, editing, tpl) {
+  const [list, templates] = await Promise.all([api("GET", "/api/secrets"), secretTemplates()]);
   const cur = editing ? list.find(x => x.name === editing) : null;
   const n = field("Tên", {autocomplete: "off", spellcheck: "false", placeholder: "github_token"});
   const v = field(cur ? "Giá trị mới (để trống nếu giữ nguyên)" : "Giá trị", {type: "password", autocomplete: "off"});
@@ -139,14 +147,15 @@ async function viewSecrets(body, editing) {
   const toggle = h("input", {type: "checkbox", onchange: e => { multi.hidden = !e.target.checked; v.el.hidden = e.target.checked; }});
   const cmd = h("input", {type: "checkbox"});
   // A secret is one value, or several named fields such as a database login.
-  let multiMode = !!(cur && cur.fields && cur.fields.length);
-  const rows = (cur && cur.fields || []).map(f => ({name: f.name, public: !!f.public, value: "", had: true}));
+  let multiMode = !!(cur && cur.fields && cur.fields.length || tpl && tpl.fields);
+  const rows = cur ? (cur.fields || []).map(f => ({name: f.name, public: !!f.public, value: "", had: true}))
+    : tpl && tpl.fields ? tpl.fields.map(f => ({name: f.name, public: !!f.public, value: "", hint: f.value})) : [];
   if (!rows.length) rows.push({name: "host", public: true, value: ""}, {name: "user", public: true, value: ""}, {name: "password", public: false, value: ""});
   const fieldBox = h("div", {hidden: !multiMode});
   const drawFields = () => fill(fieldBox, h("small", {class: "muted"}, "Trường công khai (máy chủ, cổng, user, tên database) agent thấy được giá trị và dùng ở mọi vị trí. Trường kín như password chỉ đi vào header hoặc biến môi trường."),
     rows.map((r, i) => {
       const nm = h("input", {"aria-label": "Tên trường", autocomplete: "off", spellcheck: "false", placeholder: "password"}); nm.value = r.name;
-      const val = h("input", {"aria-label": "Giá trị trường", autocomplete: "off", type: r.public ? "text" : "password", placeholder: r.had ? tr("giữ nguyên") : ""}); val.value = r.value;
+      const val = h("input", {"aria-label": "Giá trị trường", autocomplete: "off", type: r.public ? "text" : "password", placeholder: r.had ? tr("giữ nguyên") : r.hint || ""}); val.value = r.value;
       const pub = h("input", {type: "checkbox", checked: r.public, onchange: e => { r.public = e.target.checked; val.type = r.public ? "text" : "password"; }});
       nm.addEventListener("input", () => { r.name = nm.value.trim(); });
       val.addEventListener("input", () => { r.value = val.value; });
@@ -156,14 +165,20 @@ async function viewSecrets(body, editing) {
   drawFields();
   const modeSel = choiceGroup("secretkind", multiMode ? "multi" : "one", [{value: "one", title: "Một giá trị", help: "Token, API key"}, {value: "multi", title: "Nhiều trường", help: "Đăng nhập database, máy chủ"}],
     v => { multiMode = v === "multi"; fieldBox.hidden = !multiMode; v_wrap.hidden = multiMode; });
+  const execOn = !!(state.status && state.status.exec);
   if (cur) {
     n.input.value = cur.name; n.input.readOnly = true;
     desc.value = cur.description || ""; hosts.input.value = (cur.hosts || []).join(", "); cmd.checked = !!cur.allow_commands;
+  } else if (tpl) {
+    // A template fills everything except the value.
+    n.input.value = tpl.name || ""; desc.value = L(tpl, "description") || ""; hosts.input.value = (tpl.hosts || []).join(", ");
+    cmd.checked = !!tpl.allow_commands && execOn;
+    if (tpl.placeholder) v.input.placeholder = tpl.placeholder;
+    if (tpl.multiline) { toggle.checked = true; multi.hidden = false; v.el.hidden = true; }
   }
-  const execOn = !!(state.status && state.status.exec);
   // TOTP when approving requests that use this secret.
   const totpWas = cur ? (cur.totp || "") : "";
-  let totpMode = totpWas;
+  let totpMode = cur ? totpWas : tpl && tpl.totp || "";
   const totpCode = field("Mã TOTP hiện tại, để xác nhận tắt", {inputmode: "numeric", maxlength: 6, autocomplete: "one-time-code"});
   const showCode = () => { totpCode.el.hidden = !(totpMode === "never" && totpWas !== "never" && state.status && state.status.totp); };
   const totpBox = h("div", null, h("h3", null, "TOTP khi duyệt"),
@@ -191,9 +206,22 @@ async function viewSecrets(body, editing) {
   // Read top to bottom: name, kind, value, notes, hosts, TOTP.
   save.querySelector("h2").after(n.el, modeSel);
   if (cur) save.append(h("div", {class: "row"}, h("button", {onclick: () => viewSecrets(body)}, "Huỷ")));
-  const addBox = cur ? save : h("details", {class: "card add", open: !list.length}, h("summary", null, tr("Thêm secret")), save);
+  // Templates fill the form for common services; the value is the only thing left to type.
+  const tile = t => {
+    const have = list.some(x => x.name === t.name);
+    return h("button", {class: "tile pick" + (tpl && tpl.id === t.id ? " on" : ""), type: "button", onclick: () => {
+      if (have) viewSecrets(body, t.name);
+      else viewSecrets(body, null, t).then(() => { const f = body.querySelector("details.add"); if (f) { f.scrollIntoView({block: "start"}); const i = f.querySelector(t.name ? "input[type=password], textarea:not([hidden])" : "input"); if (i) i.focus(); } });
+    }}, h("b", null, L(t, "title")), h("small", {class: "muted"}, L(t, "hint")),
+      have ? h("span", {class: "badge"}, "đã có, bấm để sửa") : t.exec && !execOn ? h("span", {class: "badge"}, "cần image exec") : null);
+  };
+  const addBox = cur ? save : h("details", {class: "card add", open: !list.length || !!tpl},
+    h("summary", null, tpl ? tr("Thêm secret") + ": " + L(tpl, "title") : tr("Thêm secret")),
+    h("h3", null, "Bắt đầu từ mẫu"), h("p", {class: "muted"}, "Chọn dịch vụ để điền sẵn tên, mô tả cho agent, máy chủ và mức TOTP. Bạn chỉ cần dán giá trị."),
+    h("div", {class: "tiles compact"}, templates.map(tile)),
+    h("h3", null, tpl ? "Điền giá trị" : "Hoặc tự điền"), save);
   if (!cur) { save.classList.remove("card"); save.querySelector("h2").remove(); }
-  fill(body, cur ? save : null,
+  fill(body, cur ? save : addBox,
     h("div", {class: "card"}, h("h2", null, `Secret (${list.length})`),
       list.length ? list.map(s => h("div", {class: "spread"}, h("span", null, h("code", null, s.name),
           s.description ? h("div", null, s.description) : h("div", {class: "note"}, "Chưa có mô tả, agent sẽ không biết dùng vào việc gì."),
@@ -203,7 +231,7 @@ async function viewSecrets(body, editing) {
         h("span", null, h("button", {onclick: () => { viewSecrets(body, s.name); window.scrollTo(0, 0); }}, "Sửa"), " ",
           h("button", {class: "danger", onclick: async () => {
             if (confirm(tr(`Xoá secret ${s.name}?`))) { await api("DELETE", "/api/secrets/" + encodeURIComponent(s.name)); viewSecrets(body); }
-          }}, "Xoá")))) : h("p", {class: "muted"}, "Chưa có secret.")), cur ? null : addBox);
+          }}, "Xoá")))) : h("p", {class: "muted"}, "Chưa có secret.")));
 }
 
 // --- Profile builder ---
@@ -410,44 +438,7 @@ async function viewProfiles(body, keptImport) {
     fill(body, card);
     window.scrollTo(0, 0);
   };
-  const catalog = await fetch("catalog.json").then(r => r.json()).catch(() => []);
-  const haveSecret = n => secrets.some(s => s.name === n);
   const haveProfile = n => list.some(p => p.name === n);
-  const haveConn = n => conns.some(c => c.name === n);
-  const L = (o, k) => lang === "en" && o[k + "_en"] || o[k];
-  // One card per service: paste its token once, then pick the actions to allow.
-  const serviceCard = e => {
-    const svc = e.service, err = h("div", {class: "err"});
-    const fresh = e.actions.filter(a => !haveProfile(a.profile.name));
-    const picks = fresh.map((a, i) => ({a, cb: h("input", {type: "checkbox", checked: i === 0})}));
-    const secretName = svc && svc.auth && svc.auth.secret;
-    const needSecret = svc && !haveConn(svc.name) && secretName && !haveSecret(secretName) && !e.custom;
-    const tokenIn = needSecret ? h("input", {type: "password", autocomplete: "off", placeholder: "Dán " + secretName, "aria-label": secretName}) : null;
-    const direct = svc && !e.custom || svc && haveConn(svc.name);
-    const add = async () => {
-      err.textContent = "";
-      try {
-        if (!picks.some(x => x.cb.checked)) throw new Error("Hãy chọn ít nhất một hành động.");
-        if (tokenIn) {
-          if (!tokenIn.value) throw new Error("Hãy dán giá trị " + secretName);
-          await api("PUT", "/api/secrets/" + encodeURIComponent(secretName), {value: tokenIn.value.trim()});
-        }
-        if (!haveConn(svc.name)) await api("PUT", "/api/connections", svc);
-        for (const x of picks) if (x.cb.checked) await api("PUT", "/api/profiles", Object.assign({}, x.a.profile, lang === "en" && x.a.title_en ? {description: x.a.title_en} : {}));
-        viewProfiles(body);
-      } catch (e2) { err.textContent = viErr(e2.message); }
-    };
-    return h("div", {class: "tile"}, h("b", null, svc ? (svc.title || svc.name) : L(e, "title")), h("small", {class: "muted"}, L(e, "hint")),
-      svc && haveConn(svc.name) ? h("span", {class: "badge"}, "đã có kết nối") : null,
-      picks.length ? h("div", {class: "picklist"}, picks.map(x => h("label", {class: "check"}, x.cb, h("span", null, L(x.a, "title"))))) : h("span", {class: "badge"}, "đã thêm"),
-      tokenIn,
-      picks.length ? h("div", {class: "row"},
-        direct ? h("button", {class: "primary", onclick: add}, "Thêm") : null,
-        svc ? h("button", {onclick: () => openConn(Object.assign({}, svc, {_new: !haveConn(svc.name)}))}, "Tuỳ chỉnh kết nối")
-          : h("button", {onclick: () => openBuilder(fromProfile(picks[0].a.profile))}, "Tuỳ chỉnh")) : null, err);
-  };
-  const execOn = !!(state.status && state.status.exec);
-  const usable = catalog.filter(e => execOn || !e.actions.some(a => a.profile.exec));
   const ioErr = h("div", {class: "err", role: "alert"});
   const importBox = keptImport || h("div");
   const fileInput = h("input", {type: "file", accept: "application/json", hidden: true, onchange: () => {
@@ -522,12 +513,9 @@ async function viewProfiles(body, keptImport) {
   }}, "Xuất profile");
   const importOpenBtn = h("button", {type: "button", onclick: () => { fileInput.value = ""; fileInput.click(); }}, "Nhập profile");
   fill(body, h("p", {class: "note"}, "Không bắt buộc. Thông thường chỉ cần lưu secret kèm mô tả ở tab Secret, agent tự soạn lệnh và bạn duyệt. Phần này để giới hạn chặt hơn: agent chỉ chạy đúng các hành động bạn định sẵn."),
-  h("div", {class: "card"}, h("h2", null, "Thêm nhanh"),
-    h("p", {class: "muted"}, "Chọn dịch vụ, dán token một lần, rồi chọn các hành động agent được xin."),
-    h("div", {class: "tiles"}, usable.map(serviceCard),
-      h("div", {class: "tile"}, h("b", null, "Dịch vụ khác"), h("small", {class: "muted"}, "Mọi API dùng token: khai báo địa chỉ và cách đăng nhập."),
-        h("div", {class: "row"}, h("button", {class: "primary", onclick: () => openConn({_new: true, name: "", base_url: "https://", auth: {type: "bearer", secret: ""}})}, "Thêm kết nối"))))),
   h("div", {class: "card"}, h("h2", null, `Kết nối (${conns.length})`),
+    h("p", {class: "muted"}, "Một kết nối là một dịch vụ: nơi gọi tới và cách đăng nhập. Mọi hành động dùng chung, agent không đổi được máy chủ."),
+    h("div", {class: "row"}, h("button", {class: "primary", onclick: () => openConn({_new: true, name: "", base_url: "https://", auth: {type: "bearer", secret: ""}})}, "Thêm kết nối")),
     conns.length ? conns.map(c => h("div", {class: "spread"}, h("span", null, h("b", null, c.title || c.name), " ", h("code", null, c.name),
       h("div", {class: "muted"}, c.base_url + " · " + c.auth.type + (c.auth.secret ? " · " + c.auth.secret : c.auth.choices && c.auth.choices.length ? " · " + c.auth.choices.join(" / ") : ""))),
       h("span", null, h("button", {onclick: () => openBuilder(newDraft({kind: "conn", connection: c.name, url: "/"}))}, "Hành động mới"), " ",
@@ -538,7 +526,7 @@ async function viewProfiles(body, keptImport) {
     h("div", {class: "row"}, Object.values(templates).map(t => h("button", {onclick: () => openBuilder(newDraft(t.d))}, t.label)))),
   h("div", {class: "card"}, h("h2", null, `Profile (${list.length})`),
     list.length ? list.map(p => h("div", {class: "spread"}, h("span", null, h("b", null, p.description || p.name), " ",
-      h("span", {class: "badge " + (p.risk === "high" ? "high" : "")}, p.risk === "high" ? "cần TOTP" : p.auto_approve ? "tự chạy" : "hỏi duyệt"),
+      h("span", {class: "badge " + (p.risk === "high" ? "high" : "")}, p.risk === "high" ? "rủi ro cao" : p.auto_approve ? "tự chạy" : "hỏi duyệt"),
       h("div", {class: "muted"}, h("code", null, "ucr run " + p.name + (p.params || []).map(q => ` ${q.name}=…`).join("")))),
     h("span", null, h("button", {onclick: () => openTest(p)}, "Chạy thử"), " ", h("button", {onclick: () => openBuilder(fromProfile(p))}, "Sửa"), " ",
       h("button", {class: "danger", onclick: async () => { if (confirm(tr(`Xoá profile ${p.name}?`))) { await api("DELETE", "/api/profiles/" + encodeURIComponent(p.name)); viewProfiles(body); } }}, "Xoá")))) : h("p", {class: "muted"}, "Chưa có profile."),
@@ -564,7 +552,7 @@ function connForm(c, secrets, done) {
       if (mode === "one") {
         const sn = field("Tên secret", {autocomplete: "off", spellcheck: "false", list: "secret-names"}); sn.input.value = x.auth.secret || "";
         sn.input.addEventListener("input", () => { x.auth.secret = sn.input.value.trim(); });
-        kids.push(sn.el, h("datalist", {id: "secret-names"}, secrets.map(s => h("option", {value: s.name}))), h("small", {class: "muted"}, "Chưa có secret này thì thêm ở tab Secret, hoặc dán token khi dùng Thêm nhanh."));
+        kids.push(sn.el, h("datalist", {id: "secret-names"}, secrets.map(s => h("option", {value: s.name}))), h("small", {class: "muted"}, "Chưa có secret này thì thêm ở tab Secret, có sẵn mẫu cho dịch vụ phổ biến."));
       } else {
         x.auth.choices = x.auth.choices || [];
         kids.push(secrets.length ? h("div", {class: "picklist"}, secrets.map(s => h("label", {class: "check"}, h("input", {type: "checkbox", checked: x.auth.choices.includes(s.name), onchange: e => { x.auth.choices = e.target.checked ? x.auth.choices.concat(s.name) : x.auth.choices.filter(n => n !== s.name); }}), h("span", null, s.name))))

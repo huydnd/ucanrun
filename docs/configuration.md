@@ -10,7 +10,6 @@ Nothing is required. All variables are optional.
 | `UCANRUN_ENABLE_EXEC` | Off | `1` allows profiles that run programs. |
 | `UCANRUN_LANG` | `en` | Telegram language, `en` or `vi`. The web UI has its own setting. |
 | `UCANRUN_UNLOCK_FILE` | Empty | A file holding the master password, read at start so a restart does not lock agents out. Skips TOTP. Use a Docker secret, and read [the trade-off](security.md). |
-| `UCANRUN_CATALOG_DIR` | `data/catalog.d` | Extra templates: every `*.json` file holding an array in the shape of `catalog.json`. Invalid entries are skipped and logged. |
 | `UCANRUN_APPROVAL_TTL` | `2m` | How long a request waits. |
 | `UCANRUN_PORT` | `8780` | Web port in `compose.yml`. |
 | `UCANRUN_AGENT_PORT` | `8781` | Agent port in `compose.yml`. |

@@ -9,18 +9,12 @@ ucanrun dùng một mô hình chung thay vì code riêng cho từng dịch vụ:
 
 Máy chủ và đăng nhập luôn lấy từ kết nối, nên hành động không thể gửi secret đi nơi khác. Sửa kết nối, ví dụ đổi máy chủ, thì mọi hành động đi theo; thay đổi làm hỏng hành động nào sẽ bị từ chối.
 
-## Thêm nhanh
+## Cách thêm
 
-Tab Profile, **Thêm nhanh**. Chọn dịch vụ, dán token một lần, tích các hành động agent được xin, bấm **Thêm**. **Dịch vụ khác** khai báo được mọi API dùng token.
-
-Danh sách sẵn là dữ liệu trong `web/static/catalog.json`: GitHub, Gitea, Cloudflare, DeepSeek, Google AI, Notion, và hai lệnh đứng riêng cần image `exec`: SSH (xem [ssh-sudo](ssh-sudo.md)) và truy vấn PostgreSQL chỉ đọc. Mẫu PostgreSQL đọc secret nhiều trường `postgres` (host, port, user, database công khai; password riêng), chạy mỗi truy vấn trong transaction chỉ đọc, giới hạn 20 giây. Hãy dùng user database chỉ có quyền SELECT, vì đó mới là giới hạn thật.
+Tab Nâng cao, mục **Kết nối**, bấm **Thêm kết nối**: tên, địa chỉ gốc, cách đăng nhập và secret. Sau đó bấm **Hành động mới** trên kết nối đó: phương thức, đường dẫn và các giá trị agent được điền. Bản thân secret lưu ở tab Secret, nơi có sẵn [mẫu](templates.md) cho dịch vụ phổ biến.
 
 ## Nhiều tài khoản cho một dịch vụ
 
 Sửa kết nối, chọn **Chọn khi duyệt**, tích các secret. Telegram hiện mỗi secret một nút **Dùng tên**, kết quả ghi rõ secret đã dùng.
 
-## Mẫu riêng
-
-Đặt file `*.json` vào `data/catalog.d/` (hoặc `UCANRUN_CATALOG_DIR`), cùng định dạng như bản tiếng Anh của tài liệu này. Mục sai được bỏ qua và ghi log.
-
-Xuất và nhập ở tab Profile mang theo cả kết nối và profile. File chỉ có tên secret, không có giá trị.
+Xuất và nhập ở tab Nâng cao mang theo cả kết nối và profile. File chỉ có tên secret, không có giá trị.

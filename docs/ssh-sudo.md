@@ -23,10 +23,27 @@ cat ~/ucanrun_key
 
 In the UI:
 
-1. **Secrets**, name `ssh_key`, tick **Multi-line**, paste the key.
-2. **Secrets**, name `sudo_password`, enter the sudo password.
-3. **Profiles**, card **Restart a service over SSH**, **Customize**.
+1. **Secrets**, template **SSH key**, paste the key.
+2. **Secrets**, template **sudo password**, enter the sudo password. It always asks for TOTP.
+3. **Advanced**, **Create a profile**, **Blank**, open **Advanced: view or paste JSON** and paste the profile below.
 4. Edit `deploy@server.example.com` and the service list, then save.
+
+```json
+{
+  "name": "ssh-restart-service",
+  "description": "Restart a service on the server",
+  "risk": "high",
+  "timeout_sec": 60,
+  "params": [{"name": "service", "pattern": "nginx|cron", "required": true}],
+  "exec": {
+    "argv": ["/usr/bin/ssh", "-i", "id_key", "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes",
+      "-o", "StrictHostKeyChecking=accept-new", "-o", "UserKnownHostsFile=known_hosts",
+      "deploy@server.example.com", "sudo -S -p '' /usr/bin/systemctl restart {{service}}"],
+    "stdin": "{{secret:sudo_password}}",
+    "files": {"id_key": "{{secret:ssh_key}}"}
+  }
+}
+```
 
 The preview must show `stdin: ‹secret:sudo_password›` and `file id_key: ‹secret:ssh_key›`.
 

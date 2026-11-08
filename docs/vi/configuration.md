@@ -10,7 +10,6 @@ Mặc định không cần cấu hình gì. Mọi biến đều tuỳ chọn.
 | `UCANRUN_ENABLE_EXEC` | Tắt | `1` cho phép profile chạy lệnh. |
 | `UCANRUN_LANG` | `en` | Ngôn ngữ tin nhắn Telegram, `vi` hoặc `en`. Giao diện web chọn riêng trong Cài đặt. |
 | `UCANRUN_UNLOCK_FILE` | Trống | File chứa mật khẩu chính, đọc khi khởi động để khởi động lại không khoá agent. Bỏ qua TOTP. Dùng Docker secret, đọc [đánh đổi](security.md). |
-| `UCANRUN_CATALOG_DIR` | `data/catalog.d` | Mẫu thêm: mỗi file `*.json` chứa một mảng giống `catalog.json`. Mục sai được bỏ qua và ghi log. |
 | `UCANRUN_APPROVAL_TTL` | `2m` | Thời gian chờ duyệt. |
 | `UCANRUN_PORT` | `8780` | Cổng web trong `compose.yml`. |
 | `UCANRUN_AGENT_PORT` | `8781` | Cổng agent trong `compose.yml`. |

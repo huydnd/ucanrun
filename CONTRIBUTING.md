@@ -21,4 +21,4 @@ Before a pull request, run `cargo fmt --check` and `cargo clippy --all-targets -
 
 ## Adding a template
 
-Add an entry to `web/static/catalog.json` with `group`, `title`, `title_en`, `hint`, `hint_en`, `secrets` and `profile`. `cargo test --test web catalog` validates it. Do not guess API URLs; link the provider's documentation in the pull request.
+Add an entry to `web/static/secret-templates.json` with `id`, `title`, `hint`, `hint_en`, `name`, `description`, `description_en` and `hosts` (or `fields`, `multiline`, `allow_commands` with `exec`, `totp`). The description must show agents how to use the secret. `cargo test --test web secret_templates` validates it. Do not guess API URLs; link the provider's documentation in the pull request.

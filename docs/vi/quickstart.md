@@ -33,7 +33,7 @@ Sau khi khởi tạo, tab **Bắt đầu** dẫn bạn qua bốn bước. Bướ
 
 1. **Nối Telegram:** tạo bot bằng @BotFather, dán token, gửi `/pair <mã>` cho bot. Mã có 6 ký tự, hạn 3 phút, sai 3 lần là huỷ.
 2. **Bật TOTP:** quét mã QR, rồi lưu 8 mã khôi phục. Các mã này chỉ hiện một lần.
-3. **Thêm dịch vụ:** chọn mẫu, dán token, xem [danh mục mẫu](catalog.md). Việc khác thì dùng [form tạo profile](profiles.md).
+3. **Lưu secret:** ở tab Secret, chọn một [mẫu](templates.md) hoặc tự điền, dán giá trị, ghi một dòng mô tả và máy chủ được phép.
 4. **Tạo token cho agent:** chọn agent bạn dùng, chọn profile được phép, rồi làm theo hướng dẫn hiện ra. Token được đưa vào chính cài đặt MCP của agent đó.
 
 Kiểm tra agent: `ucr profiles`.
@@ -55,7 +55,7 @@ Thông tin đăng nhập database có máy chủ, cổng, user và mật khẩu.
 - Trường riêng theo các quy tắc ở trên và bị che trong kết quả.
 - `{{secret:db}}` không ghi trường sẽ bị từ chối.
 
-Muốn giới hạn chặt hơn, tab Nâng cao định nghĩa các hành động cố định, xem [hành động cố định](catalog.md).
+Muốn giới hạn chặt hơn, tab Nâng cao định nghĩa các hành động cố định, xem [hành động cố định](fixed-actions.md).
 
 ## Mất điện thoại
 

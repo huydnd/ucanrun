@@ -23,10 +23,27 @@ cat ~/ucanrun_key
 
 Trong giao diện:
 
-1. Tab **Secret**, tên `ssh_key`, tích **Nhiều dòng**, dán nội dung khoá.
-2. Tab **Secret**, tên `sudo_password`, nhập mật khẩu sudo.
-3. Tab **Profile**, thẻ **Khởi động lại dịch vụ qua SSH**, bấm **Tuỳ chỉnh**.
+1. Tab **Secret**, mẫu **Khoá SSH**, dán nội dung khoá.
+2. Tab **Secret**, mẫu **Mật khẩu sudo**, nhập mật khẩu sudo. Mẫu này luôn cần TOTP.
+3. Tab **Nâng cao**, mục **Tự tạo profile**, bấm **Trống**, mở **Nâng cao: xem hoặc dán JSON** rồi dán profile dưới đây.
 4. Sửa `deploy@server.example.com` và danh sách dịch vụ, rồi lưu.
+
+```json
+{
+  "name": "ssh-restart-service",
+  "description": "Khởi động lại một dịch vụ trên máy chủ",
+  "risk": "high",
+  "timeout_sec": 60,
+  "params": [{"name": "service", "pattern": "nginx|cron", "required": true}],
+  "exec": {
+    "argv": ["/usr/bin/ssh", "-i", "id_key", "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes",
+      "-o", "StrictHostKeyChecking=accept-new", "-o", "UserKnownHostsFile=known_hosts",
+      "deploy@server.example.com", "sudo -S -p '' /usr/bin/systemctl restart {{service}}"],
+    "stdin": "{{secret:sudo_password}}",
+    "files": {"id_key": "{{secret:ssh_key}}"}
+  }
+}
+```
 
 Ô xem trước phải hiện `stdin: ‹secret:sudo_password›` và `file id_key: ‹secret:ssh_key›`.
 
