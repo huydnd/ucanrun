@@ -178,3 +178,20 @@ details.hist[open]>summary{margin-bottom:6px}
 .spread.secret{align-items:flex-start}
 .spread .acts{display:flex;gap:6px;flex:none}
 @media (max-width:520px){.spread.secret{flex-direction:column}.spread .acts{align-self:flex-end}}
+
+/* overview */
+.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:12px}
+@media (max-width:640px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.stat{display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:12px 14px;min-height:0;border-radius:var(--radius);background:var(--panel);box-shadow:var(--shadow);text-align:left;font-weight:400}
+.stat:hover{border-color:var(--accent-line)}
+.stat .num{font-size:24px;font-weight:650;line-height:1.1;color:var(--text)}
+.stat .lbl{font-size:12.5px;color:var(--muted)}
+.stat.attn{border-color:var(--warn);background:var(--warn-bg)}
+.stat.attn .num{color:var(--warn)}
+.stat.warn .num{color:var(--danger)}
+.card.attention{border-color:var(--warn);background:var(--warn-bg)}
+.card.attention h2{color:var(--warn)}
+button.link{border:0;background:none;padding:0 4px;min-height:0;color:var(--accent);font-size:12.5px;margin-left:auto;flex:none;white-space:nowrap}
+.health li{align-items:center}
+details.card.setup>summary{font-weight:600}
+details.card.setup[open]>summary{margin-bottom:8px}
