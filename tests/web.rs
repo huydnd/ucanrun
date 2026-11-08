@@ -20,7 +20,7 @@ use sha2::Sha256;
 
 use ucanrun::client::Client;
 use ucanrun::core::{self, Core, Options, ReqState, Request};
-use ucanrun::policy::Profile;
+use ucanrun::policy::{Profile, SecretMeta};
 use ucanrun::web::{self, Server};
 use ucanrun::{audit, totp};
 
@@ -1114,7 +1114,7 @@ async fn gate_blocks_everything_without_code() {
         "/api/status",
         "/api/secrets",
         "/api/profiles",
-        "/catalog.json",
+        "/secret-templates.json",
         "/gate",
     ] {
         let r = anon.send("GET", p, None, &[]).await;
@@ -1878,94 +1878,70 @@ async fn choice_on_connection_explains_auto_approve() {
     );
 }
 
-// --- catalog_test.go ---
+// --- secret templates ---
 
+/// Every built-in template must save as is, apart from its value.
 #[test]
-fn catalog_embedded_is_valid() {
-    let cat = web::read_catalog(None);
-    assert!(cat.len() >= 6, "only {} entries", cat.len());
-    for e in &cat {
-        if let Err(err) = web::valid_entry(e) {
-            panic!("{:?}: {err}", e.service.as_ref().map(|s| &s.name));
+fn secret_templates_are_valid() {
+    let p = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/web/static/secret-templates.json"
+    );
+    let list: Vec<Value> = serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap();
+    assert!(list.len() >= 8, "only {} templates", list.len());
+    let mut ids = std::collections::HashSet::new();
+    for t in &list {
+        let id = t["id"].as_str().unwrap();
+        assert!(ids.insert(id.to_string()), "duplicate id {id}");
+        for k in ["title", "hint", "hint_en", "description", "description_en"] {
+            assert!(t[k].as_str().is_some_and(|s| !s.is_empty()), "{id}: {k}");
         }
+        let name = t["name"].as_str().unwrap();
+        if !name.is_empty() {
+            assert!(
+                ucanrun::vault::valid_name(name) && !name.starts_with('_'),
+                "{id}: name"
+            );
+            assert!(
+                t["description"]
+                    .as_str()
+                    .unwrap()
+                    .contains(&format!("{{{{secret:{name}")),
+                "{id}: notes should show agents how to use {name}"
+            );
+        }
+        for d in ["description", "description_en"] {
+            let fields: Vec<ucanrun::policy::FieldMeta> =
+                serde_json::from_value(t.get("fields").cloned().unwrap_or(json!([]))).unwrap();
+            let m = SecretMeta {
+                description: t[d].as_str().unwrap().into(),
+                hosts: serde_json::from_value(t.get("hosts").cloned().unwrap_or(json!([])))
+                    .unwrap(),
+                allow_commands: t["allow_commands"].as_bool().unwrap_or(false),
+                totp: t["totp"].as_str().unwrap_or("").into(),
+                fields,
+            };
+            if let Err(e) = m.validate() {
+                panic!("{id} {d}: {e}");
+            }
+        }
+        assert_eq!(
+            t["allow_commands"].as_bool().unwrap_or(false),
+            t["exec"].as_bool().unwrap_or(false),
+            "{id}: commands go with the exec flag"
+        );
     }
 }
 
-#[test]
-fn catalog_extra_dir() {
-    let base = web::read_catalog(None).len();
-    let dir = tempfile::tempdir().unwrap();
-    let w = |name: &str, body: &str| std::fs::write(dir.path().join(name), body).unwrap();
-    w(
-        "a-good.json",
-        r#"[{"service":{"name":"acme","base_url":"https://api.acme.example","auth":{"type":"bearer","secret":"acme_token"}},
-      "hint":"x","actions":[{"title":"Ping","profile":{"name":"acme-ping","risk":"low","http":{"method":"GET","url":"/ping"}}}]}]"#,
-    );
-    w("b-broken.json", "[{");
-    w(
-        "c-badhost.json",
-        r#"[{"service":{"name":"evil","base_url":"https://{{x}}.example","auth":{"type":"none"}},"actions":[{"title":"x","profile":{"name":"evil-x","risk":"low","http":{"method":"GET","url":"/"}}}]}]"#,
-    );
-    w(
-        "d-escape.json",
-        r#"[{"service":{"name":"esc","base_url":"https://a.example","auth":{"type":"none"}},"actions":[{"title":"x","profile":{"name":"esc-x","risk":"low","http":{"method":"GET","url":"//evil.example/"}}}]}]"#,
-    );
-    w(
-        "e-dup.json",
-        r#"[{"service":{"name":"github","base_url":"https://a.example","auth":{"type":"none"}},"actions":[{"title":"x","profile":{"name":"dup-x","risk":"low","http":{"method":"GET","url":"/"}}}]}]"#,
-    );
-    w(
-        "f-dupaction.json",
-        r#"[{"service":{"name":"other","base_url":"https://a.example","auth":{"type":"none"}},"actions":[{"title":"x","profile":{"name":"github-whoami","risk":"low","http":{"method":"GET","url":"/"}}}]}]"#,
-    );
-    std::os::unix::fs::symlink(
-        dir.path().join("a-good.json"),
-        dir.path().join("g-link.json"),
-    )
-    .unwrap();
-    std::fs::create_dir(dir.path().join("h-dir.json")).unwrap();
-    w(
-        "i-notjson.txt",
-        &std::fs::read_to_string(dir.path().join("a-good.json"))
-            .unwrap()
-            .replace("acme", "txt"),
-    );
-    w("j-big.json", &format!("[{}]", " ".repeat(1 << 20)));
-    let got = web::read_catalog(Some(dir.path()));
-    assert_eq!(got.len(), base + 1, "want base plus acme");
-    assert_eq!(got[base].service.as_ref().unwrap().name, "acme");
-    assert_eq!(
-        web::read_catalog(Some(&dir.path().join("missing"))).len(),
-        base
-    );
-}
-
 #[tokio::test(flavor = "multi_thread")]
-async fn catalog_over_http() {
+async fn secret_templates_are_served_and_catalog_is_gone() {
     let e = setup(minute()).await;
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("x.json"), r#"[{"title":"Mine","hint":"h","custom":true,"actions":[{"title":"t","profile":{"name":"mine-x","risk":"low","http":{"method":"GET","url":"https://a.example/"}}}]}]"#).unwrap();
-    let mut s = Server::new(e.c.clone(), "", e.dir.join("audit.jsonl"), false);
-    s.catalog_dir = Some(dir.path().to_path_buf());
-    let (url, _) = start(s).await;
-    let r = Http::new(&url)
-        .send("GET", "/catalog.json", None, &[])
-        .await;
+    let r = e.hc.send("GET", "/secret-templates.json", None, &[]).await;
     assert_eq!(r.code, 200);
     assert_eq!(r.header("content-type"), "application/json");
-    let v = r.json();
-    let last = v.as_array().unwrap().last().unwrap().clone();
-    assert_eq!(last["title"], "Mine");
-    assert_eq!(last["custom"], true);
-    assert!(
-        last.get("service").is_none() && last.get("title_en").is_none(),
-        "{last}"
-    );
+    assert!(r.json().as_array().is_some_and(|a| !a.is_empty()));
     let r = e.hc.send("GET", "/catalog.json", None, &[]).await;
-    assert_eq!(
-        r.json().as_array().unwrap().len(),
-        v.as_array().unwrap().len() - 1
-    );
+    assert_eq!(r.code, 404);
 }
 
 // --- secrets with several fields over HTTP ---

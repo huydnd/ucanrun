@@ -55,7 +55,7 @@ A database login has a host, a port, a user and a password. Choose **Several fie
 - Private fields follow the rules above and are masked in the output.
 - `{{secret:db}}` without a field is refused.
 
-For tighter control, the Advanced tab defines fixed actions agents may only fill in, see [fixed actions](catalog.md).
+For tighter control, the Advanced tab defines fixed actions agents may only fill in, see [fixed actions](fixed-actions.md).
 
 ## Lost your phone
 

@@ -97,6 +97,13 @@ img.qr{display:block;width:180px;height:180px;background:#fff;padding:8px;border
 .tile{border:1px solid var(--line);border-radius:8px;padding:10px;min-width:0;background:var(--panel)}
 .tile input{margin-top:6px}
 .tile .row{margin-top:8px}
+.tiles.compact{grid-template-columns:repeat(auto-fill,minmax(170px,1fr))}
+button.tile.pick{display:flex;flex-direction:column;align-items:flex-start;gap:3px;text-align:left;font-weight:400;min-height:0}
+button.tile.pick b{font-weight:600}
+button.tile.pick small{line-height:1.35}
+button.tile.pick:hover{border-color:var(--accent)}
+button.tile.pick.on{border-color:var(--accent);background:var(--accent-soft)}
+.card.add h3{margin:12px 0 6px}
 .chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px}
 .chip{padding:1px 9px;min-height:26px;border-radius:99px;font:12.5px ui-monospace,Menlo,Consolas,monospace}
 .param{border-top:1px solid var(--line);padding:8px 0}

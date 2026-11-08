@@ -37,7 +37,7 @@ Agent:
   ucr mcp                   stdio MCP server
 
 Environment: UCANRUN_PUBLIC_URL, UCANRUN_GATE_TOKEN, UCANRUN_GATE=off,
-UCANRUN_ENABLE_EXEC=1, UCANRUN_LANG=vi|en, UCANRUN_UNLOCK_FILE, UCANRUN_CATALOG_DIR, UCANRUN_DATA, UCANRUN_WEB_ADDR, UCANRUN_AGENT_ADDR,
+UCANRUN_ENABLE_EXEC=1, UCANRUN_LANG=vi|en, UCANRUN_UNLOCK_FILE, UCANRUN_DATA, UCANRUN_WEB_ADDR, UCANRUN_AGENT_ADDR,
 UCANRUN_APPROVAL_TTL, UCANRUN_URL, UCANRUN_TOKEN
 ";
 
@@ -314,11 +314,6 @@ async fn serve_core(c: &Arc<Core>, dir: &Path) -> Res {
         dir.join("audit.jsonl"),
         public.starts_with("https://"),
     );
-    let default_catalog = dir.join("catalog.d");
-    s.catalog_dir = Some(PathBuf::from(env(
-        "UCANRUN_CATALOG_DIR",
-        &default_catalog.to_string_lossy(),
-    )));
     if env("UCANRUN_GATE", "") == "off" {
         log(
             "WARN",

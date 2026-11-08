@@ -2,10 +2,7 @@
 //! `internal/web`), so that the UI can be published without exposing the
 //! agent port.
 
-mod catalog;
 mod strict;
-
-pub use catalog::{CatalogAction, CatalogEntry, read_catalog, valid_entry};
 
 use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
@@ -54,14 +51,6 @@ pub(crate) struct Static;
 
 static GATE_PAGE: &[u8] = include_bytes!("../../web/gate.html");
 
-pub(crate) fn log_warn(msg: &str, kv: &[(&str, &str)]) {
-    let mut s = format!("WARN {msg}");
-    for (k, v) in kv {
-        s.push_str(&format!(" {k}={v:?}"));
-    }
-    eprintln!("{s}");
-}
-
 struct Session {
     created: Instant,
     seen: Instant,
@@ -83,7 +72,6 @@ pub struct Server {
     pub audit_path: PathBuf,
     /// Empty turns the access gate off.
     pub gate_token: String,
-    pub catalog_dir: Option<PathBuf>,
     mu: Mutex<Guard>,
 }
 
@@ -330,7 +318,6 @@ impl Server {
             setup_token: setup_token.to_string(),
             audit_path,
             gate_token: String::new(),
-            catalog_dir: None,
             mu: Mutex::new(Guard::default()),
         }
     }
@@ -425,7 +412,6 @@ impl Server {
     /// The human UI.
     pub fn handler(self: &Arc<Self>) -> Router {
         Router::new()
-            .route("/catalog.json", ui(get(catalog)))
             .route("/healthz", ui(get(healthz)))
             .route("/api/status", ui(get(status)))
             .route("/api/setup", ui(post(setup)))
@@ -613,12 +599,6 @@ async fn gate(State(s): State<Arc<Server>>, req: Request, next: Next) -> Respons
 
 async fn healthz() -> Response {
     ok_json()
-}
-
-async fn catalog(State(s): State<Arc<Server>>) -> Response {
-    let dir = s.catalog_dir.clone();
-    let cat = blocking(move || read_catalog(dir.as_deref())).await;
-    write_json(200, &cat)
 }
 
 async fn status(State(s): State<Arc<Server>>, h: HeaderMap) -> Response {
