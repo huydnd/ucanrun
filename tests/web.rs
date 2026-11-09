@@ -2260,8 +2260,63 @@ async fn json_decoding_is_strict() {
     let r = post(json!({"profile": "nope"})).await.unwrap();
     assert_eq!(
         (r.status().as_u16(), r.json::<Value>().await.unwrap()),
-        (404, json!({"error": "not found"}))
+        (404, json!({"error": "not found", "code": "not_found"}))
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn agent_errors_carry_a_code_and_what_to_ask() {
+    let e = setup(minute()).await;
+    let cl = e.token("c", &[]).await;
+    let post = |b: Value| {
+        let (url, tok) = (format!("{}/v1/requests", e.agent), cl.token.clone());
+        async move {
+            let r = reqwest::Client::new()
+                .post(url)
+                .bearer_auth(tok)
+                .json(&b)
+                .send()
+                .await
+                .unwrap();
+            (r.status().as_u16(), r.json::<Value>().await.unwrap())
+        }
+    };
+    let call = |url: &str, h: &str| json!({"call": {"http": {"method": "GET", "url": url, "headers": {"A": h}}}});
+    // gitea has no hosts in this setup.
+    let (code, v) = post(call("https://api.example.com/", "{{secret:gitea}}")).await;
+    assert_eq!((code, v["code"].as_str()), (400, Some("no_hosts")), "{v}");
+    assert!(
+        v["ask_human"].as_str().unwrap().contains("api.example.com"),
+        "{v}"
+    );
+    let (_, v) = post(call("https://api.example.com/", "{{secret:nope}}")).await;
+    assert_eq!(v["code"], "unknown_secret");
+    let (_, v) =
+        post(json!({"call": {"exec": {"argv": ["/bin/cat"], "stdin": "{{secret:gitea}}"}}})).await;
+    assert!(
+        matches!(
+            v["code"].as_str(),
+            Some("exec_off" | "commands_not_allowed")
+        ),
+        "{v}"
+    );
+    let r = reqwest::Client::new()
+        .get(format!("{}/v1/profiles", e.agent))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.json::<Value>().await.unwrap()["code"], "missing_token");
+    let r = reqwest::Client::new()
+        .get(format!("{}/v1/profiles", e.agent))
+        .bearer_auth("ucr_nope")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.json::<Value>().await.unwrap()["code"], "invalid_token");
+    e.c.lock("web");
+    let (code, v) = post(json!({"profile": "auto"})).await;
+    assert_eq!((code, v["code"].as_str()), (423, Some("locked")), "{v}");
+    assert!(v["ask_human"].as_str().unwrap().contains("sign in"));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -2464,14 +2519,17 @@ async fn cli_agent_commands() {
     );
     let o = ucr(&env, &["run", "create", "repo=../x"], None).await;
     assert!(
-        !o.ok && o.stderr.starts_with("ucr: ucanrun: "),
-        "{}",
+        o.code == 65
+            && o.stderr.starts_with("ucr: ucanrun: ")
+            && o.stderr.contains("[code: invalid_request]"),
+        "{} {}",
+        o.code,
         o.stderr
     );
     let o = ucr(&env, &["run", "create", "oops"], None).await;
     assert_eq!(o.stderr, "ucr: param \"oops\" must be k=v\n");
     let o = ucr(&env, &["run", "create", "repo=b"], None).await;
-    assert_eq!(o.code, 1, "pending is not done");
+    assert_eq!(o.code, 75, "pending is not done");
     let o = ucr(&env, &["doctor"], None).await;
     assert!(
         o.ok && o.stdout.starts_with("OK  token: token found\n"),
@@ -2493,9 +2551,15 @@ async fn cli_agent_commands() {
         o.stdout
     );
     let o = ucr(&[("HOME", "/nonexistent")], &["profiles"], None).await;
-    assert_eq!(
-        o.stderr,
-        "ucr: no agent token: set UCANRUN_TOKEN or ~/.config/ucanrun/token\n"
+    assert!(
+        o.code == 77
+            && o.stderr.starts_with(
+                "ucr: no agent token: run ucr login, or set UCANRUN_TOKEN [code: missing_token]\n"
+            )
+            && o.stderr.contains("Ask the human: "),
+        "{} {}",
+        o.code,
+        o.stderr
     );
 }
 
@@ -2811,4 +2875,57 @@ async fn settings_and_custom_templates_over_http() {
         .send("GET", "/api/templates", None, &[("X-Ucanrun", "1")])
         .await;
     assert_eq!(r.code, 401);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cli_login_saves_the_token_and_logout_forgets_it() {
+    let e = setup(minute()).await;
+    let cl = e.token("c", &[]).await;
+    let home = tempfile::tempdir().unwrap();
+    let h = home.path().to_str().unwrap();
+    let env = [("HOME", h), ("XDG_CONFIG_HOME", h)];
+    let o = ucr(&env, &["login", &e.agent], Some("not-a-token\n")).await;
+    assert!(
+        !o.ok && o.stderr.contains("start with ucr_"),
+        "{}",
+        o.stderr
+    );
+    let o = ucr(&env, &["login", &e.agent], Some("ucr_wrong\n")).await;
+    assert!(
+        !o.ok && o.stderr.contains("[code: invalid_token]"),
+        "{}",
+        o.stderr
+    );
+    assert!(
+        !home.path().join("ucanrun/token").exists(),
+        "saved a rejected token"
+    );
+    let o = ucr(&env, &["login", &e.agent], Some(&format!("{}\n", cl.token))).await;
+    assert!(o.ok, "{}", o.stderr);
+    let saved = home.path().join("ucanrun/token");
+    use std::os::unix::fs::PermissionsExt;
+    assert_eq!(
+        std::fs::metadata(&saved).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    // No UCANRUN_URL or UCANRUN_TOKEN: both come from the saved login.
+    let o = ucr(&env, &["profiles"], None).await;
+    assert!(
+        o.ok && o.stdout.contains("\"name\": \"auto\""),
+        "{}",
+        o.stderr
+    );
+    let o = ucr(&env, &["logout"], None).await;
+    assert!(
+        o.ok && o.stderr.starts_with("Removed the saved token"),
+        "{}",
+        o.stderr
+    );
+    let o = ucr(&env, &["profiles"], None).await;
+    assert!(
+        o.code == 77 && o.stderr.contains("[code: missing_token]"),
+        "{} {}",
+        o.code,
+        o.stderr
+    );
 }

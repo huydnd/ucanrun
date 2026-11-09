@@ -43,6 +43,8 @@ No config file is needed. Open `http://127.0.0.1:8780`, enter the access code fr
 - [Quick start](docs/quickstart.md)
 - [Configuration](docs/configuration.md)
 - [Secret templates](docs/templates.md)
+- [Agents on Windows](docs/windows.md)
+- [Agent skill](skills/ucanrun/SKILL.md): copy to `~/.claude/skills/ucanrun`
 - [Fixed actions (advanced)](docs/fixed-actions.md)
 - [Creating profiles](docs/profiles.md)
 - [Root commands over SSH](docs/ssh-sudo.md)

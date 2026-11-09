@@ -45,6 +45,19 @@ Mỗi secret có lựa chọn **TOTP khi duyệt**:
 
 Một yêu cầu cần TOTP nếu có secret nào đặt *Luôn cần*, hoặc nếu việc rủi ro cao mà không phải mọi secret đều đặt *Không cần*. Việc rủi ro cao không dùng secret nào vẫn cần TOTP. Đặt *Không cần TOTP* phải nhập mã TOTP hiện tại, và mục Sức khoẻ bảo mật liệt kê các secret đó. Với *Không cần TOTP*, ai chiếm được Telegram hoặc phiên web là duyệt được; đăng nhập vẫn cần TOTP. Yêu cầu đang chờ giữ nguyên quy tắc lúc được tạo.
 
+## Khôi phục không cần ucanrun
+
+Bản sao lưu là file tar.gz của thư mục dữ liệu, và kho bên trong là age thuần, nên công cụ gốc vẫn lấy lại được secret kể cả khi không còn ucanrun:
+
+```sh
+mkdir restored && tar -xzf ucanrun-backup.tar.gz -C restored
+age -d -o restored/identity.txt restored/vault/identity.age   # hỏi mật khẩu chính
+age -d -i restored/identity.txt restored/vault/secrets/github_token.age
+rm -rf restored   # thư mục này giờ chứa khoá dạng rõ
+```
+
+Secret nhiều trường giải mã ra JSON: `{"ucanrun_fields": {...}}`.
+
 ## Tự chạy, không hỏi
 
 Secret cũng có thể đặt **Tự chạy, không hỏi**. Khi đó lời gọi agent tự soạn chạy ngay nếu mọi secret nó dùng đều đặt như vậy và không cần TOTP: không gửi tin duyệt, nhật ký lần chạy vẫn ghi lại. Lệnh tính là rủi ro cao nên vẫn cần TOTP, trừ khi secret đặt thêm *Không cần TOTP*. Hành động cố định giữ cài đặt riêng của nó. Bật tuỳ chọn này cần mã TOTP hiện tại. Mục Sức khoẻ bảo mật liệt kê các secret này, và báo lỗi nếu một secret tự chạy cho phép máy chủ dạng `*.`, vì agent bị lừa có thể gửi nó tới máy lạ mà không ai thấy.
