@@ -135,10 +135,12 @@ fn main() {
             "secrets" => runtime().block_on(secrets()),
             "run" => run(rest),
             "doctor" => runtime().block_on(doctor()),
-            "mcp" => match Client::from_env() {
-                Ok(c) => runtime().block_on(mcp::serve(c)).map_err(|e| e.to_string()),
-                Err(e) => Err(e),
-            },
+            // Start even without a token: each tool call then answers with
+            // missing_token and what to ask the human, which an agent can act on.
+            "mcp" => {
+                let c = Client::from_env().unwrap_or_else(|_| unsigned_client());
+                runtime().block_on(mcp::serve(c)).map_err(|e| e.to_string())
+            }
             "version" | "--version" => {
                 println!("ucr {}", env!("CARGO_PKG_VERSION"));
                 Ok(())
@@ -255,16 +257,19 @@ fn run(args: &[String]) -> Res {
     Ok(())
 }
 
+/// A client with no token, pointed at the saved or configured server.
+fn unsigned_client() -> Client {
+    let saved = tokenstore::load().unwrap_or_default();
+    let url = if saved.url.is_empty() {
+        env("UCANRUN_URL", "http://127.0.0.1:8781")
+    } else {
+        saved.url
+    };
+    Client::new(&url, "")
+}
+
 async fn doctor() -> Res {
-    let c = Client::from_env().unwrap_or_else(|_| {
-        let saved = tokenstore::load().unwrap_or_default();
-        let url = if saved.url.is_empty() {
-            env("UCANRUN_URL", "http://127.0.0.1:8781")
-        } else {
-            saved.url
-        };
-        Client::new(&url, "")
-    });
+    let c = Client::from_env().unwrap_or_else(|_| unsigned_client());
     let mut failed = false;
     for ch in c.doctor().await {
         if !ch.ok {

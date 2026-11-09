@@ -2929,3 +2929,32 @@ async fn cli_login_saves_the_token_and_logout_forgets_it() {
         o.stderr
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn mcp_starts_without_a_token_and_says_what_to_ask() {
+    let e = setup(minute()).await;
+    let home = tempfile::tempdir().unwrap();
+    let h = home.path().to_str().unwrap();
+    let input = [
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}"#,
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_secrets","arguments":{}}}"#,
+    ]
+    .join("\n")
+        + "\n";
+    let out = ucr(
+        &[
+            ("UCANRUN_URL", &e.agent),
+            ("HOME", h),
+            ("XDG_CONFIG_HOME", h),
+        ],
+        &["mcp"],
+        Some(&input),
+    )
+    .await;
+    assert!(out.ok, "{}", out.stderr);
+    assert!(
+        out.stdout.contains("missing_token") && out.stdout.contains("Ask the human"),
+        "{}",
+        out.stdout
+    );
+}
