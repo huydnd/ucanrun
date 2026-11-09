@@ -211,9 +211,14 @@ fn error_text(e: reqwest::Error) -> String {
 fn make_home() -> std::io::Result<std::path::PathBuf> {
     loop {
         let p = std::env::temp_dir().join(format!("ucr-run-{:016x}", rand::random::<u64>()));
-        let mut b = std::fs::DirBuilder::new();
         #[cfg(unix)]
-        std::os::unix::fs::DirBuilderExt::mode(&mut b, 0o700);
+        let b = {
+            let mut b = std::fs::DirBuilder::new();
+            std::os::unix::fs::DirBuilderExt::mode(&mut b, 0o700);
+            b
+        };
+        #[cfg(not(unix))]
+        let b = std::fs::DirBuilder::new();
         match b.create(&p) {
             Ok(()) => return Ok(p),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
