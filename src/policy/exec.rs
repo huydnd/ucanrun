@@ -209,10 +209,12 @@ fn error_text(e: reqwest::Error) -> String {
 }
 
 fn make_home() -> std::io::Result<std::path::PathBuf> {
-    use std::os::unix::fs::DirBuilderExt;
     loop {
         let p = std::env::temp_dir().join(format!("ucr-run-{:016x}", rand::random::<u64>()));
-        match std::fs::DirBuilder::new().mode(0o700).create(&p) {
+        let mut b = std::fs::DirBuilder::new();
+        #[cfg(unix)]
+        std::os::unix::fs::DirBuilderExt::mode(&mut b, 0o700);
+        match b.create(&p) {
             Ok(()) => return Ok(p),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(e) => return Err(e),
@@ -240,7 +242,6 @@ async fn exec_in(
     timeout: Duration,
     home: &std::path::Path,
 ) -> RunResult {
-    use std::os::unix::fs::OpenOptionsExt;
     let Some(prog) = e.argv.first() else {
         return fail("could not start: empty command");
     };
@@ -249,11 +250,11 @@ async fn exec_in(
         if !data.ends_with('\n') {
             data.push('\n'); // OpenSSH refuses a key without a final newline
         }
-        let w = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
+        let mut o = std::fs::OpenOptions::new();
+        o.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
+        let w = o
             .open(home.join(name))
             .and_then(|mut f| std::io::Write::write_all(&mut f, data.as_bytes()));
         if w.is_err() {
@@ -264,13 +265,29 @@ async fn exec_in(
     cmd.args(&e.argv[1..])
         .current_dir(home)
         .env_clear()
-        .env("PATH", "/usr/local/bin:/usr/bin:/bin")
         .env("HOME", home)
         .env("GIT_TERMINAL_PROMPT", "0")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .process_group(0)
         .kill_on_drop(true);
+    #[cfg(unix)]
+    cmd.env("PATH", "/usr/local/bin:/usr/bin:/bin")
+        .process_group(0);
+    // Most Windows programs fail without these; none of them is a secret.
+    #[cfg(windows)]
+    {
+        let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+        cmd.env("SystemRoot", &root)
+            .env("windir", &root)
+            .env("SystemDrive", root.get(..2).unwrap_or("C:"))
+            .env(
+                "PATH",
+                format!(r"{root}\System32;{root};{root}\System32\WindowsPowerShell\v1.0"),
+            )
+            .env("USERPROFILE", home)
+            .env("TEMP", home)
+            .env("TMP", home);
+    }
     for (k, v) in &e.env {
         cmd.env(k, expand(v, get));
     }
@@ -307,10 +324,13 @@ async fn exec_in(
         s = child.wait() => s,
         _ = tokio::time::sleep(timeout) => {
             timed_out = true;
+            #[cfg(unix)]
             if let Some(pid) = pid {
                 // SAFETY: plain kill(2) on the child's own process group.
                 unsafe { libc::kill(-(pid as i32), libc::SIGKILL) };
             }
+            #[cfg(not(unix))]
+            let _ = pid;
             let _ = child.start_kill();
             child.wait().await
         }

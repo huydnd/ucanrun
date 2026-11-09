@@ -190,7 +190,7 @@ impl Core {
             let a = Action {
                 http: p.http.clone(),
                 exec: p.exec.clone(),
-                timeout_sec: 0,
+                ..Default::default()
             };
             for n in a.secrets() {
                 used.insert(base(&n));

@@ -24,13 +24,13 @@ fn header_safe(s: &str) -> String {
 
 /// This machine's host name, for the run log.
 #[cfg(windows)]
-fn host_name() -> String {
+pub fn host_name() -> String {
     std::env::var("COMPUTERNAME").unwrap_or_default()
 }
 
 /// This machine's host name, for the run log.
 #[cfg(not(windows))]
-fn host_name() -> String {
+pub fn host_name() -> String {
     let mut buf = [0u8; 256];
     // SAFETY: the buffer is valid for its length and gethostname writes at most that.
     let r = unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len()) };
@@ -63,7 +63,8 @@ pub fn exit_code(err: &str) -> i32 {
         | "host_not_allowed"
         | "commands_not_allowed"
         | "exec_off" => 77,
-        "unknown_secret" | "not_found" => 78,
+        "unknown_secret" | "not_found" | "unknown_runner" => 78,
+        "runner_offline" => 75,
         "" => 1,
         _ => 65,
     }
@@ -141,6 +142,9 @@ impl Client {
 
     pub async fn profiles(&self) -> Result<Value, String> {
         self.send(reqwest::Method::GET, "/v1/profiles", None).await
+    }
+    pub async fn runners(&self) -> Result<Value, String> {
+        self.send(reqwest::Method::GET, "/v1/runners", None).await
     }
     pub async fn secrets(&self) -> Result<Value, String> {
         self.send(reqwest::Method::GET, "/v1/secrets", None).await

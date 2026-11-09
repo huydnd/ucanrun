@@ -23,9 +23,13 @@ You reach it through the MCP server `ucanrun` (tools below) or the `ucr` CLI.
    the secret lists. Private secrets never go in the URL or body.
 4. For a program, use `run_command` with an absolute `argv[0]` and no shell.
    Private secrets go in `env`, `stdin` or `files`, never in `argv`.
-5. If `list_profiles` has a fixed action that fits, prefer `run`.
-6. Write a short, specific `reason`. The human decides on it.
-7. The answer has `state`: `done` or `failed` with `result.output`;
+5. To run a command on another machine, `list_runners` (CLI: `ucr runners`)
+   shows each runner, whether it is online, and the programs it allows. Pass
+   `runner`; for root, also `sudo: "{{secret:NAME}}"` with the sudo password
+   (no `env` then). argv[0] must be in that runner's allow list.
+6. If `list_profiles` has a fixed action that fits, prefer `run`.
+7. Write a short, specific `reason`. The human decides on it.
+8. The answer has `state`: `done` or `failed` with `result.output`;
    `pending` means nobody answered yet (poll `get_request` with the `id`);
    `denied` and `expired` are final.
 
@@ -58,8 +62,10 @@ Every refusal has a stable `code` (in the MCP error text and the CLI as
 | `secret_placement` | a private secret is in the URL, body or argv | move it to a header, env, stdin or file |
 | `no_secret_used` | the request uses no secret | run it yourself without ucanrun |
 | `rate_limited` | too many requests | wait, then try once more |
+| `unknown_runner` | no runner with that name | call `list_runners`; if missing, relay `ask_human` |
+| `runner_offline` | the runner is not connected | relay `ask_human`, then retry once the user says so |
 | `invalid_request` | anything else | read the message and fix the request |
 
 `ucr` exits with 77 when only the human can fix it, 75 when trying later may
-work (`locked`, `rate_limited`, `pending`, `expired`), 78 for an unknown
-secret or profile, 65 for a bad request, and 1 otherwise.
+work (`locked`, `rate_limited`, `runner_offline`, `pending`, `expired`), 78 for an unknown
+secret, profile or runner, 65 for a bad request, and 1 otherwise.

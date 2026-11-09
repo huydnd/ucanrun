@@ -1,6 +1,6 @@
 [package]
 name = "ucanrun"
-version = "0.7.2"
+version = "0.8.0"
 edition = "2024"
 license = "MIT"
 description = "Credential broker for AI agents with human approval"
@@ -37,6 +37,8 @@ rust-embed = "8"
 mime_guess = "2"
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 libc = "0.2"
+ed25519-dalek = { version = "2", default-features = false, features = ["std", "zeroize", "rand_core"] }
+toml = { version = "0.8", default-features = false, features = ["parse"] }
 
 [dev-dependencies]
 tempfile = "3"
@@ -49,4 +51,4 @@ strip = true
 panic = "abort"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Credentials", "Win32_System_Console"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Credentials", "Win32_System_Console", "Win32_System_Threading"] }

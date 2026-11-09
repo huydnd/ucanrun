@@ -101,6 +101,22 @@ pub struct State {
     /// this file is signed, not encrypted.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub templates: Vec<SecretTemplate>,
+    /// Machines enrolled to run approved commands.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub runners: BTreeMap<String, RunnerRec>,
+}
+
+/// An enrolled runner: its public keys and the hash of its token.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RunnerRec {
+    pub name: String,
+    /// ed25519, base64: checks the runner's results.
+    pub sign_key: String,
+    /// age X25519 recipient that job secrets are sealed to.
+    pub age_key: String,
+    pub token_hash: String,
+    pub created: String,
 }
 
 fn is_zero(n: &i64) -> bool {

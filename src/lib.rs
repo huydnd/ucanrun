@@ -14,9 +14,9 @@ pub mod client;
 pub mod core;
 pub mod gojson;
 pub mod mcp;
-#[cfg(unix)]
 pub mod policy;
 pub mod prompt;
+pub mod runner;
 #[cfg(unix)]
 pub mod state;
 #[cfg(unix)]

@@ -17,12 +17,14 @@ mod devices;
 mod fields;
 mod health;
 mod lang;
+mod runners;
 #[cfg(test)]
 mod tests;
 
 pub use crate::state::{TelegramCfg, Token};
 pub use fields::{FieldInfo, SecretInfo};
 pub use health::HealthItem;
+pub use runners::RunnerView;
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fmt;
@@ -149,6 +151,13 @@ impl Error {
                     ("secret_placement", None)
                 } else if m.contains("uses no secret") {
                     ("no_secret_used", None)
+                } else if m.starts_with("unknown runner") {
+                    (
+                        "unknown_runner",
+                        ask("Enroll the runner: Overview, Devices and rights, Add runner."),
+                    )
+                } else if m.contains("is offline; ") {
+                    ("runner_offline", how(tail))
                 } else {
                     ("invalid_request", None)
                 }
@@ -404,6 +413,7 @@ struct Inner {
     recent: HashMap<String, Vec<SystemTime>>,
     /// Last web, Telegram or agent activity, for the idle auto lock.
     last_active: SystemTime,
+    runners: runners::Hub,
 }
 
 /// Bounds of the idle auto lock, in minutes.
@@ -634,7 +644,7 @@ fn action_of(p: &Profile) -> Action {
     Action {
         http: p.http.clone(),
         exec: p.exec.clone(),
-        timeout_sec: 0,
+        ..Default::default()
     }
 }
 
@@ -668,6 +678,7 @@ impl Core {
                 pair_fails: 0,
                 last_active: UNIX_EPOCH,
                 recent: HashMap::new(),
+                runners: runners::Hub::default(),
             }),
             login_mu: Mutex::new(()),
             rt,
@@ -1579,7 +1590,7 @@ impl Core {
             return Err(Error::Forbidden);
         }
         let stored = st.profiles.get(profile).ok_or(Error::NotFound)?;
-        if stored.exec.is_some() && !self.opt.allow_exec {
+        if stored.exec.is_some() && stored.runner.is_empty() && !self.opt.allow_exec {
             return Err(Error::ExecOff);
         }
         let p = policy::resolve(stored, &st.connections)?;
@@ -1623,7 +1634,7 @@ impl Core {
             );
             return Err(Error::Forbidden);
         }
-        if call.exec.is_some() && !self.opt.allow_exec {
+        if call.exec.is_some() && call.runner.is_empty() && !self.opt.allow_exec {
             return Err(Error::ExecOff);
         }
         // Secrets outside the token's workspaces do not exist for it.
@@ -1673,6 +1684,7 @@ impl Core {
         if pending >= MAX_PENDING {
             return Err(Error::Busy);
         }
+        self.check_runner_locked(g, &p.runner)?;
         let now = self.now();
         let mut kept: Vec<SystemTime> = g
             .recent
@@ -1911,9 +1923,21 @@ impl Core {
         let get = |n: &str| fields::resolve(vault, n);
         let mut stop = self.shutdown.subscribe();
         let started = Instant::now();
-        let mut res = tokio::select! {
-            r = policy::run_with(&action, get, &public) => r,
-            _ = stop.wait_for(|v| *v) => RunResult { ok: false, exit: -1, output: "context canceled".into() },
+        let mut res = if action.runner.is_empty() {
+            tokio::select! {
+                r = policy::run_with(&action, get, &public) => r,
+                _ = stop.wait_for(|v| *v) => RunResult { ok: false, exit: -1, output: "context canceled".into() },
+            }
+        } else {
+            // The runner redacts too; the values are redacted here again below.
+            let mut r = self.run_on_runner(&id, &action, &public).await;
+            let vals: Vec<Vec<u8>> = refs
+                .iter()
+                .filter(|n| !public.contains(*n))
+                .filter_map(|n| fields::resolve(vault, n).ok())
+                .collect();
+            r.output = policy::redact(&r.output, &vals);
+            r
         };
         let extra = fields::private_values(vault, &refs, &meta);
         if !extra.is_empty() {

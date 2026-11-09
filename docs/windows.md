@@ -43,24 +43,25 @@ For Claude Code, also copy `skills/ucanrun` from this repository to
 `%USERPROFILE%\.claude\skills\ucanrun`, so the agent knows when and how to use
 ucanrun.
 
-## Commands that need administrator rights
+## Running commands on Windows
 
-`ucr.exe` only sends requests; the server runs them. To run something on the
-Windows machine itself, the server connects over SSH:
+Enroll the Windows machine as a runner (see [runners.md](runners.md)). It then
+runs approved commands with the rights of your user, not as administrator:
+Windows has no `sudo -S` to raise rights for one approved command.
 
-1. Turn on the OpenSSH Server on Windows.
-2. Make a key for ucanrun and put its public half in
-   `C:\ProgramData\ssh\administrators_authorized_keys`, so sessions with it run
-   as an administrator. Limit it to the server's address.
-3. Save the private key in ucanrun with the **SSH key** template, set to
-   **Always ask for TOTP**.
-4. Create a fixed action, for example
-   `powershell -NoProfile -Command Restart-Service <name>`, with the service
-   picked from a list. Do not let agents write administrator commands
-   themselves: SSH hands the command to a shell on Windows.
+```powershell
+ucr.exe runner enroll http://ucanrun-server:8781 ABCDE-FGHJK --name pc
+notepad $env:APPDATA\ucanrun\runner.toml
+powershell -ExecutionPolicy Bypass -File runner-windows.ps1
+```
+
+For administrator commands, the server can still connect over SSH with a key
+in `C:\ProgramData\ssh\administrators_authorized_keys`, saved in ucanrun with
+**Always ask for TOTP**, through a fixed action. Do not let agents write those
+commands themselves: SSH hands the command to a shell on Windows.
 
 ## Limits
 
 - The server itself does not run on Windows.
-- Running commands directly on Windows, without SSH, needs a runner on the
-  Windows machine, which is planned (see `docs/design/runners.md`).
+- A runner started from an elevated prompt, or from the SSH session of an
+  administrator, has administrator rights. Start it with the scheduled task.
