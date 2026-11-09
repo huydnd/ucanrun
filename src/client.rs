@@ -112,9 +112,12 @@ impl Client {
         let mut req = self
             .http
             .request(method, format!("{}{path}", self.url))
-            .bearer_auth(&self.token)
             .header("X-Ucanrun-Device", header_safe(&self.device))
             .header("X-Ucanrun-App", header_safe(&self.app));
+        // No header at all without a token, so the server says missing_token.
+        if !self.token.is_empty() {
+            req = req.bearer_auth(&self.token);
+        }
         if let Some(b) = body {
             req = req.json(&b);
         }
