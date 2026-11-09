@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/assets/logo-wordmark.svg" alt="ucanrun" width="260"></p>
+<p align="center"><img src="docs/assets/logo-wordmark.svg" alt="ucanrun" width="420"></p>
 
 # ucanrun
 
