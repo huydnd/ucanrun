@@ -23,6 +23,13 @@ fn header_safe(s: &str) -> String {
 }
 
 /// This machine's host name, for the run log.
+#[cfg(windows)]
+fn host_name() -> String {
+    std::env::var("COMPUTERNAME").unwrap_or_default()
+}
+
+/// This machine's host name, for the run log.
+#[cfg(not(windows))]
 fn host_name() -> String {
     let mut buf = [0u8; 256];
     // SAFETY: the buffer is valid for its length and gethostname writes at most that.
@@ -40,9 +47,32 @@ pub struct Check {
     pub detail: String,
 }
 
+/// The exit status `ucr` uses for an agent error code, after sysexits.h:
+/// 77 when only the human can grant it, 75 when trying again later can work.
+pub fn exit_code(err: &str) -> i32 {
+    let code = err
+        .split_once("[code: ")
+        .and_then(|(_, r)| r.split_once(']'))
+        .map_or("", |(c, _)| c);
+    match code {
+        "locked" | "rate_limited" => 75,
+        "forbidden"
+        | "invalid_token"
+        | "missing_token"
+        | "no_hosts"
+        | "host_not_allowed"
+        | "commands_not_allowed"
+        | "exec_off" => 77,
+        "unknown_secret" | "not_found" => 78,
+        "" => 1,
+        _ => 65,
+    }
+}
+
 impl Client {
     pub fn new(url: &str, token: &str) -> Client {
         let http = reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(130))
             .build()
             .expect("http client");
@@ -55,21 +85,20 @@ impl Client {
         }
     }
 
-    /// Reads UCANRUN_URL and UCANRUN_TOKEN, then ~/.config/ucanrun/token.
+    /// Reads UCANRUN_URL and UCANRUN_TOKEN, then what `ucr login` saved:
+    /// the Windows Credential Manager, or ~/.config/ucanrun/token.
     pub fn from_env() -> Result<Client, String> {
-        let url = std::env::var("UCANRUN_URL")
-            .ok()
-            .filter(|s| !s.is_empty())
+        let saved = crate::tokenstore::load().unwrap_or_default();
+        let env = |k: &str| std::env::var(k).ok().filter(|s| !s.is_empty());
+        let url = env("UCANRUN_URL")
+            .or_else(|| (!saved.url.is_empty()).then(|| saved.url.clone()))
             .unwrap_or_else(|| "http://127.0.0.1:8781".into());
-        let mut token = std::env::var("UCANRUN_TOKEN").unwrap_or_default();
+        let token = env("UCANRUN_TOKEN").unwrap_or(saved.token);
         if token.is_empty() {
-            let home = std::env::var("HOME").unwrap_or_default();
-            token = std::fs::read_to_string(format!("{home}/.config/ucanrun/token"))
-                .map_err(|_| {
-                    "no agent token: set UCANRUN_TOKEN or ~/.config/ucanrun/token".to_string()
-                })?
-                .trim()
-                .to_string();
+            return Err(format!(
+                "no agent token: run ucr login, or set UCANRUN_TOKEN [code: missing_token]\nAsk the human: Create an agent token on the Agent tokens tab, then run ucr login (saved in {}).",
+                crate::tokenstore::location()
+            ));
         }
         Ok(Client::new(&url, &token))
     }
@@ -94,7 +123,15 @@ impl Client {
         let v: Value = resp.json().await.unwrap_or(Value::Null);
         if !status.is_success() {
             let msg = v.get("error").and_then(Value::as_str).unwrap_or("");
-            return Err(format!("ucanrun: {msg} (HTTP {})", status.as_u16()));
+            let mut e = format!("ucanrun: {msg} (HTTP {})", status.as_u16());
+            // Agents branch on the code; the human fixes what ask_human says.
+            if let Some(c) = v.get("code").and_then(Value::as_str) {
+                e.push_str(&format!(" [code: {c}]"));
+            }
+            if let Some(a) = v.get("ask_human").and_then(Value::as_str) {
+                e.push_str(&format!("\nAsk the human: {a}"));
+            }
+            return Err(e);
         }
         Ok(v)
     }

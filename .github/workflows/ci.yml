@@ -1,6 +1,19 @@
 name: ci
 on: [push, pull_request]
 jobs:
+  # Windows gets the agent side only: ucr.exe with login, run, mcp.
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.99.1"
+          components: clippy
+      - run: cargo clippy --locked --bin ucr -- -D warnings
+      - run: cargo build --locked --release --bin ucr
+      - run: target/release/ucr.exe version
+        shell: bash
   test:
     strategy:
       matrix:

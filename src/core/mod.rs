@@ -103,6 +103,59 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {}
 
 impl Error {
+    /// A stable code agents branch on, and what to ask the human when only
+    /// the human can fix it. Messages may change; codes do not.
+    pub fn agent_code(&self) -> (&'static str, Option<String>) {
+        let ask = |s: &str| Some(s.to_string());
+        match self {
+            Error::Locked => (
+                "locked",
+                ask("Open the ucanrun web UI and sign in to unlock the vault."),
+            ),
+            Error::Forbidden => (
+                "forbidden",
+                ask(
+                    "Allow this action for the agent token on the Agent tokens tab, or use a permitted profile and workspace.",
+                ),
+            ),
+            Error::NotFound => ("not_found", None),
+            Error::Busy => ("rate_limited", None),
+            Error::ExecOff => (
+                "exec_off",
+                ask("Run the server with UCANRUN_ENABLE_EXEC=1 and the exec image."),
+            ),
+            Error::Policy(_) | Error::Msg(_) => {
+                let m = self.to_string();
+                // The part after "; ask the owner" is already an instruction.
+                let tail = m
+                    .split_once("; ")
+                    .map(|(_, t)| t.trim_start_matches("ask the owner to ").to_string());
+                let how = |t: Option<String>| t.map(|t| format!("Please {t}."));
+                if m.contains("has no allowed hosts yet") {
+                    ("no_hosts", how(tail))
+                } else if m.contains("is not allowed in commands") {
+                    ("commands_not_allowed", how(tail))
+                } else if m.contains("may not be sent to") {
+                    (
+                        "host_not_allowed",
+                        ask("Add this host to the secret on the Secrets tab if you trust it."),
+                    )
+                } else if m.starts_with("unknown secret") || m.starts_with("unknown field") {
+                    ("unknown_secret", None)
+                } else if m.contains("has fields, use") {
+                    ("needs_field", None)
+                } else if m.contains("headers only") || m.contains("argv is visible") {
+                    ("secret_placement", None)
+                } else if m.contains("uses no secret") {
+                    ("no_secret_used", None)
+                } else {
+                    ("invalid_request", None)
+                }
+            }
+            _ => ("error", None),
+        }
+    }
+
     /// The HTTP status the Go web layer gives this error.
     pub fn status(&self) -> u16 {
         match self {

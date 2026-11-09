@@ -48,6 +48,7 @@ jobs:
           - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl, name: linux-arm64 }
           - { os: macos-latest, target: aarch64-apple-darwin, name: darwin-arm64 }
           - { os: macos-latest, target: x86_64-apple-darwin, name: darwin-amd64 }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, name: windows-amd64, ext: .exe }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -58,9 +59,10 @@ jobs:
       - if: contains(matrix.target, 'musl')
         run: sudo apt-get update && sudo apt-get install -y musl-tools
       - run: cargo build --release --locked --bin ucr --target ${{ matrix.target }}
-      - run: |
+      - shell: bash
+        run: |
           mkdir dist
-          cp target/${{ matrix.target }}/release/ucr dist/ucr-${{ matrix.name }}
+          cp target/${{ matrix.target }}/release/ucr${{ matrix.ext }} dist/ucr-${{ matrix.name }}${{ matrix.ext }}
       - uses: actions/upload-artifact@v4
         with:
           name: ucr-${{ matrix.name }}

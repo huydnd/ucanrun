@@ -144,6 +144,26 @@ fn fail(e: core::Error) -> Response {
     err_json(e.status(), &e.to_string())
 }
 
+/// Errors for agents carry a stable `code` and, when only the human can fix
+/// it, `ask_human`. `error` keeps the message, as before.
+fn agent_fail(e: core::Error) -> Response {
+    let (code, ask) = e.agent_code();
+    let mut v = json!({"error": e.to_string(), "code": code});
+    if let Some(a) = ask {
+        v["ask_human"] = json!(a);
+    }
+    write_json(e.status(), &v)
+}
+
+macro_rules! trya {
+    ($e:expr) => {
+        match $e {
+            Ok(v) => v,
+            Err(e) => return agent_fail(e.into()),
+        }
+    };
+}
+
 fn ok_json() -> Response {
     write_json(200, &json!({"ok": true}))
 }
@@ -500,9 +520,23 @@ impl Server {
 
     async fn bearer(&self, h: &HeaderMap) -> Result<Token, Box<Response>> {
         let Some(tok) = header_str(h, "authorization").strip_prefix("Bearer ") else {
-            return Err(Box::new(err_json(401, "missing token")));
+            return Err(Box::new(write_json(
+                401,
+                &json!({"error": "missing token", "code": "missing_token",
+                    "ask_human": "Create an agent token on the Agent tokens tab and give it to the agent (ucr login, or UCANRUN_TOKEN)."}),
+            )));
         };
-        self.core.authenticate(tok).map_err(|e| Box::new(fail(e)))
+        self.core.authenticate(tok).map_err(|e| {
+            if matches!(e, core::Error::Forbidden) {
+                // An unknown token, not a missing permission.
+                return Box::new(write_json(
+                    403,
+                    &json!({"error": "forbidden", "code": "invalid_token",
+                        "ask_human": "This agent token is unknown or revoked. Create a new one on the Agent tokens tab."}),
+                ));
+            }
+            Box::new(agent_fail(e))
+        })
     }
 }
 
@@ -1289,7 +1323,7 @@ async fn agent_profiles(State(s): State<Arc<Server>>, h: HeaderMap) -> Response 
         Ok(t) => t,
         Err(r) => return *r,
     };
-    write_json(200, &tryf!(s.core.profiles_for(&t)))
+    write_json(200, &trya!(s.core.profiles_for(&t)))
 }
 
 async fn agent_secrets(State(s): State<Arc<Server>>, h: HeaderMap) -> Response {
@@ -1298,7 +1332,7 @@ async fn agent_secrets(State(s): State<Arc<Server>>, h: HeaderMap) -> Response {
         Err(r) => return *r,
     };
     let c = s.core.clone();
-    write_json(200, &tryf!(blocking(move || c.secrets_for(&t)).await))
+    write_json(200, &trya!(blocking(move || c.secrets_for(&t)).await))
 }
 
 #[derive(Deserialize, Default)]
@@ -1327,7 +1361,7 @@ async fn agent_submit(State(s): State<Arc<Server>>, h: HeaderMap, b: Body) -> Re
             .core
             .submit_from(&t, &client, &input.profile, input.params, &input.reason),
     };
-    let mut q = tryf!(q);
+    let mut q = trya!(q);
     if input.wait_sec > 0 {
         let d = Duration::from_secs(input.wait_sec.min(110) as u64);
         if let Some(r) = s.core.wait(&q.id, Some(d)).await {
@@ -1344,7 +1378,7 @@ async fn agent_get(State(s): State<Arc<Server>>, h: HeaderMap, Path(id): Path<St
     };
     match s.core.get(&id) {
         Some(q) if q.caller == t.name => write_json(200, &q),
-        _ => err_json(404, "not found"),
+        _ => agent_fail(core::Error::NotFound),
     }
 }
 
