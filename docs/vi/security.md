@@ -45,6 +45,10 @@ Mỗi secret có lựa chọn **TOTP khi duyệt**:
 
 Một yêu cầu cần TOTP nếu có secret nào đặt *Luôn cần*, hoặc nếu việc rủi ro cao mà không phải mọi secret đều đặt *Không cần*. Việc rủi ro cao không dùng secret nào vẫn cần TOTP. Đặt *Không cần TOTP* phải nhập mã TOTP hiện tại, và mục Sức khoẻ bảo mật liệt kê các secret đó. Với *Không cần TOTP*, ai chiếm được Telegram hoặc phiên web là duyệt được; đăng nhập vẫn cần TOTP. Yêu cầu đang chờ giữ nguyên quy tắc lúc được tạo.
 
+## Tự chạy, không hỏi
+
+Secret cũng có thể đặt **Tự chạy, không hỏi**. Khi đó lời gọi agent tự soạn chạy ngay nếu mọi secret nó dùng đều đặt như vậy và không cần TOTP: không gửi tin duyệt, nhật ký lần chạy vẫn ghi lại. Lệnh tính là rủi ro cao nên vẫn cần TOTP, trừ khi secret đặt thêm *Không cần TOTP*. Hành động cố định giữ cài đặt riêng của nó. Bật tuỳ chọn này cần mã TOTP hiện tại. Mục Sức khoẻ bảo mật liệt kê các secret này, và báo lỗi nếu một secret tự chạy cho phép máy chủ dạng `*.`, vì agent bị lừa có thể gửi nó tới máy lạ mà không ai thấy.
+
 ## Nhật ký lần chạy
 
 Mỗi lần chạy xong được ghi vào nhật ký audit: agent (tên token), phần mềm agent và tên máy do máy agent tự khai, các secret đã dùng, lệnh đúng như người duyệt thấy, kết quả và thời gian xử lý. **Nhật ký → Lần chạy** liệt kê và lọc được. Tên máy và phần mềm do phía agent tự khai; thứ xác định agent là token. Giá trị secret không bao giờ có trong nhật ký.

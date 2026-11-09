@@ -41,6 +41,10 @@ pub struct SecretMeta {
     /// A token limited to workspaces sees and uses only their secrets.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub workspace: String,
+    /// `auto` runs calls the agent writes with this secret without asking,
+    /// as long as they need no TOTP. Empty asks every time.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub approve: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub fields: Vec<FieldMeta>,
 }
@@ -64,6 +68,17 @@ pub fn valid_workspace(w: &str) -> Result<(), Error> {
 /// The secret a reference such as `db.host` belongs to.
 pub fn secret_of<'a>(r: &'a str, meta: &BTreeMap<String, SecretMeta>) -> &'a str {
     split_ref(r, &|n| meta.contains_key(n)).0
+}
+
+pub const APPROVE_AUTO: &str = "auto";
+
+/// Whether every secret an agent call uses lets it run without asking.
+pub fn auto_approved(secrets: &[String], meta: &BTreeMap<String, SecretMeta>) -> bool {
+    !secrets.is_empty()
+        && secrets.iter().all(|n| {
+            meta.get(secret_of(n, meta))
+                .is_some_and(|m| m.approve == APPROVE_AUTO)
+        })
 }
 
 pub const TOTP_ALWAYS: &str = "always";
@@ -110,6 +125,9 @@ impl SecretMeta {
             return err("totp must be empty, always or never");
         }
         valid_workspace(&self.workspace)?;
+        if !matches!(self.approve.as_str(), "" | APPROVE_AUTO) {
+            return err("approve must be empty or auto");
+        }
         for h in &self.hosts {
             if !HOST_RE.is_match(h) {
                 return err(format!(
@@ -263,6 +281,14 @@ pub fn from_call(c: &Call, meta: &BTreeMap<String, SecretMeta>) -> Result<Profil
                     continue;
                 }
                 let (s, _) = split_ref(&n, &|x| meta.contains_key(x));
+                // Tell the agent what the owner has to do, so it can ask.
+                if meta[s].hosts.is_empty() {
+                    return err(format!(
+                        "secret {} has no allowed hosts yet; ask the owner to add {} to it on the Secrets tab",
+                        gourl::quote(&n),
+                        u.hostname()
+                    ));
+                }
                 if !meta[s].allows_host(&u) {
                     return err(format!(
                         "secret {} may not be sent to {}",
@@ -293,7 +319,7 @@ pub fn from_call(c: &Call, meta: &BTreeMap<String, SecretMeta>) -> Result<Profil
                 let (s, _) = split_ref(&n, &|x| meta.contains_key(x));
                 if !meta[s].allow_commands {
                     return err(format!(
-                        "secret {} is not allowed in commands",
+                        "secret {} is not allowed in commands; ask the owner to turn on \"allow in commands\" for it",
                         gourl::quote(&n)
                     ));
                 }

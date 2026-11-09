@@ -535,6 +535,7 @@ fn check_template(t: &state::SecretTemplate) -> Result<()> {
         allow_commands: t.allow_commands,
         totp: t.totp.clone(),
         workspace: t.workspace.clone(),
+        approve: String::new(),
         fields: t
             .fields
             .iter()
@@ -1076,10 +1077,25 @@ impl Core {
     /// Waiving TOTP needs a current code, so an open session alone cannot
     /// weaken approvals. Recovery codes do not count here.
     pub fn authorize_secret_totp(&self, name: &str, mode: &str, code: &str) -> Result<()> {
+        self.authorize_secret_change(name, mode, "", code)
+    }
+
+    /// Checks changes that weaken approvals before anything is written:
+    /// waiving TOTP and running without asking both need a current code, so
+    /// an open session alone cannot do them. Recovery codes do not count.
+    pub fn authorize_secret_change(
+        &self,
+        name: &str,
+        totp: &str,
+        approve: &str,
+        code: &str,
+    ) -> Result<()> {
         let mut g = self.inner();
         let st = g.st.as_ref().ok_or(Error::Locked)?;
-        let old = st.secrets.get(name).map_or("", |m| m.totp.as_str());
-        if mode == policy::TOTP_NEVER && old != policy::TOTP_NEVER && st.totp_enabled {
+        let old = st.secrets.get(name).cloned().unwrap_or_default();
+        let weaker = (totp == policy::TOTP_NEVER && old.totp != policy::TOTP_NEVER)
+            || (approve == policy::APPROVE_AUTO && old.approve != policy::APPROVE_AUTO);
+        if weaker && st.totp_enabled {
             self.check_totp_locked(&mut g, code)?;
         }
         Ok(())
@@ -1169,7 +1185,8 @@ impl Core {
             "web",
             json!({"name": name, "hosts": hosts, "commands": m.allow_commands,
                 "totp": if m.totp.is_empty() { Value::Null } else { json!(m.totp) },
-                "workspace": if m.workspace.is_empty() { Value::Null } else { json!(m.workspace) }}),
+                "workspace": if m.workspace.is_empty() { Value::Null } else { json!(m.workspace) },
+                "approve": if m.approve.is_empty() { Value::Null } else { json!(m.approve) }}),
         );
         st.secrets.insert(name.to_string(), m);
         self.save_locked(&mut g)
@@ -1675,8 +1692,13 @@ impl Core {
             self.finish_locked(g, &id, ReqState::Failed, "audit");
             return Err(Error::Msg("cannot record the request".into()));
         }
-        // A secret that always needs TOTP also stops auto approval.
-        if p.auto_approve && !req.totp {
+        // A secret that always needs TOTP also stops auto approval. A call the
+        // agent wrote runs at once only when every secret in it says so.
+        let secret_auto = profile == policy::ADHOC_PROFILE
+            && g.st
+                .as_ref()
+                .is_some_and(|s| policy::auto_approved(&g.reqs[&id].action.secrets(), &s.secrets));
+        if (p.auto_approve || secret_auto) && !req.totp {
             self.start_locked(g, &id, "auto");
             return Ok(g.reqs[&id].req.clone());
         }

@@ -14,4 +14,12 @@ jobs:
           components: rustfmt, clippy
       - run: cargo fmt --check
       - run: cargo clippy --locked --all-targets -- -D warnings
-      - run: cargo test --locked
+      # Annotations are public, unlike raw logs: list what failed there.
+      - name: cargo test
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --locked --no-fail-fast 2>&1 | tee test.log || {
+            grep -E "^---- |panicked at|^test result" test.log | head -20 | while IFS= read -r l; do echo "::error::$l"; done
+            exit 1
+          }

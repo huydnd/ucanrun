@@ -177,7 +177,7 @@ fn private_field_keeps_the_rules() {
     let c = exec_call(&["/usr/bin/psql"], &[("P", "{{secret:nocmd.password}}")]);
     assert_eq!(
         from_call(&c, &meta).unwrap_err().0,
-        "secret \"nocmd.password\" is not allowed in commands"
+        "secret \"nocmd.password\" is not allowed in commands; ask the owner to turn on \"allow in commands\" for it"
     );
     let c = exec_call(&["/usr/bin/psql", "{{secret:db.password}}"], &[]);
     assert_eq!(
@@ -374,14 +374,15 @@ async fn run_exec_stdin_cwd_and_timeout() {
 
 #[tokio::test]
 async fn run_exec_files_are_private_and_end_with_newline() {
-    let mut a = exec_action(&[bin("stat"), "-c", "%a", "key"], &[], "", 10);
+    // ls is the same on Linux and macOS; stat's flags are not.
+    let mut a = exec_action(&[bin("ls"), "-l", "key"], &[], "", 10);
     a.exec
         .as_mut()
         .unwrap()
         .files
         .insert("key".into(), "{{secret:tok}}".into());
     let r = run(&a, getter).await;
-    assert_eq!(r.output.trim(), "600", "{r:?}");
+    assert!(r.output.starts_with("-rw-------"), "{r:?}");
     let mut a = exec_action(&[bin("cat"), "key"], &[], "", 10);
     a.exec
         .as_mut()
