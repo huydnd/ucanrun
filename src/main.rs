@@ -33,8 +33,15 @@ Agent (Linux, macOS, Windows):
   ucr secrets               list secrets you may use (never their values)
   ucr profiles              list permitted actions
   ucr run PROFILE [k=v...]  request an action (--reason \"text\")
+  ucr runners               list runners and what each allows
   ucr doctor                check agent configuration and server connection
   ucr mcp                   stdio MCP server
+
+Runner, on a machine that runs approved commands (Linux, macOS, Windows):
+  ucr runner enroll URL CODE [--name NAME]  pair with the server (code from the web UI)
+  ucr runner serve          ask the server for work and run it (--dir DIR for the keys)
+  ucr runner status         show keys, user and the rules in runner.toml
+  ucr runner forget         remove this machine's runner keys
 
 Environment: UCANRUN_PUBLIC_URL, UCANRUN_GATE_TOKEN, UCANRUN_GATE=off,
 UCANRUN_ENABLE_EXEC=1, UCANRUN_LANG=vi|en, UCANRUN_UNLOCK_FILE, UCANRUN_DATA, UCANRUN_WEB_ADDR, UCANRUN_AGENT_ADDR,
@@ -135,6 +142,8 @@ fn main() {
             "secrets" => runtime().block_on(secrets()),
             "run" => run(rest),
             "doctor" => runtime().block_on(doctor()),
+            "runners" => runtime().block_on(runners()),
+            "runner" => runner(rest),
             // Start even without a token: each tool call then answers with
             // missing_token and what to ask the human, which an agent can act on.
             "mcp" => {
@@ -216,6 +225,35 @@ async fn secrets() -> Res {
     let c = Client::from_env()?;
     print_json(&c.secrets().await?);
     Ok(())
+}
+
+async fn runners() -> Res {
+    let c = Client::from_env()?;
+    print_json(&c.runners().await?);
+    Ok(())
+}
+
+fn runner(args: &[String]) -> Res {
+    use ucanrun::runner::local;
+    // --dir picks the key directory, for services that get no environment.
+    let mut args = args.to_vec();
+    if let Some(i) = args.iter().position(|a| a == "--dir") {
+        let Some(d) = args.get(i + 1).cloned() else {
+            return Err("--dir needs a path".into());
+        };
+        args.drain(i..=i + 1);
+        // SAFETY: set before the runtime or any other thread starts.
+        unsafe { std::env::set_var("UCANRUN_RUNNER_DIR", d) };
+    }
+    match args.first().map(String::as_str) {
+        Some("enroll") => runtime().block_on(local::enroll(&args[1..])),
+        Some("serve") => runtime().block_on(local::serve()),
+        Some("status") => local::status(),
+        Some("forget") => local::forget(),
+        _ => {
+            Err("usage: ucr runner enroll URL CODE [--name NAME] | serve | status | forget".into())
+        }
+    }
 }
 
 async fn profiles() -> Res {

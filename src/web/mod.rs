@@ -494,6 +494,9 @@ impl Server {
             .route("/api/totp/reset", ui(post(totp_reset)))
             .route("/api/runs", ui(get(runs)))
             .route("/api/devices", ui(get(devices)))
+            .route("/api/runners", ui(get(runners_list)))
+            .route("/api/runners/code", ui(post(runner_code)))
+            .route("/api/runners/{name}", ui(delete(runner_delete)))
             .route("/api/settings", ui(put(put_settings)))
             .route("/api/templates", ui(get(templates).put(put_template)))
             .route("/api/templates/{id}", ui(delete(delete_template)))
@@ -513,6 +516,16 @@ impl Server {
             .route("/v1/secrets", get(agent_secrets).fallback(not_allowed_h))
             .route("/v1/requests", post(agent_submit).fallback(not_allowed_h))
             .route("/v1/requests/{id}", get(agent_get).fallback(not_allowed_h))
+            .route("/v1/runners", get(agent_runners).fallback(not_allowed_h))
+            .route(
+                "/v1/runner/enroll",
+                post(runner_enroll).fallback(not_allowed_h),
+            )
+            .route("/v1/runner/poll", post(runner_poll).fallback(not_allowed_h))
+            .route(
+                "/v1/runner/result",
+                post(runner_result).fallback(not_allowed_h),
+            )
             .fallback(not_found_h)
             .layer(middleware::from_fn(agent_headers))
             .layer(middleware::from_fn(write_timeout))
@@ -1387,6 +1400,87 @@ async fn agent_get(State(s): State<Arc<Server>>, h: HeaderMap, Path(id): Path<St
         Some(q) if q.caller == t.name => write_json(200, &q),
         _ => agent_fail(core::Error::NotFound),
     }
+}
+
+async fn agent_runners(State(s): State<Arc<Server>>, h: HeaderMap) -> Response {
+    if let Err(r) = s.bearer(&h).await {
+        return *r;
+    }
+    write_json(200, &trya!(s.core.runners_for_agent()))
+}
+
+// --- runner handlers ---
+
+fn runner_name(s: &Server, h: &HeaderMap) -> Result<String, Box<Response>> {
+    let tok = header_str(h, "authorization")
+        .strip_prefix("Bearer ")
+        .unwrap_or("");
+    s.core.runner_auth(tok).map_err(|e| {
+        Box::new(match e {
+            core::Error::Locked => err_json(423, "vault locked"),
+            _ => err_json(403, "unknown runner"),
+        })
+    })
+}
+
+async fn runner_enroll(State(s): State<Arc<Server>>, b: Body) -> Response {
+    let input: crate::runner::proto::EnrollIn = body!(b);
+    match s.core.enroll_runner(input) {
+        Ok(out) => write_json(200, &out),
+        Err(e) => fail(e),
+    }
+}
+
+async fn runner_poll(State(s): State<Arc<Server>>, h: HeaderMap, b: Body) -> Response {
+    let name = match runner_name(&s, &h) {
+        Ok(n) => n,
+        Err(r) => return *r,
+    };
+    let input: crate::runner::proto::PollIn = body!(b);
+    match s.core.runner_poll(&name, input.info).await {
+        Ok(jobs) => write_json(200, &crate::runner::proto::PollOut { jobs }),
+        Err(core::Error::Locked) => err_json(423, "vault locked"),
+        Err(e) => fail(e),
+    }
+}
+
+async fn runner_result(State(s): State<Arc<Server>>, h: HeaderMap, b: Body) -> Response {
+    let name = match runner_name(&s, &h) {
+        Ok(n) => n,
+        Err(r) => return *r,
+    };
+    let input: crate::runner::proto::Signed = body!(b);
+    match s.core.runner_result(&name, input) {
+        Ok(()) => ok_json(),
+        Err(e) => fail(e),
+    }
+}
+
+async fn runners_list(State(s): State<Arc<Server>>, h: HeaderMap) -> Response {
+    need_auth!(s, h);
+    let list = tryf!(s.core.runners());
+    let key = tryf!(s.core.runner_server_key());
+    write_json(
+        200,
+        &json!({"runners": list, "server_key": crate::runner::proto::fingerprint(&key),
+            "agent_url": std::env::var("UCANRUN_AGENT_URL").unwrap_or_default()}),
+    )
+}
+
+async fn runner_code(State(s): State<Arc<Server>>, h: HeaderMap) -> Response {
+    need_auth!(s, h);
+    let (code, expires) = tryf!(s.core.new_runner_code());
+    write_json(200, &json!({"code": code, "expires": expires}))
+}
+
+async fn runner_delete(
+    State(s): State<Arc<Server>>,
+    h: HeaderMap,
+    Path(name): Path<String>,
+) -> Response {
+    need_auth!(s, h);
+    tryf!(s.core.delete_runner(&name));
+    ok_json()
 }
 
 // --- serving ---

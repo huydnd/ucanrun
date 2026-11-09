@@ -588,6 +588,7 @@ fn wildcard_hosts_mean_the_default_port() {
                     ..Default::default()
                 }),
                 exec: None,
+                runner: String::new(),
             },
             &m,
         )

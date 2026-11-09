@@ -21,6 +21,9 @@ has a fixed action that fits, prefer run.
 specific reason: it is what they decide on.
 - If a request is denied or expires, tell the user and stop. Do not resend it \
 in a loop or reword it to get past a denial.
+- To run a command on another machine, call list_runners and pass runner to \
+run_command. Each runner only starts the programs in its allow list; for root, \
+set sudo to {{secret:NAME}} of the sudo password, if the runner allows sudo.
 - If no secret fits, say which secret and hosts are missing so the user can add \
 them in ucanrun. Output has secrets replaced by [REDACTED]; that is expected.";
 
@@ -34,10 +37,14 @@ fn tools() -> Value {
             "method": {"type": "string", "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"]},
             "url": {"type": "string"}, "headers": map, "body": {"type": "string"},
             "reason": {"type": "string", "description": "Short reason shown to the approver."}}}},
-        {"name": "run_command", "description": "Run a program with secrets, only for secrets that allow commands and only when the server enables it. argv[0] is an absolute path; there is no shell. Put private {{secret:NAME}} or {{secret:NAME.FIELD}} values in env, stdin or files, never in argv; public fields may go in argv. Needs human approval, usually with TOTP.",
+        {"name": "run_command", "description": "Run a program with secrets, only for secrets that allow commands. Without runner it runs on the ucanrun server, if the server enables it; with runner it runs on that enrolled machine (see list_runners), and then a secret is optional. argv[0] is an absolute path (C:\\... on Windows); there is no shell. Put private {{secret:NAME}} or {{secret:NAME.FIELD}} values in env, stdin or files, never in argv; public fields may go in argv. Needs human approval, usually with TOTP.",
          "inputSchema": {"type": "object", "required": ["argv"], "properties": {
             "argv": {"type": "array", "items": {"type": "string"}}, "env": map, "stdin": {"type": "string"}, "files": map,
+            "runner": {"type": "string", "description": "Name of a runner from list_runners."},
+            "sudo": {"type": "string", "description": "Only with runner: {{secret:NAME}} holding the sudo password, to run as root. env is not allowed with sudo."},
             "reason": {"type": "string"}}}},
+        {"name": "list_runners", "description": "List the machines that can run commands: name, online, OS, user, whether sudo is allowed, and the programs each one allows (argv[0] must be one of them, or \"*\" for any).",
+         "inputSchema": {"type": "object", "properties": {}}},
         {"name": "list_profiles", "description": "List the fixed actions you may request, with their parameters.",
          "inputSchema": {"type": "object", "properties": {}}},
         {"name": "run", "description": "Request a fixed action. A human usually approves on Telegram. Waits up to 110 s, then returns state=pending and an id for get_request.",
@@ -58,14 +65,20 @@ async fn call(c: &Client, p: &Value) -> Value {
     let res = match p.get("name").and_then(Value::as_str).unwrap_or("") {
         "list_secrets" => c.secrets().await,
         "list_profiles" => c.profiles().await,
+        "list_runners" => c.runners().await,
         "call" => {
             let http = json!({"method": s("method"), "url": s("url"), "headers": a.get("headers").cloned().unwrap_or(json!({})), "body": s("body")});
             c.call(json!({"http": http}), &s("reason"), 110).await
         }
         "run_command" => {
             let exec = json!({"argv": a.get("argv").cloned().unwrap_or(json!([])), "env": a.get("env").cloned().unwrap_or(json!({})),
-                              "stdin": s("stdin"), "files": a.get("files").cloned().unwrap_or(json!({}))});
-            c.call(json!({"exec": exec}), &s("reason"), 110).await
+                              "stdin": s("stdin"), "files": a.get("files").cloned().unwrap_or(json!({})), "sudo": s("sudo")});
+            c.call(
+                json!({"exec": exec, "runner": s("runner")}),
+                &s("reason"),
+                110,
+            )
+            .await
         }
         "run" => {
             c.run(

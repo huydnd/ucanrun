@@ -88,6 +88,10 @@ pub struct ExecSpec {
     /// the run, for tools that only read a key from a path.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub files: BTreeMap<String, String>,
+    /// Only on a runner: `{{secret:NAME}}` holding the sudo password. The
+    /// runner starts the program through `sudo -S` with it.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub sudo: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -112,6 +116,9 @@ pub struct Profile {
     pub http: Option<HttpSpec>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exec: Option<ExecSpec>,
+    /// Runs the command on this enrolled runner instead of the server.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub runner: String,
 }
 
 /// A fully rendered request except for secret placeholders.
@@ -123,6 +130,26 @@ pub struct Action {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exec: Option<ExecSpec>,
     pub timeout_sec: i64,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub runner: String,
+}
+
+/// Whether `p` is an absolute Windows path such as `C:\\Windows\\x.exe`.
+pub fn windows_abs(p: &str) -> bool {
+    let b = p.as_bytes();
+    b.len() > 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && b[2] == b'\\'
+}
+
+/// The program name of a path, lower case and without `.exe`, for either OS.
+fn program_base(p: &str) -> String {
+    let base = p
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(p)
+        .to_ascii_lowercase();
+    base.strip_suffix(".exe")
+        .map(str::to_string)
+        .unwrap_or(base)
 }
 
 static NAME_RE: LazyLock<Regex> =
@@ -199,6 +226,14 @@ impl Profile {
         if self.http.is_none() == self.exec.is_none() {
             return err("exactly one of http or exec is required");
         }
+        if !self.runner.is_empty() {
+            if !NAME_RE.is_match(&self.runner) {
+                return err("runner name must match [a-z0-9][a-z0-9_-]*");
+            }
+            if self.exec.is_none() {
+                return err("a runner only runs commands");
+            }
+        }
         if !(0..=600).contains(&self.timeout_sec) {
             return err("timeout_sec must be 0..600");
         }
@@ -259,12 +294,14 @@ impl Profile {
         }
         if let Some(e) = &self.exec {
             let a0 = e.argv.first().map(String::as_str).unwrap_or("");
-            if !a0.starts_with('/') || a0.contains("{{") {
+            // A runner may be a Windows machine.
+            let abs = a0.starts_with('/') || (!self.runner.is_empty() && windows_abs(a0));
+            if !abs || a0.contains("{{") {
                 return err("argv[0] must be a literal absolute path");
             }
-            let base = &a0[a0.rfind('/').unwrap() + 1..];
+            let base = program_base(a0);
             if matches!(
-                base,
+                base.as_str(),
                 "sh" | "bash"
                     | "dash"
                     | "ash"
@@ -284,6 +321,18 @@ impl Profile {
                     | "su"
                     | "nohup"
                     | "timeout"
+                    | "doas"
+                    | "pkexec"
+                    | "cmd"
+                    | "powershell"
+                    | "pwsh"
+                    | "wscript"
+                    | "cscript"
+                    | "mshta"
+                    | "rundll32"
+                    | "regsvr32"
+                    | "wsl"
+                    | "runas"
             ) {
                 return err("interpreters are not allowed, they turn params into code");
             }
@@ -299,6 +348,23 @@ impl Profile {
                 if refs(a).1.iter().any(|n| !public(n)) {
                     return err("secrets are only allowed in exec env, argv is visible in /proc");
                 }
+            }
+            if !e.sudo.is_empty() {
+                if self.runner.is_empty() {
+                    return err("sudo is only for commands on a runner");
+                }
+                let whole = TMPL_RE
+                    .captures(&e.sudo)
+                    .is_some_and(|c| c[0].len() == e.sudo.len() && c.get(1).is_some());
+                if !whole {
+                    return err("sudo must be one {{secret:NAME}} holding the password");
+                }
+                // sudo resets the environment, so a secret there would be lost,
+                // and passing it on argv would show it in /proc.
+                if !e.env.is_empty() {
+                    return err("with sudo, put secrets in stdin or files: sudo drops env");
+                }
+                texts.push(&e.sudo);
             }
             texts.extend(e.argv.iter().map(String::as_str));
             texts.push(&e.stdin);
@@ -456,13 +522,15 @@ impl Profile {
             }
             out.stdin = subst(&e.stdin, params, &raw);
             out.files = e.files.clone();
+            out.sudo = e.sudo.clone();
             a.exec = Some(out);
         }
+        a.runner = self.runner.clone();
         // Defence in depth: rendering must not add a secret the profile never named.
         let allowed: BTreeSet<String> = Action {
             http: self.http.clone(),
             exec: self.exec.clone(),
-            timeout_sec: 0,
+            ..Default::default()
         }
         .secrets()
         .into_iter()
@@ -604,6 +672,7 @@ impl Action {
             e.env.values().for_each(|v| add(v));
             add(&e.stdin);
             e.files.values().for_each(|v| add(v));
+            add(&e.sudo);
         }
         seen.into_iter().collect()
     }
@@ -643,6 +712,12 @@ impl Action {
             for (k, v) in &e.files {
                 b.push_str(&format!("\nfile {k}: {}", mask(v)));
             }
+            if !e.sudo.is_empty() {
+                b.push_str(&format!("\nsudo: {}", mask(&e.sudo)));
+            }
+        }
+        if !self.runner.is_empty() {
+            b.push_str(&format!("\nrunner: {}", self.runner));
         }
         b
     }
@@ -666,6 +741,7 @@ impl Action {
             e.env = m(&e.env);
             e.files = m(&e.files);
             e.stdin = r(&e.stdin);
+            e.sudo = r(&e.sudo);
         }
         c
     }

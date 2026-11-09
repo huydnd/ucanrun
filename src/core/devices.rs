@@ -39,8 +39,10 @@ pub struct Target {
     pub runs: usize,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct Devices {
+    /// Enrolled runners and what each reports about itself.
+    pub runners: Vec<super::RunnerView>,
     pub agents: Vec<AgentSeen>,
     pub targets: Vec<Target>,
     /// Whether the server runs commands at all.
@@ -87,6 +89,13 @@ pub(crate) fn ssh_target(argv: &[String]) -> Option<(String, String, bool)> {
     None
 }
 
+/// The runner a logged command went to, and whether it used sudo.
+fn runner_of(display: &str) -> Option<(String, bool)> {
+    let name = display.lines().find_map(|l| l.strip_prefix("runner: "))?;
+    let sudo = display.lines().any(|l| l.starts_with("sudo: "));
+    Some((name.to_string(), sudo))
+}
+
 /// argv back from the quoted command line the run log keeps.
 fn argv_of(display: &str) -> Vec<String> {
     let first = display.lines().next().unwrap_or("");
@@ -128,6 +137,16 @@ impl Core {
         // SAFETY: getuid has no preconditions and cannot fail.
         let uid = unsafe { libc::getuid() };
         let local = ("ucanrun".to_string(), format!("uid {uid}"), uid == 0);
+        let runners = self.runners().unwrap_or_default();
+        // The user a runner reported, for its row.
+        let user_of = |n: &str| -> String {
+            runners
+                .iter()
+                .find(|r| r.name == n)
+                .and_then(|r| r.info.as_ref())
+                .map(|i| i.user.clone())
+                .unwrap_or_default()
+        };
         let mut agents: BTreeMap<(String, String, String), AgentSeen> = BTreeMap::new();
         let mut targets: BTreeMap<(String, String), Target> = BTreeMap::new();
         let mut add =
@@ -171,15 +190,20 @@ impl Core {
                 }
                 "result" => {
                     let cmd = s("command");
-                    let argv = argv_of(&cmd);
-                    if argv.is_empty() {
-                        continue;
-                    }
                     let via = if s("profile") == crate::policy::ADHOC_PROFILE {
                         "agent".to_string()
                     } else {
                         format!("profile {}", s("profile"))
                     };
+                    if let Some((n, sudo)) = runner_of(&cmd) {
+                        let u = user_of(&n);
+                        add(format!("runner {n}"), u, sudo, via, &e.time, true);
+                        continue;
+                    }
+                    let argv = argv_of(&cmd);
+                    if argv.is_empty() {
+                        continue;
+                    }
                     match ssh_target(&argv) {
                         Some((h, u, root)) => add(h, u, root, via, &e.time, true),
                         None => add(
@@ -198,6 +222,18 @@ impl Core {
         for p in &profiles {
             let Some(x) = &p.exec else { continue };
             let via = format!("profile {}", p.name);
+            if !p.runner.is_empty() {
+                let u = user_of(&p.runner);
+                add(
+                    format!("runner {}", p.runner),
+                    u,
+                    !x.sudo.is_empty(),
+                    via,
+                    "",
+                    false,
+                );
+                continue;
+            }
             match ssh_target(&x.argv) {
                 Some((h, u, root)) => add(h, u, root, via, "", false),
                 None => add(local.0.clone(), local.1.clone(), local.2, via, "", false),
@@ -224,6 +260,7 @@ impl Core {
             .collect();
         command_secrets.sort();
         Ok(Devices {
+            runners,
             agents,
             targets: targets.into_values().collect(),
             exec: self.opt.allow_exec,

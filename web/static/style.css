@@ -232,3 +232,18 @@ small.foot{display:block;margin-top:6px}
 .card.devices .dot { margin-top: 0; transform: translateY(-1px); }
 .secret-form textarea.desc { font: inherit; min-height: 0; }
 .card.devices .badge { min-width: 3.2rem; text-align: center; }
+.card.devices ul.runners li { align-items: flex-start; }
+.card.devices ul.runners .dot { margin-top: 7px; }
+.card.devices .grow { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.card.devices .grow > div { overflow-wrap: anywhere; }
+.card.devices .small { font-size: 12.5px; }
+.card.devices .spread h3 { margin: .9rem 0 .3rem; }
+.enroll { border: 1px dashed var(--line); border-radius: 10px; padding: 10px 12px; margin-top: 8px; display: grid; gap: 6px; }
+.enroll p { margin: 0; }
+.enroll b.code { font: 600 15px/1.4 ui-monospace, Menlo, Consolas, monospace; letter-spacing: .06em; }
+.copyline { display: flex; gap: 6px; align-items: center; }
+.copyline code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; padding: 6px 8px; border-radius: 6px; background: var(--code); font-size: 12.5px; }
+button.link.danger { color: var(--danger); }
+.badge.root{background:var(--danger-soft);color:var(--danger)}
+.enroll { grid-template-columns: minmax(0, 1fr); min-width: 0; }
+.enroll p { overflow-wrap: anywhere; }

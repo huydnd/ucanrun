@@ -226,6 +226,7 @@ fn public_field_cannot_choose_the_host() {
                 body: String::new(),
             }),
             exec: None,
+            runner: String::new(),
         };
         assert!(from_call(&call, &meta).is_err(), "{url} accepted");
     }

@@ -1,7 +1,17 @@
 # Spec: tách ucanrun thành control plane và runner
 
-Trạng thái: **bản nháp để lấy ý kiến**. Chưa có code cho phần đề xuất.
-Phiên bản ucanrun hiện tại: 0.2.2 (Rust).
+Trạng thái: **giai đoạn 1 và 2 đã làm trong 0.8.0**, theo một bản rút gọn (xem mục "Đã làm" dưới đây). Giai đoạn 3 (passkey) chưa làm. Hướng dẫn dùng ở `docs/runners.md`.
+
+## Đã làm (0.8.0)
+
+- Gộp giai đoạn 1 và 2: không có unix socket riêng. Mọi runner, kể cả trên chính máy chủ, đều gọi ra Agent API (`/v1/runner/poll`, long-poll 25 giây).
+- Không dùng Noise: gói việc đã được A ký (ed25519, khoá sinh từ identity của kho bằng HKDF), secret được seal bằng age cho khoá của B, và kết quả được B ký. Đường truyền chỉ chở byte.
+- Policy của B là `runner.toml` (`allow`, `sudo`, `require_totp`). B áp lại các luật của A (cấm trình thông dịch, secret trong argv, env nguy hiểm), nên A bị chiếm cũng không có shell.
+- Root: B chạy bằng user riêng. Việc có `sudo: {{secret:X}}` được bọc thành `sudo -S -k --`, mật khẩu đi qua stdin. `sudo` dùng làm argv[0] vẫn bị cấm.
+- Windows: B chạy bằng quyền user (Scheduled Task, LogonType S4U, RunLevel Limited). Không có cách nâng quyền theo từng việc.
+- Chống gửi lại: B nhớ `job` (nonce) trong bộ nhớ tới khi hết `not_after`.
+
+Phiên bản ucanrun lúc viết bản nháp: 0.2.2 (Rust).
 
 Tài liệu gồm hai phần. Phần I mô tả ucanrun đang chạy thế nào, đủ để người chưa đọc code đánh giá được. Phần II đề xuất tách thành hai thành phần, triển khai qua ba giai đoạn.
 

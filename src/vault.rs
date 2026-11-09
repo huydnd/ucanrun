@@ -208,6 +208,19 @@ impl Vault {
         Ok(out)
     }
 
+    /// Seed of the key that signs runner jobs. Derived from the identity like
+    /// the state key, so it needs no storage and exists only while unlocked.
+    pub fn runner_seed(&self) -> Result<Zeroizing<[u8; 32]>> {
+        let g = self.identity.read().unwrap();
+        let id = g.as_ref().ok_or(Error::Locked)?;
+        let s = id.to_string();
+        let hk = Hkdf::<Sha256>::new(None, s.expose_secret().as_bytes());
+        let mut out = Zeroizing::new([0u8; 32]);
+        hk.expand(b"ucanrun runner signing v1", &mut out[..])
+            .map_err(|e| Error::Msg(e.to_string()))?;
+        Ok(out)
+    }
+
     /// Encrypts a secret. Needs only the recipient, so it works while locked.
     pub fn put(&self, name: &str, value: &[u8]) -> Result<()> {
         if !valid_name(name) {

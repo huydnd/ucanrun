@@ -1142,7 +1142,7 @@ async function viewOverview(body, s, steps, stepList) {
   const done = steps.filter(x => x.done).length, all = done === steps.length;
   const [secrets, tokens, profiles, reqs, runs, health] = await Promise.all([api("GET", "/api/secrets"), api("GET", "/api/tokens"), api("GET", "/api/profiles"),
     api("GET", "/api/requests"), api("GET", "/api/runs").catch(() => ({runs: []})), api("GET", "/api/health").catch(() => [])]);
-  const devs = await api("GET", "/api/devices").catch(() => null);
+  const [devs, rinfo] = await Promise.all([api("GET", "/api/devices").catch(() => null), api("GET", "/api/runners").catch(() => null)]);
   const go = tab => () => { state.tab = tab; renderShell(); };
   const pending = reqs.filter(r => r.state === "pending");
   const ws = workspacesOf(secrets);
@@ -1174,7 +1174,7 @@ async function viewOverview(body, s, steps, stepList) {
         line(bad ? false : warn ? null : true, bad || warn ? `${tr("Sức khoẻ bảo mật")}: ${bad} ${tr("lỗi")}, ${warn} ${tr("cảnh báo")}.` : tr("Sức khoẻ bảo mật ổn."), "settings"),
         line(true, `${profiles.length} ${tr("hành động cố định")}${s.exec ? " · " + tr("chạy lệnh đang bật") : ""}.`, "profiles"),
         idle.length ? line(null, tr(`Agent chưa tự gọi được ${idle.length} secret vì chưa có máy chủ: ${idle.map(x => x.name).join(", ")}.`), "secrets") : null)),
-    devs ? devicesCard(devs, s, secrets) : null,
+    devs ? devicesCard(devs, s, secrets, rinfo) : null,
     h("div", {class: "card"}, h("h2", null, "Lần chạy gần đây"),
       recent.length ? recent.map(runRow) : h("p", {class: "muted"}, "Chưa có lần chạy nào."),
       h("div", {class: "row"}, h("button", {onclick: go("audit")}, "Xem nhật ký"), h("button", {onclick: go("secrets")}, "Thêm secret"), h("button", {onclick: go("tokens")}, "Tạo token"))),
@@ -1186,27 +1186,76 @@ async function viewOverview(body, s, steps, stepList) {
 // Who calls ucanrun from where, and where it runs commands with which rights.
 // Built from the audit log and fixed actions; device names are what each
 // agent reported about itself.
-function devicesCard(d, s, secrets) {
+// One row per enrolled runner, from what it reports on each poll.
+function runnerRow(r, redraw) {
+  const i = r.info || {};
+  const rights = i.root ? h("span", {class: "badge root"}, "root") : i.sudo ? h("span", {class: "badge high"}, "sudo") : h("span", {class: "badge"}, tr("thường"));
+  const allow = !i.allow || !i.allow.length ? tr("chưa cho chạy chương trình nào") : i.allow.includes("*") ? tr("mọi chương trình") : i.allow.join(", ");
+  return h("li", {class: "runner"},
+    h("span", {class: "dot " + (r.online ? "ok" : "bad"), "aria-hidden": "true", title: r.online ? tr("đang kết nối") : tr("mất kết nối")}),
+    h("div", {class: "grow"},
+      h("div", null, h("b", null, r.name), " ", rights, " ",
+        h("span", {class: "muted"}, [r.online ? tr("đang kết nối") : tr("mất kết nối"), [i.os, i.arch].filter(Boolean).join("/"),
+          i.user ? `${tr("user")} ${i.user}` : "", i.require_totp ? tr("bắt buộc TOTP") : "", r.last_seen ? new Date(r.last_seen).toLocaleString() : ""].filter(Boolean).join(" · "))),
+      h("div", {class: "muted small"}, `${tr("Cho chạy")}: ${allow}`),
+      i.policy_error ? h("div", {class: "warn-line"}, `${tr("Lỗi runner.toml")}: ${i.policy_error}`) : null,
+      i.root ? h("div", {class: "warn-line"}, tr("Runner đang có quyền root hoặc admin. Nên chạy bằng user riêng, dùng sudo khi cần.")) : null,
+      h("small", {class: "muted"}, `${tr("Khoá runner")}: ${r.fingerprint}`)),
+    h("button", {class: "link danger", onclick: async () => {
+      if (!confirm(tr(`Gỡ runner ${r.name}? Máy đó sẽ không nhận việc nữa.`))) return;
+      await api("DELETE", "/api/runners/" + encodeURIComponent(r.name)); redraw();
+    }}, "Gỡ"));
+}
+
+function runnersBlock(d, rinfo) {
+  const list = d.runners || [];
+  const box = h("ul", {class: "health runners"});
+  const redraw = () => { state.tab = "start"; renderShell(); };
+  fill(box, list.map(r => runnerRow(r, redraw)));
+  const add = h("div", {class: "enroll", hidden: true});
+  const url = (rinfo && rinfo.agent_url) || "http://<agent-api>:8781";
+  const start = h("button", {class: "small", onclick: async () => {
+    const c = await api("POST", "/api/runners/code");
+    const line = (bin, name) => `${bin} runner enroll ${url} ${c.code} --name ${name}`;
+    const copy = text => h("div", {class: "copyline"}, h("code", null, text),
+      h("button", {class: "icon", "aria-label": tr("Chép"), title: tr("Chép"), onclick: () => navigator.clipboard && navigator.clipboard.writeText(text)}, "⧉"));
+    fill(add,
+      h("p", null, tr("Mã ghép nối, dùng một lần, hết hạn lúc"), " ", new Date(c.expires).toLocaleTimeString(), ": ", h("b", {class: "code"}, c.code)),
+      h("p", {class: "muted"}, "Chạy trên máy cần làm runner, bằng user riêng (không phải root). Linux, macOS, WSL:"),
+      copy(line("ucr", "ten-may")), copy("ucr runner serve"),
+      h("p", {class: "muted"}, "Windows (PowerShell):"),
+      copy(line("ucr.exe", "ten-may")), copy("ucr.exe runner serve"),
+      h("p", {class: "muted"}, `${tr("Sau khi ghép, so khoá server máy kia in ra với khoá này")}: ${rinfo ? rinfo.server_key : "?"}. ${tr("Rồi sửa runner.toml trên máy đó để liệt kê chương trình được chạy; mặc định không chạy gì.")}`),
+      h("div", {class: "row"}, h("button", {onclick: redraw}, "Xong, tải lại")));
+    add.hidden = false;
+  }}, "+ Thêm runner");
+  return [h("div", {class: "spread"}, h("h3", null, "Runner"), start),
+    list.length ? box : h("p", {class: "muted"}, "Chưa có runner. Runner là ucr chạy trên một máy khác, chủ động lấy việc đã duyệt từ đây và chạy theo luật runner.toml của chính máy đó. Máy chạy runner không cần mở cổng."),
+    add];
+}
+
+function devicesCard(d, s, secrets, rinfo) {
   const when = t => t ? new Date(t).toLocaleString() : tr("chưa gọi lần nào");
   const agents = d.agents.map(a => h("li", null,
     h("span", {class: "dot " + (a.last_seen ? "ok" : "warn"), "aria-hidden": "true"}),
     h("span", null, h("b", null, a.device || tr("không rõ máy")), " ",
       h("span", {class: "muted"}, [a.token, a.app, a.requests ? `${a.requests} ${tr("yêu cầu")}` : "", when(a.last_seen)].filter(Boolean).join(" · ")))));
   const targets = d.targets.map(t => h("li", null,
-    h("span", {class: "badge " + (t.rights === "root" ? "high" : "")}, t.rights === "root" ? "root" : tr("thường")), " ",
+    h("span", {class: "badge " + (t.rights === "root" ? "root" : "")}, t.rights === "root" ? "root" : tr("thường")), " ",
     h("span", null, h("b", null, t.host === "ucanrun" ? tr("Container ucanrun") : t.host), " ",
       h("span", {class: "muted"}, [t.user ? `${tr("user")} ${t.user}` : "", t.via.map(v => v === "agent" ? tr("agent tự soạn") : v.replace(/^profile /, "")).join(", "),
         t.runs ? `${t.runs} ${tr("lần")}, ${tr("gần nhất")} ${when(t.last_run)}` : tr("chưa chạy")].filter(Boolean).join(" · ")))));
   return h("div", {class: "card devices"}, h("h2", null, "Thiết bị và quyền"),
+    ...runnersBlock(d, rinfo),
     h("h3", null, "Agent gọi từ"),
     agents.length ? h("ul", {class: "health"}, agents) : h("p", {class: "muted"}, "Chưa có token agent."),
     h("h3", null, "Nơi ucanrun chạy lệnh"),
-    !d.exec ? h("p", {class: "muted"}, "Chạy lệnh đang tắt: ucanrun chỉ gọi HTTP.") :
+    !d.exec && !targets.length ? h("p", {class: "muted"}, "Server không tự chạy lệnh; lệnh chỉ chạy trên runner.") :
       targets.length ? h("ul", {class: "health"}, targets) : h("p", {class: "muted"}, "Chưa có lệnh nào chạy và chưa có hành động cố định chạy lệnh."),
-    d.exec ? h("p", {class: "muted"}, d.command_secrets.length
+    d.exec || (d.runners || []).length ? h("p", {class: "muted"}, d.command_secrets.length
       ? `${tr("Agent được tự soạn lệnh với")}: ${d.command_secrets.map(n => { const x = (secrets || []).find(y => y.name === n) || {};
         const f = [x.approve === "auto" ? tr("tự chạy, không hỏi") : "", x.totp === "never" ? tr("không cần TOTP") : x.totp === "always" ? tr("luôn cần TOTP") : ""].filter(Boolean);
-        return f.length ? `${n} (${f.join(", ")})` : n; }).join(", ")}. ${tr("Máy nào các secret này SSH tới được thì agent chạy lệnh được ở đó, theo mức duyệt của từng secret.")}`
+        return f.length ? `${n} (${f.join(", ")})` : n; }).join(", ")}. ${tr("Lệnh chạy trên runner theo luật runner.toml của máy đó; qua SSH thì theo quyền của khoá.")}`
       : tr("Không secret nào cho phép dùng trong lệnh agent tự soạn.")) : null,
     h("small", {class: "foot muted"}, "Tên máy do agent tự khai. Danh sách lấy từ nhật ký và hành động cố định, không dò trực tiếp."));
 }

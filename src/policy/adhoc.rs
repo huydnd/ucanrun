@@ -226,6 +226,9 @@ pub struct Call {
     pub http: Option<HttpSpec>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exec: Option<ExecSpec>,
+    /// Runs the command on this runner instead of the server.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub runner: String,
 }
 
 /// Turns an agent's call into a profile, enforcing where each secret may go.
@@ -303,7 +306,7 @@ pub fn from_call(c: &Call, meta: &BTreeMap<String, SecretMeta>) -> Result<Profil
     }
     if let Some(e) = &c.exec {
         p.risk = RISK_HIGH.to_string();
-        let mut texts: Vec<&str> = vec![&e.stdin];
+        let mut texts: Vec<&str> = vec![&e.stdin, &e.sudo];
         texts.extend(e.argv.iter().map(String::as_str));
         texts.extend(e.env.values().map(String::as_str));
         texts.extend(e.files.values().map(String::as_str));
@@ -328,9 +331,11 @@ pub fn from_call(c: &Call, meta: &BTreeMap<String, SecretMeta>) -> Result<Profil
         }
         p.exec = Some(e.clone());
     }
-    if used == 0 {
+    // On another machine the agent cannot run it itself.
+    if used == 0 && c.runner.is_empty() {
         return err("the call uses no secret, so run it yourself");
     }
+    p.runner = c.runner.clone();
     p.validate_with(&public_fn(meta))?;
     Ok(p)
 }
