@@ -493,6 +493,7 @@ impl Server {
             .route("/api/totp/recovery", ui(post(totp_recovery)))
             .route("/api/totp/reset", ui(post(totp_reset)))
             .route("/api/runs", ui(get(runs)))
+            .route("/api/devices", ui(get(devices)))
             .route("/api/settings", ui(put(put_settings)))
             .route("/api/templates", ui(get(templates).put(put_template)))
             .route("/api/templates/{id}", ui(delete(delete_template)))
@@ -1255,6 +1256,12 @@ async fn delete_template(
     need_auth!(s, h);
     tryf!(s.core.delete_template(&id));
     ok_json()
+}
+
+async fn devices(State(s): State<Arc<Server>>, h: HeaderMap) -> Response {
+    need_auth!(s, h);
+    let c = s.core.clone();
+    write_json(200, &tryf!(blocking(move || c.devices()).await))
 }
 
 /// How far back the run log looks, in audit lines.
