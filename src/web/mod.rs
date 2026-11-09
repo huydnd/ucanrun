@@ -794,6 +794,8 @@ struct SecretRow {
     totp: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     workspace: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    approve: String,
 }
 
 async fn list_secrets(State(s): State<Arc<Server>>, h: HeaderMap) -> Response {
@@ -832,6 +834,7 @@ async fn list_secrets(State(s): State<Arc<Server>>, h: HeaderMap) -> Response {
                 fields,
                 totp: x.totp,
                 workspace: x.workspace,
+                approve: x.approve,
             });
         }
         Ok(out)
@@ -860,6 +863,8 @@ struct PutSecretIn {
     allow_commands: bool,
     fields: Option<Vec<FieldIn>>,
     workspace: String,
+    /// "" asks every time, "auto" runs agent calls without asking.
+    approve: String,
     /// "", "always" or "never".
     totp: String,
     /// A current TOTP code, needed to set totp to "never".
@@ -885,13 +890,14 @@ async fn put_secret(
         fields: vec![],
         totp: input.totp,
         workspace: input.workspace.trim().to_string(),
+        approve: input.approve,
     };
     tryf!(meta.validate());
     let c = s.core.clone();
     let res = blocking(move || -> core::Result<Option<Response>> {
         // Checked before anything is written, so a refused change leaves the
         // value untouched too.
-        c.authorize_secret_totp(&name, &meta.totp, &input.code)?;
+        c.authorize_secret_change(&name, &meta.totp, &meta.approve, &input.code)?;
         if let Some(fields) = input.fields {
             meta.fields = fields
                 .iter()

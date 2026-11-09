@@ -1937,6 +1937,7 @@ fn secret_templates_are_valid() {
                 totp: t["totp"].as_str().unwrap_or("").into(),
                 fields,
                 workspace: String::new(),
+                approve: String::new(),
             };
             if let Err(e) = m.validate() {
                 panic!("{id} {d}: {e}");

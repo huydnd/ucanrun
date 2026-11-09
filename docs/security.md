@@ -46,6 +46,10 @@ Each secret has a **TOTP when approving** setting:
 
 A request needs TOTP if any secret it uses is set to *Always*, or if it is high risk and not every secret it uses is set to *No TOTP*. High risk with no secret at all still needs TOTP. Setting a secret to *No TOTP* needs a current TOTP code, and the security checklist lists such secrets. With *No TOTP*, anyone who takes over your Telegram account or a web session can approve; signing in still needs TOTP. A request keeps the rule it was queued with.
 
+## Running without asking
+
+A secret can also be set to **Run without asking**. A call the agent writes then runs at once when every secret in it is set that way and it needs no TOTP: no message is sent, and the run log still records it. Commands count as high risk, so they still need TOTP unless the secret is also set to *No TOTP*. Fixed actions keep their own setting. Turning it on needs a current TOTP code. The security checklist lists such secrets, and reports an error when one of them allows a wildcard host, because a tricked agent could then send it to a stranger's server unseen.
+
 ## Run log
 
 Every finished run is written to the audit log with the agent (token name), the agent software and host name the agent's machine reported, the secrets it used, the command as the approver saw it, the result and how long it took. **Log → Runs** lists them and can filter. The host name and software are self-declared by the agent side; the token is what identifies the agent. Secret values never appear in the log.

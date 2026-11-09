@@ -1948,3 +1948,133 @@ async fn custom_templates_hold_no_secret_values() {
         Err(Error::NotFound)
     ));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn secrets_set_to_auto_run_agent_calls_without_asking() {
+    let e = setup().await;
+    e.pair().await;
+    let host = e.url.trim_start_matches("http://").to_string();
+    let (sec, _) = e.enable_totp();
+    let meta = |approve: &str, hosts: Vec<String>| SecretMeta {
+        hosts,
+        approve: approve.into(),
+        ..Default::default()
+    };
+    // Turning auto on needs a current TOTP code.
+    assert!(matches!(
+        e.c.authorize_secret_change("gitea", "", "auto", ""),
+        Err(Error::NeedTotp)
+    ));
+    e.c.authorize_secret_change("gitea", "", "auto", &e.code_now(&sec))
+        .unwrap();
+    e.c.set_secret_meta("gitea", meta("auto", vec![host.clone()]))
+        .unwrap();
+    e.c.put_secret("ask", b"ask-secret-value-9876").unwrap();
+    e.c.set_secret_meta("ask", meta("", vec![host.clone()]))
+        .unwrap();
+    let (t, _) = e.token("claude", &[]);
+    let call = |hs: &[(&str, &str)]| Call {
+        http: Some(policy::HttpSpec {
+            method: "GET".into(),
+            url: format!("{}/auto", e.url),
+            headers: hs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            ..Default::default()
+        }),
+        exec: None,
+    };
+    let sent = e.tg.dump().len();
+    let r =
+        e.c.submit_call(&t, &call(&[("A", "{{secret:gitea}}")]), "")
+            .unwrap();
+    assert_ne!(r.state, ReqState::Pending, "auto secret still asked");
+    let done = e.wait_state(&r.id, ReqState::Done).await;
+    assert_eq!(done.decided_by, "auto");
+    assert_eq!(e.tg.dump().len(), sent, "a Telegram message was sent");
+    assert!(
+        e.c.secrets_for(&t)
+            .unwrap()
+            .iter()
+            .any(|s| s.name == "gitea" && s.auto_approve)
+    );
+
+    // One secret that asks makes the whole call ask.
+    let r =
+        e.c.submit_call(
+            &t,
+            &call(&[("A", "{{secret:gitea}}"), ("B", "{{secret:ask}}")]),
+            "",
+        )
+        .unwrap();
+    assert_eq!(r.state, ReqState::Pending);
+    // Fixed profiles keep their own setting.
+    let r =
+        e.c.submit(&t, "create", params(&[("repo", "a")]), "")
+            .unwrap();
+    assert_eq!(r.state, ReqState::Pending);
+
+    let health = e.c.health().unwrap();
+    assert!(
+        health
+            .iter()
+            .any(|i| i.key == "secret_auto" && i.names == ["gitea"])
+    );
+    e.c.set_secret_meta("gitea", meta("auto", vec!["*.example.com".into()]))
+        .unwrap();
+    let health = e.c.health().unwrap();
+    assert!(
+        health
+            .iter()
+            .any(|i| i.key == "secret_auto_wild" && i.level == "bad")
+    );
+    assert!(
+        SecretMeta {
+            approve: "yes".into(),
+            ..Default::default()
+        }
+        .validate()
+        .is_err()
+    );
+    let last =
+        e.c.audit
+            .tail(30)
+            .unwrap()
+            .into_iter()
+            .find(|x| x.event == "secret_meta")
+            .unwrap();
+    assert_eq!(last.fields["approve"], "auto");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn auto_secrets_still_need_totp_for_commands() {
+    let e = new_env("vi", true).await;
+    e.c.setup(PASS.as_bytes()).unwrap();
+    e.c.put_secret("k", b"cmd-secret-value-5555").unwrap();
+    let m = |totp: &str| SecretMeta {
+        allow_commands: true,
+        approve: "auto".into(),
+        totp: totp.into(),
+        ..Default::default()
+    };
+    e.c.set_secret_meta("k", m("")).unwrap();
+    let (t, _) = e.token("claude", &[]);
+    let cat = Call {
+        http: None,
+        exec: Some(policy::ExecSpec {
+            argv: vec!["/bin/cat".into()],
+            stdin: "{{secret:k}}".into(),
+            ..Default::default()
+        }),
+    };
+    let r = e.c.submit_call(&t, &cat, "").unwrap();
+    assert_eq!(r.state, ReqState::Pending, "a command ran without TOTP");
+    e.c.set_secret_meta("k", m("never")).unwrap();
+    let r = e.c.submit_call(&t, &cat, "").unwrap();
+    assert_ne!(
+        r.state,
+        ReqState::Pending,
+        "auto + no TOTP should run at once"
+    );
+}

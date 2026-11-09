@@ -105,6 +105,38 @@ impl Core {
             .map(|(n, _)| n.clone())
             .collect();
         no_totp.sort();
+        // Secrets that run without asking: worse when a wildcard widens the hosts.
+        let mut auto: Vec<String> = meta
+            .iter()
+            .filter(|(_, m)| m.approve == policy::APPROVE_AUTO)
+            .map(|(n, _)| n.clone())
+            .collect();
+        auto.sort();
+        let mut wild: Vec<String> = meta
+            .iter()
+            .filter(|(_, m)| {
+                m.approve == policy::APPROVE_AUTO && m.hosts.iter().any(|h| h.starts_with("*."))
+            })
+            .map(|(n, _)| n.clone())
+            .collect();
+        wild.sort();
+        if !wild.is_empty() {
+            let mut i = item(
+                "secret_auto_wild",
+                "bad",
+                "Secret tự chạy không cần duyệt nhưng có máy chủ dạng *. Agent bị lừa có thể gửi nó tới máy lạ mà không ai thấy. Hãy ghi tên máy chủ cụ thể.",
+            );
+            i.names = wild;
+            out.push(i);
+        } else if !auto.is_empty() {
+            let mut i = item(
+                "secret_auto",
+                "warn",
+                "Secret tự chạy không cần duyệt. Agent gọi trong phạm vi máy chủ đã khai báo là chạy ngay; xem lại ở Nhật ký lần chạy.",
+            );
+            i.names = auto;
+            out.push(i);
+        }
         if !no_totp.is_empty() {
             let mut i = item(
                 "secret_totp",

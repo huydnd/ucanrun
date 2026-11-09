@@ -27,6 +27,9 @@ pub struct SecretInfo {
     pub fields: Vec<FieldInfo>,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub workspace: String,
+    /// Calls with this secret run without asking the owner.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub auto_approve: bool,
 }
 
 /// A field of a multi-field secret. Only public fields carry their value.
@@ -317,6 +320,7 @@ impl Core {
                 allow_commands: m.allow_commands && exec,
                 fields,
                 workspace: m.workspace.clone(),
+                auto_approve: m.approve == policy::APPROVE_AUTO,
             });
         }
         Ok(out)

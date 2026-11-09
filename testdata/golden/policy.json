@@ -224,7 +224,7 @@
    },
    "want": {
     "ok": false,
-    "error": "secret \"none\" may not be sent to api.github.com"
+    "error": "secret \"none\" has no allowed hosts yet; ask the owner to add api.github.com to it on the Secrets tab"
    }
   },
   {
@@ -462,7 +462,7 @@
    },
    "want": {
     "ok": false,
-    "error": "secret \"gh\" is not allowed in commands"
+    "error": "secret \"gh\" is not allowed in commands; ask the owner to turn on \"allow in commands\" for it"
    }
   },
   {
