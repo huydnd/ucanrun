@@ -195,3 +195,40 @@ button.link{border:0;background:none;padding:0 4px;min-height:0;color:var(--acce
 .health li{align-items:center}
 details.card.setup>summary{font-weight:600}
 details.card.setup[open]>summary{margin-bottom:8px}
+
+
+/* compact secret form */
+.secret-form{display:flex;flex-direction:column;gap:8px}
+.secret-form label{margin:0}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media (max-width:560px){.grid2{grid-template-columns:1fr}}
+.row.tight{gap:10px;align-items:center;margin:0}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--panel)}
+.seg button{border:0;border-radius:0;min-height:30px;padding:4px 12px;font-size:13px;background:transparent}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button.on{background:var(--accent);color:var(--accent-text)}
+.check.inline{display:inline-flex;margin:0}
+.pills{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:2px 0 10px}
+.pill{min-height:28px;padding:3px 10px;border-radius:99px;font-size:12.5px;font-weight:500}
+.pill.on{background:var(--accent);border-color:var(--accent);color:var(--accent-text)}
+.pill.have{color:var(--muted)}
+.pill.mine{border-style:dashed}
+.fields{display:flex;flex-direction:column;gap:6px}
+.fields .field-row{margin:0}
+button.small{min-height:28px;padding:3px 10px;font-size:12.5px;align-self:flex-start}
+button.icon{min-height:30px;padding:2px 9px}
+.warn-line{color:var(--warn);font-size:12.5px}
+details.opts{border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+details.opts>summary{font-weight:500;cursor:pointer}
+details.opts[open]>summary{margin-bottom:8px}
+details.opts label{margin-top:6px}
+.save-tpl{border-top:1px dashed var(--line);padding-top:8px;margin-top:4px}
+small.foot{display:block;margin-top:6px}
+
+/* Devices card */
+.card.devices h3 { font-size: .95rem; margin: .9rem 0 .3rem; }
+.card.devices ul.health { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.card.devices ul.health li { align-items: baseline; }
+.card.devices .dot { margin-top: 0; transform: translateY(-1px); }
+.secret-form textarea.desc { font: inherit; min-height: 0; }
+.card.devices .badge { min-width: 3.2rem; text-align: center; }

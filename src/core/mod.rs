@@ -13,6 +13,7 @@
 //! `setup`, `login`, `unlock_at_start` and `totp_reset` run scrypt and block
 //! for about a second; call them from `spawn_blocking` in async code.
 
+mod devices;
 mod fields;
 mod health;
 mod lang;
