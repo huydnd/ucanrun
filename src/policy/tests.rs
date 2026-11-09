@@ -405,7 +405,9 @@ async fn run_http_does_not_follow_redirects_and_caps_output() {
                 let n = s.read(&mut buf).await.unwrap_or(0);
                 let req = String::from_utf8_lossy(&buf[..n]).to_string();
                 let resp = if req.starts_with("GET /redir") {
-                    "HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:1/\r\nContent-Length: 0\r\n\r\n"
+                    // Each connection serves one request; say so, or a pooled
+                    // connection may be reused after it closed.
+                    "HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:1/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
                         .to_string()
                 } else {
                     let body = format!(
@@ -414,7 +416,7 @@ async fn run_http_does_not_follow_redirects_and_caps_output() {
                         "x".repeat(100_000)
                     );
                     format!(
-                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{body}",
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                         body.len()
                     )
                 };
