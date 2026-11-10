@@ -495,6 +495,7 @@ impl Server {
             .route("/api/runs", ui(get(runs)))
             .route("/api/devices", ui(get(devices)))
             .route("/api/runners", ui(get(runners_list)))
+            .route("/api/system", ui(get(system_info)))
             .route("/api/runners/code", ui(post(runner_code)))
             .route("/api/runners/{name}", ui(delete(runner_delete)))
             .route("/api/settings", ui(put(put_settings)))
@@ -1465,6 +1466,24 @@ async fn runners_list(State(s): State<Arc<Server>>, h: HeaderMap) -> Response {
         &json!({"runners": list, "server_key": crate::runner::proto::fingerprint(&key),
             "agent_url": std::env::var("UCANRUN_AGENT_URL").unwrap_or_default()}),
     )
+}
+
+async fn system_info(State(s): State<Arc<Server>>, h: HeaderMap) -> Response {
+    need_auth!(s, h);
+    let c = s.core.clone();
+    let info = blocking(move || c.system()).await;
+    let env = |k: &str, d: &str| match std::env::var(k) {
+        Ok(v) if !v.is_empty() => v,
+        _ => d.to_string(),
+    };
+    let mut v = serde_json::to_value(&info).unwrap_or_default();
+    v["web_addr"] = json!(env("UCANRUN_WEB_ADDR", "127.0.0.1:8780"));
+    v["agent_addr"] = json!(env("UCANRUN_AGENT_ADDR", "127.0.0.1:8781"));
+    v["public_url"] = json!(env("UCANRUN_PUBLIC_URL", ""));
+    v["agent_url"] = json!(env("UCANRUN_AGENT_URL", ""));
+    v["gate"] = json!(!s.gate_token.is_empty());
+    v["secure_cookie"] = json!(s.secure_cookie);
+    write_json(200, &v)
 }
 
 async fn runner_code(State(s): State<Arc<Server>>, h: HeaderMap) -> Response {

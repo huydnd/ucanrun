@@ -247,3 +247,12 @@ button.link.danger { color: var(--danger); }
 .badge.root{background:var(--danger-soft);color:var(--danger)}
 .enroll { grid-template-columns: minmax(0, 1fr); min-width: 0; }
 .enroll p { overflow-wrap: anywhere; }
+.card.system dl.kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px; margin: 0; }
+.card.system dl.kv dt { color: var(--muted); }
+.card.system dl.kv dd { margin: 0; overflow-wrap: anywhere; }
+.card.system h3 { font-size: .95rem; margin: .9rem 0 .3rem; }
+.card.system ul.health { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.card.system ul.health li { align-items: baseline; }
+.card.system .grow { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.card.system .dot { margin-top: 0; transform: translateY(-1px); }
+.warn-text { color: var(--warn); }

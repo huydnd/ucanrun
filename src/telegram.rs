@@ -49,6 +49,8 @@ pub struct Bot {
     http: reqwest::Client,
     waiting: Mutex<HashMap<i64, Pending>>,
     msgs: Mutex<HashMap<String, i64>>,
+    /// When a poll last succeeded, and the last poll error, for the overview.
+    link: Mutex<(Option<std::time::SystemTime>, String)>,
 }
 
 #[derive(Deserialize)]
@@ -79,6 +81,7 @@ impl Bot {
             http,
             waiting: Mutex::new(HashMap::new()),
             msgs: Mutex::new(HashMap::new()),
+            link: Mutex::new((None, String::new())),
         })
     }
 
@@ -240,6 +243,8 @@ impl Bot {
             match res {
                 Ok(Value::Array(ups)) => {
                     backoff = Duration::from_secs(1);
+                    *self.link.lock().unwrap() =
+                        (Some(std::time::SystemTime::now()), String::new());
                     for u in ups {
                         if let Some(id) = u.get("update_id").and_then(Value::as_i64) {
                             offset = id + 1;
@@ -250,6 +255,7 @@ impl Bot {
                 Ok(_) => {}
                 Err(e) => {
                     eprintln!("WARN telegram poll: {e}");
+                    self.link.lock().unwrap().1 = e.to_string().chars().take(200).collect();
                     tokio::select! {
                         _ = tokio::time::sleep(backoff) => {}
                         _ = stop.changed() => return,
@@ -258,6 +264,11 @@ impl Bot {
                 }
             }
         }
+    }
+
+    /// The last successful poll and the last error since then.
+    pub fn link(&self) -> (Option<std::time::SystemTime>, String) {
+        self.link.lock().unwrap().clone()
     }
 
     async fn handle(&self, u: &Value) {
