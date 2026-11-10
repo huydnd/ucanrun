@@ -11,6 +11,15 @@ Trạng thái: **giai đoạn 1 và 2 đã làm trong 0.8.0**, theo một bản 
 - Windows: B chạy bằng quyền user (Scheduled Task, LogonType S4U, RunLevel Limited). Không có cách nâng quyền theo từng việc.
 - Chống gửi lại: B nhớ `job` (nonce) trong bộ nhớ tới khi hết `not_after`.
 
+## Giao thức v2 (0.9.0)
+
+- Toàn bộ nội dung việc (lệnh, tham số, secret) được seal cho B; chỉ còn tên runner, id việc và hạn là đọc được. Kết quả được seal cho A.
+- Bỏ bearer token: mỗi request của B ký ed25519 trên method, path, thời gian, nonce và hash thân; lệch quá 60 giây hoặc nonce lặp thì bị từ chối.
+- Ghép nối không gửi mã: hai bên trao HMAC dùng mã làm khoá trên các khoá công khai của mình, nên không tráo được khoá. Mã dài 12 ký tự.
+- B lưu `seen.json` để chống phát lại kể cả sau khi khởi động lại, và từ chối việc có hạn quá xa.
+- Việc có `sudo` không bao giờ tự chạy; runner bắt buộc TOTP thì A hỏi TOTP lúc duyệt.
+- Kiểm tra trong phòng lab có máy đứng giữa ghi, sửa và phát lại lưu lượng: `sh tests/lab/run.sh` (18 ca).
+
 Phiên bản ucanrun lúc viết bản nháp: 0.2.2 (Rust).
 
 Tài liệu gồm hai phần. Phần I mô tả ucanrun đang chạy thế nào, đủ để người chưa đọc code đánh giá được. Phần II đề xuất tách thành hai thành phần, triển khai qua ba giai đoạn.

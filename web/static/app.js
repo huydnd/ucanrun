@@ -1268,10 +1268,18 @@ function systemCard(x, go) {
 const systems = [["linux-amd64", "Linux x86_64"], ["linux-arm64", "Linux ARM64"], ["darwin", "macOS"], ["windows", "Windows"]];
 const guessOs = () => /Windows/.test(navigator.userAgent) ? "windows" : /Mac/.test(navigator.userAgent) ? "darwin" : "linux-amd64";
 const WIN_UCR = '"$env:USERPROFILE\\.local\\bin\\ucr.exe"';
+// Each command checks the download against the release's SHA256SUMS
+// before putting it in place.
+function fetchCmd(dl, os, file, dest) {
+  if (os === "windows") return `$f = "$env:TEMP\\dl-${file}"; $s = "$env:TEMP\\ucr-SHA256SUMS"; Invoke-WebRequest ${dl}/${file} -OutFile $f; Invoke-WebRequest ${dl}/SHA256SUMS -OutFile $s; if (-not (Select-String -Path $s -SimpleMatch "$((Get-FileHash $f -Algorithm SHA256).Hash.ToLower())  ${file}" -Quiet)) { throw "checksum mismatch" }; New-Item -ItemType Directory -Force (Split-Path ${dest}) | Out-Null; Move-Item -Force $f ${dest}`;
+  const sum = os === "darwin" ? "shasum -a 256 -c -" : "sha256sum -c -";
+  return `d=$(mktemp -d) && curl -fsSL -o "$d/${file}" ${dl}/${file} && curl -fsSL -o "$d/SHA256SUMS" ${dl}/SHA256SUMS && (cd "$d" && grep " ${file}\$" SHA256SUMS | ${sum}) && mkdir -p "$(dirname ${dest})" && install -m 755 "$d/${file}" ${dest}`;
+}
 function installCmd(dl, os) {
-  if (os === "windows") return `New-Item -ItemType Directory -Force "$env:USERPROFILE\\.local\\bin" | Out-Null; Invoke-WebRequest ${dl}/ucr-windows-amd64.exe -OutFile ${WIN_UCR}`;
+  if (os === "windows") return fetchCmd(dl, os, "ucr-windows-amd64.exe", WIN_UCR);
+  // The shell picks the Mac build, since browsers report every Mac as Intel.
   const file = os === "darwin" ? "ucr-darwin-$(uname -m | sed s/x86_64/amd64/)" : `ucr-${os}`;
-  return `mkdir -p ~/.local/bin && curl -fsSL -o ~/.local/bin/ucr ${dl}/${file} && chmod +x ~/.local/bin/ucr`;
+  return fetchCmd(dl, os, file, "~/.local/bin/ucr");
 }
 
 function copyLine(text) {
@@ -1298,14 +1306,14 @@ function enrollBox(rinfo, done) {
       step(3, "Liệt kê chương trình được chạy", 'notepad "$env:APPDATA\\ucanrun\\runner.toml"',
         h("small", {class: "muted"}, tr("Ví dụ: allow = ['C:\\Windows\\System32\\ipconfig.exe']. Mặc định không chạy gì."))),
       step(4, "Chạy nền khi khởi động, quyền user thường (PowerShell admin)",
-        `Invoke-WebRequest ${dl}/runner-windows.ps1 -OutFile "$env:TEMP\\runner-windows.ps1"; powershell -ExecutionPolicy Bypass -File "$env:TEMP\\runner-windows.ps1"`)];
+        fetchCmd(dl, "windows", "runner-windows.ps1", '"$env:TEMP\\runner-windows.ps1"'), 'powershell -ExecutionPolicy Bypass -File "$env:TEMP\\runner-windows.ps1"')];
     if (os === "darwin") return [
       step(1, "Tải ucr", installCmd(dl, os)),
       step(2, "Ghép nối", enroll("~/.local/bin/ucr")),
       step(3, "Liệt kê chương trình được chạy", "open -e ~/.config/ucanrun/runner.toml"),
       step(4, "Chạy", "~/.local/bin/ucr runner serve")];
     return [
-      step(1, "Tải ucr và script cài đặt", `curl -fsSL -o /tmp/ucr ${dl}/ucr-${os} && chmod +x /tmp/ucr && curl -fsSL -o /tmp/runner-setup-linux.sh ${dl}/runner-setup-linux.sh`),
+      step(1, "Tải ucr và script cài đặt", fetchCmd(dl, os, `ucr-${os}`, "/tmp/ucr"), fetchCmd(dl, os, "runner-setup-linux.sh", "/tmp/runner-setup-linux.sh")),
       step(2, "Tạo user ucr-runner và service (cần sudo)", 'sudo SUDO_CMDS="/usr/bin/systemctl /usr/bin/journalctl" sh /tmp/runner-setup-linux.sh /tmp/ucr',
         h("small", {class: "muted"}, tr("SUDO_CMDS là chương trình được chạy bằng root. Script in ra mật khẩu sudo của ucr-runner một lần: lưu nó thành secret, bật dùng trong lệnh và luôn cần TOTP. Bỏ SUDO_CMDS nếu không cần root."))),
       step(3, "Ghép nối", `sudo -u ucr-runner UCANRUN_RUNNER_DIR=/var/lib/ucr-runner ${enroll("/usr/local/bin/ucr")}`),

@@ -21,7 +21,8 @@ use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
 use super::proto::{
-    self, EnrollIn, EnrollOut, Info, Job, JobResult, PollIn, PollOut, Signed, VERSION,
+    self, EnrollIn, EnrollOut, Info, Job, JobBody, JobResult, MAX_JOB_LIFE_SECS, PollIn, PollOut,
+    ResultBody, Signed, VERSION,
 };
 use crate::policy::{self, Action, ExecSpec, Profile, RISK_HIGH};
 
@@ -29,10 +30,13 @@ use crate::policy::{self, Action, ExecSpec, Profile, RISK_HIGH};
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
+    /// Protocol version this machine was enrolled with.
+    pub v: u32,
     pub name: String,
     pub server: String,
-    pub token: String,
     pub server_key: String,
+    /// age recipient results are sealed to.
+    pub server_age: String,
     pub sign_seed: String,
     pub age_identity: String,
 }
@@ -145,7 +149,15 @@ pub fn load_config() -> Result<Config, String> {
             p.display()
         )
     })?;
-    serde_json::from_slice(&raw).map_err(|_| format!("{} is not valid", p.display()))
+    let c: Config =
+        serde_json::from_slice(&raw).map_err(|_| format!("{} is not valid", p.display()))?;
+    if c.v < VERSION || c.server_age.is_empty() {
+        return Err(
+            "this machine was enrolled by an older ucr; create a new code in the web UI and run ucr runner enroll URL CODE --force"
+                .into(),
+        );
+    }
+    Ok(c)
 }
 
 pub fn load_rules() -> Result<Rules, String> {
@@ -257,6 +269,10 @@ fn default_name() -> String {
 }
 
 /// `ucr runner enroll URL CODE [--name NAME] [--force]`
+///
+/// The code never leaves this machine: the request carries an HMAC made
+/// with it, and the server answers with one over its own keys, which is
+/// checked before anything is saved.
 pub async fn enroll(args: &[String]) -> Result<(), String> {
     let mut pos = vec![];
     let (mut name, mut force) = (String::new(), false);
@@ -279,6 +295,7 @@ pub async fn enroll(args: &[String]) -> Result<(), String> {
     if !(server.starts_with("http://") || server.starts_with("https://")) {
         return Err("the URL must start with http:// or https://".into());
     }
+    let code = proto::normalize_code(&pos[1]);
     if name.is_empty() {
         name = default_name();
     }
@@ -291,13 +308,20 @@ pub async fn enroll(args: &[String]) -> Result<(), String> {
     }
     let sign = SigningKey::generate(&mut rand::rngs::OsRng);
     let id = x25519::Identity::generate();
-    let body = EnrollIn {
-        code: pos[1].clone(),
+    let mut body = EnrollIn {
+        v: VERSION,
         name: name.clone(),
         sign_key: proto::public_b64(&sign),
         age_key: id.to_public().to_string(),
-        info: info(),
+        // The rules follow sealed, with the first poll; the server's key is
+        // not known yet.
+        info: Info {
+            version: env!("CARGO_PKG_VERSION").into(),
+            ..Default::default()
+        },
+        ..Default::default()
     };
+    body.proof = body.proof_for(&code);
     let http = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(30))
@@ -316,17 +340,25 @@ pub async fn enroll(args: &[String]) -> Result<(), String> {
         return Err(format!("enroll failed: {msg} (HTTP {})", status.as_u16()));
     }
     let out: EnrollOut = serde_json::from_value(v).map_err(|_| "bad answer from the server")?;
+    // Only the server that showed this code can make this proof, so a
+    // machine in the middle cannot slip in its own keys.
+    if out.name != name || !out.proves(&code, &body.sign_key) {
+        return Err("the server could not prove it knows the code: not saved. Is the URL right, and is someone in between?".into());
+    }
     proto::verifying_key(&out.server_key)?;
+    proto::seal(&out.server_age, &())?;
     let cfg = Config {
+        v: VERSION,
         name: out.name.clone(),
         server,
-        token: out.token,
         server_key: out.server_key.clone(),
+        server_age: out.server_age.clone(),
         sign_seed: B64.encode(sign.to_bytes()),
         age_identity: id.to_string().expose_secret().to_string(),
     };
     let json = Zeroizing::new(serde_json::to_vec_pretty(&cfg).map_err(|e| e.to_string())?);
     private_write(&d.join("runner.json"), &json)?;
+    let _ = std::fs::remove_file(d.join("seen.json"));
     let rules = d.join("runner.toml");
     if !rules.exists() {
         let mut t = RULES_TEMPLATE.to_string();
@@ -335,13 +367,15 @@ pub async fn enroll(args: &[String]) -> Result<(), String> {
         }
         private_write(&rules, t.as_bytes())?;
     }
-    println!("Enrolled as runner \"{}\".", out.name);
+    println!(
+        "Enrolled as runner \"{}\"; the server proved it knows the code.",
+        out.name
+    );
     println!("Server key:  {}", proto::fingerprint(&out.server_key));
     println!(
         "Runner key:  {}",
         proto::fingerprint(&proto::public_b64(&sign))
     );
-    println!("Compare both with the Devices card in the ucanrun web UI.");
     println!(
         "Rules:       {} (nothing runs until you list programs there)",
         rules.display()
@@ -387,6 +421,7 @@ pub fn status() -> Result<(), String> {
 /// until it is removed there.
 pub fn forget() -> Result<(), String> {
     let p = dir().join("runner.json");
+    let _ = std::fs::remove_file(dir().join("seen.json"));
     match std::fs::remove_file(&p) {
         Ok(()) => {
             println!(
@@ -403,14 +438,52 @@ pub fn forget() -> Result<(), String> {
     }
 }
 
-/// Checks a job against this runner's identity and rules. Returns why it is
-/// refused, or nothing.
-pub fn check(
-    job: &Job,
-    name: &str,
-    rules: &Rules,
-    seen: &mut HashMap<String, i64>,
-) -> Result<(), String> {
+/// Jobs already received, kept on disk until they expire, so a copy of a
+/// job is refused even after the runner restarts.
+pub struct Seen {
+    path: Option<PathBuf>,
+    map: HashMap<String, i64>,
+}
+
+impl Seen {
+    pub fn memory() -> Seen {
+        Seen {
+            path: None,
+            map: HashMap::new(),
+        }
+    }
+
+    fn open() -> Seen {
+        let path = dir().join("seen.json");
+        let map = std::fs::read(&path)
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default();
+        Seen {
+            path: Some(path),
+            map,
+        }
+    }
+
+    /// Records a job id; an error if it was seen before or cannot be saved.
+    pub fn claim(&mut self, job: &str, till: i64) -> Result<(), String> {
+        let now = now_unix();
+        self.map.retain(|_, t| *t >= now);
+        if self.map.contains_key(job) {
+            return Err("the job was already received".into());
+        }
+        self.map.insert(job.to_string(), till);
+        if let Some(p) = &self.path {
+            let b = serde_json::to_vec(&self.map).map_err(|e| e.to_string())?;
+            // Refuse rather than run something whose replay we cannot stop.
+            private_write(p, &b).map_err(|e| format!("cannot record the job: {e}"))?;
+        }
+        Ok(())
+    }
+}
+
+/// The routing fields, checked before anything is decrypted.
+pub fn check_outer(job: &Job, name: &str, seen: &mut Seen) -> Result<(), String> {
     if job.v != VERSION {
         return Err(format!("job version {} is not supported", job.v));
     }
@@ -421,15 +494,26 @@ pub fn check(
     if now > job.not_after {
         return Err("the job has expired".into());
     }
-    seen.retain(|_, till| *till >= now);
-    if job.job.len() < 16 || seen.contains_key(&job.job) {
-        return Err("the job was already received".into());
+    if job.not_after > now + MAX_JOB_LIFE_SECS {
+        return Err("the job is valid for too long; check the clocks".into());
     }
-    seen.insert(job.job.clone(), job.not_after);
-    if rules.require_totp && !job.totp {
+    if job.job.len() < 16 || !job.job.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err("bad job id".into());
+    }
+    seen.claim(&job.job, job.not_after)
+}
+
+/// The command, checked against this runner's rules once decrypted.
+pub fn check_body(job: &Job, body: &JobBody, name: &str, rules: &Rules) -> Result<(), String> {
+    // The sealed part names the same job, so it cannot be moved onto
+    // another envelope.
+    if body.job != job.job || body.runner != name {
+        return Err("the sealed job does not match its envelope".into());
+    }
+    if rules.require_totp && !body.totp {
         return Err("this runner only takes jobs approved with TOTP".into());
     }
-    let e = &job.exec;
+    let e = &body.exec;
     let a0 = e.argv.first().map(String::as_str).unwrap_or("");
     let abs = if cfg!(windows) {
         policy::windows_abs(a0)
@@ -465,10 +549,10 @@ pub fn check(
         risk: RISK_HIGH.into(),
         runner: name.into(),
         exec: Some(e.clone()),
-        timeout_sec: job.timeout_sec.clamp(0, 600),
+        timeout_sec: body.timeout_sec.clamp(0, 600),
         ..Default::default()
     };
-    let public: BTreeSet<&str> = job.public.iter().map(String::as_str).collect();
+    let public: BTreeSet<&str> = body.public.iter().map(String::as_str).collect();
     p.validate_with(&|r: &str| public.contains(r))
         .map_err(|e| e.to_string())?;
     Ok(())
@@ -509,37 +593,33 @@ fn command_of(e: &ExecSpec) -> Result<ExecSpec, String> {
     Ok(x)
 }
 
-async fn run_job(job: &Job, id: &x25519::Identity) -> policy::RunResult {
-    let values = match proto::unseal(id, &job.secrets) {
+fn failed(output: String) -> policy::RunResult {
+    policy::RunResult {
+        ok: false,
+        exit: -1,
+        output,
+    }
+}
+
+async fn run_body(body: &JobBody) -> policy::RunResult {
+    let values = match body.secrets.to_bytes() {
         Ok(v) => v,
-        Err(e) => {
-            return policy::RunResult {
-                ok: false,
-                exit: -1,
-                output: e,
-            };
-        }
+        Err(e) => return failed(e),
     };
-    let exec = match command_of(&job.exec) {
+    let exec = match command_of(&body.exec) {
         Ok(x) => x,
-        Err(e) => {
-            return policy::RunResult {
-                ok: false,
-                exit: -1,
-                output: e,
-            };
-        }
+        Err(e) => return failed(e),
     };
     let action = Action {
         exec: Some(exec),
-        timeout_sec: if job.timeout_sec > 0 {
-            job.timeout_sec.min(600)
+        timeout_sec: if body.timeout_sec > 0 {
+            body.timeout_sec.min(600)
         } else {
             30
         },
         ..Default::default()
     };
-    let public: BTreeSet<String> = job.public.iter().cloned().collect();
+    let public: BTreeSet<String> = body.public.iter().cloned().collect();
     let get = |n: &str| {
         values
             .get(n)
@@ -599,8 +679,24 @@ struct Ctx {
     id: x25519::Identity,
     server_key: ed25519_dalek::VerifyingKey,
     http: reqwest::Client,
-    seen: Mutex<HashMap<String, i64>>,
+    seen: Mutex<Seen>,
     log: Log,
+}
+
+impl Ctx {
+    /// A POST signed with the runner's key: no token travels.
+    async fn post(&self, path: &str, body: Vec<u8>) -> reqwest::Result<reqwest::Response> {
+        let mut req = self
+            .http
+            .post(format!("{}{path}", self.cfg.server))
+            .header("content-type", "application/json");
+        for (k, v) in
+            proto::sign_request(&self.sign, &self.cfg.name, "POST", path, now_unix(), &body)
+        {
+            req = req.header(k, v);
+        }
+        req.body(body).send().await
+    }
 }
 
 async fn handle(ctx: Arc<Ctx>, env: Signed) {
@@ -615,56 +711,81 @@ async fn handle(ctx: Arc<Ctx>, env: Signed) {
             return;
         }
     };
-    let verdict = load_rules().and_then(|r| {
-        let mut seen = ctx.seen.lock().unwrap();
-        check(&job, &ctx.cfg.name, &r, &mut seen)
-    });
+    if let Err(e) = check_outer(&job, &ctx.cfg.name, &mut ctx.seen.lock().unwrap()) {
+        // A replay or an expired copy: nothing to answer.
+        eprintln!("runner: ignored job {}: {e}", job.job);
+        ctx.log
+            .write(serde_json::json!({"event": "ignored", "job": job.job, "why": e}));
+        return;
+    }
     let started = std::time::Instant::now();
-    let (res, refused) = match verdict {
-        Err(why) => (
-            policy::RunResult {
-                ok: false,
-                exit: -1,
-                output: format!("runner {} refused: {why}", ctx.cfg.name),
-            },
+    let body: Result<JobBody, String> = proto::unseal(&ctx.id, &job.sealed);
+    let (res, refused, id, meta) = match body {
+        Err(e) => (
+            failed(format!("runner {} refused: {e}", ctx.cfg.name)),
             true,
+            String::new(),
+            serde_json::json!({}),
         ),
-        Ok(()) => (run_job(&job, &ctx.id).await, false),
+        Ok(b) => {
+            let meta = serde_json::json!({"hash": b.hash, "approved_by": b.approved_by,
+                "argv0": b.exec.argv.first(), "sudo": !b.exec.sudo.is_empty()});
+            match load_rules().and_then(|r| check_body(&job, &b, &ctx.cfg.name, &r)) {
+                Err(why) => (
+                    failed(format!("runner {} refused: {why}", ctx.cfg.name)),
+                    true,
+                    b.id.clone(),
+                    meta,
+                ),
+                Ok(()) => (run_body(&b).await, false, b.id.clone(), meta),
+            }
+        }
     };
-    ctx.log.write(serde_json::json!({
-        "event": if refused { "refused" } else { "ran" },
-        "id": job.id, "job": job.job, "hash": job.hash, "approved_by": job.approved_by,
-        "argv0": job.exec.argv.first(), "sudo": !job.exec.sudo.is_empty(),
+    let mut line = serde_json::json!({
+        "event": if refused { "refused" } else { "ran" }, "id": id, "job": job.job,
         "ok": res.ok, "exit": res.exit, "ms": started.elapsed().as_millis() as u64,
         "why": if refused { res.output.clone() } else { String::new() },
-    }));
-    let out = JobResult {
-        v: VERSION,
-        job: job.job.clone(),
-        id: job.id.clone(),
-        runner: ctx.cfg.name.clone(),
-        ok: res.ok,
-        exit: res.exit,
-        output: res.output,
-        refused,
+    });
+    if let (Some(l), Some(m)) = (line.as_object_mut(), meta.as_object()) {
+        l.extend(m.clone());
+    }
+    ctx.log.write(line);
+    let sealed = match proto::seal(
+        &ctx.cfg.server_age,
+        &ResultBody {
+            job: job.job.clone(),
+            id: id.clone(),
+            ok: res.ok,
+            exit: res.exit,
+            output: res.output,
+            refused,
+        },
+    ) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("runner: cannot seal the result of {id}: {e}");
+            return;
+        }
     };
-    let signed = Signed::new(&ctx.sign, &out);
+    let signed = Signed::new(
+        &ctx.sign,
+        &JobResult {
+            v: VERSION,
+            job: job.job.clone(),
+            runner: ctx.cfg.name.clone(),
+            sealed,
+        },
+    );
+    let body = serde_json::to_vec(&signed).unwrap_or_default();
     for attempt in 0..4u64 {
-        let r = ctx
-            .http
-            .post(format!("{}/v1/runner/result", ctx.cfg.server))
-            .bearer_auth(&ctx.cfg.token)
-            .json(&signed)
-            .send()
-            .await;
-        match r {
+        match ctx.post("/v1/runner/result", body.clone()).await {
             Ok(r) if r.status().is_success() => return,
             // The server no longer waits for it; retrying will not help.
-            Ok(r) if r.status().as_u16() == 404 || r.status().as_u16() == 410 => return,
+            Ok(r) if matches!(r.status().as_u16(), 403 | 404 | 410) => return,
             _ => tokio::time::sleep(Duration::from_secs(2 << attempt)).await,
         }
     }
-    eprintln!("runner: could not deliver the result of {}", job.id);
+    eprintln!("runner: could not deliver the result of {id}");
 }
 
 /// `ucr runner serve`: asks the server for work until stopped.
@@ -702,20 +823,15 @@ pub async fn serve() -> Result<(), String> {
         id,
         server_key,
         http,
-        seen: Mutex::new(HashMap::new()),
+        seen: Mutex::new(Seen::open()),
         log: Log::open(),
     });
     let mut backoff = 2u64;
     let mut said_locked = false;
     loop {
-        let r = ctx
-            .http
-            .post(format!("{}/v1/runner/poll", ctx.cfg.server))
-            .bearer_auth(&ctx.cfg.token)
-            .json(&PollIn { info: info() })
-            .send()
-            .await;
-        match r {
+        let sealed = proto::seal(&ctx.cfg.server_age, &info()).unwrap_or_default();
+        let body = serde_json::to_vec(&PollIn { info: sealed }).unwrap_or_default();
+        match ctx.post("/v1/runner/poll", body).await {
             Ok(r) if r.status().is_success() => {
                 backoff = 2;
                 said_locked = false;
@@ -724,8 +840,15 @@ pub async fn serve() -> Result<(), String> {
                     tokio::spawn(handle(ctx.clone(), env));
                 }
             }
-            Ok(r) if matches!(r.status().as_u16(), 401 | 403) => {
-                return Err("the server rejected this runner: it was removed. Enroll again with a new code.".into());
+            Ok(r) if r.status().as_u16() == 401 => {
+                eprintln!(
+                    "runner: the server did not accept the signature; check this machine's clock"
+                );
+                tokio::time::sleep(Duration::from_secs(backoff)).await;
+                backoff = (backoff * 2).min(60);
+            }
+            Ok(r) if r.status().as_u16() == 403 => {
+                return Err("the server does not know this runner: it was removed. Enroll again with a new code.".into());
             }
             Ok(r) if r.status().as_u16() == 423 => {
                 if !said_locked {
@@ -748,25 +871,25 @@ pub async fn serve() -> Result<(), String> {
     }
 }
 
-/// Values the command needs, for tests.
-#[cfg(test)]
-pub(crate) fn values(m: &[(&str, &str)]) -> std::collections::BTreeMap<String, Zeroizing<Vec<u8>>> {
-    m.iter()
-        .map(|(k, v)| (k.to_string(), Zeroizing::new(v.as_bytes().to_vec())))
-        .collect()
-}
-
 #[cfg(test)]
 mod unit {
     use super::*;
 
-    fn job(argv: &[&str]) -> Job {
+    fn outer() -> Job {
         Job {
             v: VERSION,
-            id: "r1".into(),
             job: format!("{:032x}", rand::random::<u128>()),
             runner: "box".into(),
             not_after: now_unix() + 60,
+            ..Default::default()
+        }
+    }
+
+    fn body_of(j: &Job, argv: &[&str]) -> JobBody {
+        JobBody {
+            job: j.job.clone(),
+            runner: j.runner.clone(),
+            id: "r1".into(),
             totp: true,
             exec: ExecSpec {
                 argv: argv.iter().map(|s| s.to_string()).collect(),
@@ -785,53 +908,83 @@ mod unit {
     }
 
     #[test]
-    #[cfg(unix)]
-    fn checks_identity_time_replay_and_rules() {
-        let mut seen = HashMap::new();
-        let r = rules(&["/usr/bin/id"]);
-        assert!(check(&job(&["/usr/bin/id"]), "box", &r, &mut seen).is_ok());
-        // The same job again.
-        let once = job(&["/usr/bin/id"]);
-        assert!(check(&once, "box", &r, &mut seen).is_ok());
-        let e = check(&once, "box", &r, &mut seen).unwrap_err();
+    fn outer_checks_identity_time_and_replay() {
+        let mut seen = Seen::memory();
+        let j = outer();
+        assert!(check_outer(&j, "box", &mut seen).is_ok());
+        let e = check_outer(&j, "box", &mut seen).unwrap_err();
         assert!(e.contains("already"), "{e}");
-        let mut seen = HashMap::new();
-        assert!(check(&job(&["/usr/bin/id"]), "other", &r, &mut seen).is_err());
-        let mut old = job(&["/usr/bin/id"]);
+        assert!(check_outer(&outer(), "other", &mut seen).is_err());
+        let mut old = outer();
         old.not_after = now_unix() - 1;
         assert!(
-            check(&old, "box", &r, &mut seen)
+            check_outer(&old, "box", &mut seen)
                 .unwrap_err()
                 .contains("expired")
         );
-        let e = check(&job(&["/usr/bin/rm", "-rf", "/"]), "box", &r, &mut seen).unwrap_err();
+        let mut far = outer();
+        far.not_after = now_unix() + 86400;
+        assert!(
+            check_outer(&far, "box", &mut seen)
+                .unwrap_err()
+                .contains("too long")
+        );
+        let mut v1 = outer();
+        v1.v = 1;
+        assert!(check_outer(&v1, "box", &mut seen).is_err());
+    }
+
+    #[test]
+    fn replays_are_refused_after_a_restart() {
+        let d = tempfile::tempdir().unwrap();
+        let path = d.path().join("seen.json");
+        let mut a = Seen {
+            path: Some(path.clone()),
+            map: HashMap::new(),
+        };
+        a.claim("aaaabbbbccccdddd", now_unix() + 60).unwrap();
+        let mut b = Seen {
+            path: Some(path.clone()),
+            map: serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap(),
+        };
+        assert!(b.claim("aaaabbbbccccdddd", now_unix() + 60).is_err());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn body_checks_rules() {
+        let r = rules(&["/usr/bin/id"]);
+        let j = outer();
+        assert!(check_body(&j, &body_of(&j, &["/usr/bin/id"]), "box", &r).is_ok());
+        let e = check_body(&j, &body_of(&j, &["/usr/bin/rm", "-rf", "/"]), "box", &r).unwrap_err();
         assert!(e.contains("allow list"), "{e}");
         // Even with "*", the shared rules still stop a shell.
-        let e = check(
-            &job(&["/bin/sh", "-c", "id"]),
+        let e = check_body(
+            &j,
+            &body_of(&j, &["/bin/sh", "-c", "id"]),
             "box",
             &rules(&["*"]),
-            &mut seen,
         )
         .unwrap_err();
         assert!(e.contains("interpreters"), "{e}");
-        let mut no_totp = job(&["/usr/bin/id"]);
-        no_totp.job = "fedcba9876543210fedc".into();
-        no_totp.totp = false;
-        assert!(
-            check(&no_totp, "box", &r, &mut seen)
-                .unwrap_err()
-                .contains("TOTP")
-        );
-        let mut s = job(&["/usr/bin/id"]);
-        s.job = "aaaabbbbccccddddeeee".into();
-        s.exec.sudo = "{{secret:pw}}".into();
+        let mut b = body_of(&j, &["/usr/bin/id"]);
+        b.totp = false;
+        assert!(check_body(&j, &b, "box", &r).unwrap_err().contains("TOTP"));
+        let mut b = body_of(&j, &["/usr/bin/id"]);
+        b.exec.sudo = "{{secret:pw}}".into();
         let mut off = r.clone();
         off.sudo = false;
         assert!(
-            check(&s, "box", &off, &mut seen)
+            check_body(&j, &b, "box", &off)
                 .unwrap_err()
                 .contains("sudo is off")
+        );
+        // A body taken from another envelope.
+        let other = outer();
+        assert!(
+            check_body(&j, &body_of(&other, &["/usr/bin/id"]), "box", &r)
+                .unwrap_err()
+                .contains("envelope")
         );
     }
 
@@ -856,21 +1009,18 @@ mod unit {
 
     #[tokio::test]
     #[cfg(unix)]
-    async fn runs_with_sealed_secrets_and_redacts() {
-        let id = x25519::Identity::generate();
-        let sealed = proto::seal(
-            &id.to_public().to_string(),
-            &values(&[("k", "s3cr3t-value")]),
-        )
-        .unwrap();
+    async fn runs_with_its_secrets_and_redacts() {
         let cat = ["/bin/cat", "/usr/bin/cat"]
             .into_iter()
             .find(|p| std::path::Path::new(p).exists())
             .unwrap();
-        let mut j = job(&[cat]);
-        j.exec.stdin = "{{secret:k}}".into();
-        j.secrets = sealed;
-        let r = run_job(&j, &id).await;
+        let j = outer();
+        let mut b = body_of(&j, &[cat]);
+        b.exec.stdin = "{{secret:k}}".into();
+        let mut m = std::collections::BTreeMap::new();
+        m.insert("k".to_string(), Zeroizing::new(b"s3cr3t-value".to_vec()));
+        b.secrets = proto::Values::from_bytes(&m);
+        let r = run_body(&b).await;
         assert!(r.ok, "{r:?}");
         assert!(!r.output.contains("s3cr3t-value"), "{}", r.output);
         assert!(r.output.contains("[REDACTED]"));

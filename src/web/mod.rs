@@ -1412,14 +1412,38 @@ async fn agent_runners(State(s): State<Arc<Server>>, h: HeaderMap) -> Response {
 
 // --- runner handlers ---
 
-fn runner_name(s: &Server, h: &HeaderMap) -> Result<String, Box<Response>> {
-    let tok = header_str(h, "authorization")
-        .strip_prefix("Bearer ")
-        .unwrap_or("");
-    s.core.runner_auth(tok).map_err(|e| {
+/// The raw body of a runner request: its signature covers these bytes.
+/// A sealed result can be several times its 64 KiB of output once escaped,
+/// encrypted and encoded.
+const MAX_RUNNER_BODY: usize = 1 << 20;
+
+async fn runner_body(b: Body) -> Result<axum::body::Bytes, Box<Response>> {
+    match tokio::time::timeout(READ_TIMEOUT, axum::body::to_bytes(b, MAX_RUNNER_BODY)).await {
+        Ok(Ok(b)) => Ok(b),
+        _ => Err(Box::new(err_json(400, "JSON không hợp lệ"))),
+    }
+}
+
+/// Which runner signed this request, or the answer to send instead.
+fn runner_check(
+    s: &Server,
+    h: &HeaderMap,
+    path: &str,
+    body: &[u8],
+) -> Result<String, Box<Response>> {
+    use crate::runner::proto::{H_DATE, H_NONCE, H_RUNNER, H_SIG};
+    let a = core::RunnerAuth {
+        runner: header_str(h, H_RUNNER).to_string(),
+        date: header_str(h, H_DATE).to_string(),
+        nonce: header_str(h, H_NONCE).to_string(),
+        sig: header_str(h, H_SIG).to_string(),
+    };
+    s.core.runner_verify(&a, "POST", path, body).map_err(|e| {
         Box::new(match e {
             core::Error::Locked => err_json(423, "vault locked"),
-            _ => err_json(403, "unknown runner"),
+            core::Error::Forbidden => err_json(403, "unknown runner"),
+            core::Error::Busy => err_json(429, "too many requests"),
+            _ => err_json(401, core::runners_unsigned()),
         })
     })
 }
@@ -1433,12 +1457,28 @@ async fn runner_enroll(State(s): State<Arc<Server>>, b: Body) -> Response {
 }
 
 async fn runner_poll(State(s): State<Arc<Server>>, h: HeaderMap, b: Body) -> Response {
-    let name = match runner_name(&s, &h) {
+    let raw = match runner_body(b).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    let name = match runner_check(&s, &h, "/v1/runner/poll", &raw) {
         Ok(n) => n,
         Err(r) => return *r,
     };
-    let input: crate::runner::proto::PollIn = body!(b);
-    match s.core.runner_poll(&name, input.info).await {
+    let Ok(input) = serde_json::from_slice::<crate::runner::proto::PollIn>(&raw) else {
+        return err_json(400, "JSON không hợp lệ");
+    };
+    let info = match s
+        .core
+        .vault
+        .unseal_bytes(&input.info)
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+    {
+        Some(i) => i,
+        None => return err_json(400, "JSON không hợp lệ"),
+    };
+    match s.core.runner_poll(&name, info).await {
         Ok(jobs) => write_json(200, &crate::runner::proto::PollOut { jobs }),
         Err(core::Error::Locked) => err_json(423, "vault locked"),
         Err(e) => fail(e),
@@ -1446,11 +1486,17 @@ async fn runner_poll(State(s): State<Arc<Server>>, h: HeaderMap, b: Body) -> Res
 }
 
 async fn runner_result(State(s): State<Arc<Server>>, h: HeaderMap, b: Body) -> Response {
-    let name = match runner_name(&s, &h) {
+    let raw = match runner_body(b).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    let name = match runner_check(&s, &h, "/v1/runner/result", &raw) {
         Ok(n) => n,
         Err(r) => return *r,
     };
-    let input: crate::runner::proto::Signed = body!(b);
+    let Ok(input) = serde_json::from_slice::<crate::runner::proto::Signed>(&raw) else {
+        return err_json(400, "JSON không hợp lệ");
+    };
     match s.core.runner_result(&name, input) {
         Ok(()) => ok_json(),
         Err(e) => fail(e),

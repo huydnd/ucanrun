@@ -2085,44 +2085,109 @@ async fn auto_secrets_still_need_totp_for_commands() {
 // --- runners ---
 
 struct FakeRunner {
+    name: String,
     sign: ed25519_dalek::SigningKey,
     id: age::x25519::Identity,
-    token: String,
     server: ed25519_dalek::VerifyingKey,
+    server_age: String,
 }
 
-fn enroll_fake(c: &Core, name: &str) -> FakeRunner {
-    use crate::runner::proto;
+impl FakeRunner {
+    /// Headers for a signed request at `date`.
+    fn auth(&self, path: &str, date: i64, body: &[u8]) -> RunnerAuth {
+        use crate::runner::proto::{H_DATE, H_NONCE, H_RUNNER, H_SIG, sign_request};
+        let hs = sign_request(&self.sign, &self.name, "POST", path, date, body);
+        let get = |n: &str| hs.iter().find(|(k, _)| *k == n).unwrap().1.clone();
+        RunnerAuth {
+            runner: get(H_RUNNER),
+            date: get(H_DATE),
+            nonce: get(H_NONCE),
+            sig: get(H_SIG),
+        }
+    }
+
+    fn open(
+        &self,
+        s: &crate::runner::proto::Signed,
+    ) -> (crate::runner::proto::Job, crate::runner::proto::JobBody) {
+        let j: crate::runner::proto::Job = s.open(&self.server).unwrap();
+        let b = crate::runner::proto::unseal(&self.id, &j.sealed).unwrap();
+        (j, b)
+    }
+
+    fn answer(
+        &self,
+        job: &str,
+        id: &str,
+        output: &str,
+        refused: bool,
+    ) -> crate::runner::proto::Signed {
+        use crate::runner::proto::{JobResult, ResultBody, Signed, VERSION, seal};
+        let sealed = seal(
+            &self.server_age,
+            &ResultBody {
+                job: job.into(),
+                id: id.into(),
+                ok: !refused,
+                exit: if refused { -1 } else { 0 },
+                output: output.into(),
+                refused,
+            },
+        )
+        .unwrap();
+        Signed::new(
+            &self.sign,
+            &JobResult {
+                v: VERSION,
+                job: job.into(),
+                runner: self.name.clone(),
+                sealed,
+            },
+        )
+    }
+}
+
+fn enroll_fake(c: &Core, name: &str, info: crate::runner::proto::Info) -> FakeRunner {
+    use crate::runner::proto::{self, EnrollIn, VERSION};
     let sign = ed25519_dalek::SigningKey::generate(&mut rand::rngs::OsRng);
     let id = age::x25519::Identity::generate();
     let (code, _) = c.new_runner_code().unwrap();
-    let input = |code: &str| proto::EnrollIn {
-        code: code.into(),
-        name: name.into(),
-        sign_key: proto::public_b64(&sign),
-        age_key: id.to_public().to_string(),
-        info: proto::Info {
-            os: "linux".into(),
-            user: "ucr-runner".into(),
-            sudo: true,
-            allow: vec!["/usr/bin/id".into()],
+    assert_eq!(code.len(), 14, "XXXX-XXXX-XXXX");
+    let input = |code: &str| {
+        let mut e = EnrollIn {
+            v: VERSION,
+            name: name.into(),
+            sign_key: proto::public_b64(&sign),
+            age_key: id.to_public().to_string(),
+            info: info.clone(),
             ..Default::default()
-        },
+        };
+        e.proof = e.proof_for(code);
+        e
     };
-    assert!(c.enroll_runner(input("WRONG-CODE")).is_err());
-    // Lower case and without the dash still match.
-    let out = c
-        .enroll_runner(input(&code.to_lowercase().replace('-', "")))
-        .unwrap();
+    assert!(c.enroll_runner(input("WRON-GCOD-EXXX")).is_err());
+    // A proof made for other keys does not carry over.
+    let mut stolen = input(&code);
+    stolen.sign_key =
+        proto::public_b64(&ed25519_dalek::SigningKey::generate(&mut rand::rngs::OsRng));
+    assert!(c.enroll_runner(stolen).is_err(), "proof bound to the keys");
+    // Lower case and without dashes still match.
+    let mine = input(&code.to_lowercase().replace('-', ""));
+    let out = c.enroll_runner(mine.clone()).unwrap();
+    assert!(
+        out.proves(&code, &mine.sign_key),
+        "the server proves the code too"
+    );
     assert!(
         c.enroll_runner(input(&code)).is_err(),
         "a code works only once"
     );
     FakeRunner {
+        name: name.into(),
         sign,
         id,
         server: proto::verifying_key(&out.server_key).unwrap(),
-        token: out.token,
+        server_age: out.server_age,
     }
 }
 
@@ -2138,128 +2203,202 @@ fn sudo_call(runner: &str) -> Call {
     }
 }
 
+fn plain_call(runner: &str) -> Call {
+    Call {
+        http: None,
+        exec: Some(policy::ExecSpec {
+            argv: vec!["/usr/bin/id".into()],
+            env: [("K".to_string(), "{{secret:pw}}".to_string())].into(),
+            ..Default::default()
+        }),
+        runner: runner.into(),
+    }
+}
+
+fn auto_never() -> SecretMeta {
+    SecretMeta {
+        allow_commands: true,
+        approve: "auto".into(),
+        totp: "never".into(),
+        ..Default::default()
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
-async fn runner_gets_a_signed_sealed_job_and_returns_a_signed_result() {
-    use crate::runner::proto::{self, Job, JobResult, Signed, VERSION};
+async fn runner_jobs_are_sealed_signed_and_answered_once() {
     let e = new_env("en", false).await;
     e.c.setup(PASS.as_bytes()).unwrap();
     e.c.put_secret("pw", b"sudo-pass-VALUE-1").unwrap();
-    e.c.set_secret_meta(
-        "pw",
-        SecretMeta {
-            allow_commands: true,
-            approve: "auto".into(),
-            totp: "never".into(),
-            ..Default::default()
-        },
-    )
-    .unwrap();
+    e.c.set_secret_meta("pw", auto_never()).unwrap();
     let (t, _) = e.token("claude", &[]);
-    // Unknown runner: refused before anyone is asked.
-    let err = e.c.submit_call(&t, &sudo_call("box"), "").unwrap_err();
+    let err = e.c.submit_call(&t, &plain_call("box"), "").unwrap_err();
     assert_eq!(err.agent_code().0, "unknown_runner", "{err}");
-    let fr = enroll_fake(&e.c, "box");
-    assert_eq!(e.c.runner_auth(&fr.token).unwrap(), "box");
-    assert!(e.c.runner_auth("ucr_r_nope").is_err());
+    let fr = enroll_fake(&e.c, "box", Default::default());
     assert!(e.c.runner_seen_secs("box").is_some());
 
-    // Exec is off on the server, but a runner still takes commands.
-    let r = e.c.submit_call(&t, &sudo_call("box"), "restart").unwrap();
+    // Exec is off on the server, but a runner still takes commands; this
+    // secret is auto and needs no TOTP, so it starts at once.
+    let r = e.c.submit_call(&t, &plain_call("box"), "check").unwrap();
     assert!(r.display.contains("runner: box"), "{}", r.display);
-    assert!(r.display.contains("sudo: ‹secret:pw›"), "{}", r.display);
-    assert_eq!(r.state, ReqState::Running, "auto secret, no TOTP");
+    assert_eq!(r.state, ReqState::Running);
 
     let jobs = e.c.runner_poll("box", Default::default()).await.unwrap();
     assert_eq!(jobs.len(), 1);
-    assert!(
-        !jobs[0].payload.contains("sudo-pass-VALUE-1"),
-        "secret in clear"
-    );
-    let job: Job = jobs[0].open(&fr.server).unwrap();
+    // Nothing but routing data is readable on the wire.
+    for bad in ["sudo-pass-VALUE-1", "/usr/bin/id", &r.id, &r.hash] {
+        assert!(!jobs[0].payload.contains(bad), "{bad} readable in the job");
+    }
+    let (job, body) = fr.open(&jobs[0]);
     assert_eq!(
-        (job.id.as_str(), job.runner.as_str()),
-        (r.id.as_str(), "box")
+        (body.id.as_str(), body.runner.as_str(), body.job.as_str()),
+        (r.id.as_str(), "box", job.job.as_str())
     );
-    assert_eq!(job.exec.sudo, "{{secret:pw}}");
-    let vals = proto::unseal(&fr.id, &job.secrets).unwrap();
-    assert_eq!(vals["pw"].as_slice(), b"sudo-pass-VALUE-1");
+    assert_eq!(
+        body.secrets.to_bytes().unwrap()["pw"].as_slice(),
+        b"sudo-pass-VALUE-1"
+    );
 
-    let answer = |key: &ed25519_dalek::SigningKey, output: &str| {
-        Signed::new(
-            key,
-            &JobResult {
-                v: VERSION,
-                job: job.job.clone(),
-                id: job.id.clone(),
-                runner: "box".into(),
-                ok: true,
-                exit: 0,
-                output: output.into(),
-                refused: false,
-            },
-        )
+    // Forged or misrouted results are refused.
+    let stranger = FakeRunner {
+        sign: ed25519_dalek::SigningKey::generate(&mut rand::rngs::OsRng),
+        ..FakeRunner {
+            name: "box".into(),
+            sign: fr.sign.clone(),
+            id: age::x25519::Identity::generate(),
+            server: fr.server,
+            server_age: fr.server_age.clone(),
+        }
     };
-    // A result signed by anyone else is rejected, and so is one sent with
-    // another runner's token.
-    let stranger = ed25519_dalek::SigningKey::generate(&mut rand::rngs::OsRng);
-    assert!(e.c.runner_result("box", answer(&stranger, "0")).is_err());
-    assert!(e.c.runner_result("other", answer(&fr.sign, "0")).is_err());
-    e.c.runner_result("box", answer(&fr.sign, "0 sudo-pass-VALUE-1"))
-        .unwrap();
+    assert!(
+        e.c.runner_result("box", stranger.answer(&job.job, &r.id, "0", false))
+            .is_err()
+    );
+    assert!(
+        e.c.runner_result("other", fr.answer(&job.job, &r.id, "0", false))
+            .is_err()
+    );
+    assert!(
+        e.c.runner_result("box", fr.answer(&job.job, "someone-else", "0", false))
+            .is_err(),
+        "id must match"
+    );
+    e.c.runner_result(
+        "box",
+        fr.answer(&job.job, &r.id, "uid=0 sudo-pass-VALUE-1", false),
+    )
+    .unwrap();
     let done = e.c.wait(&r.id, Some(Duration::from_secs(5))).await.unwrap();
     assert_eq!(done.state, ReqState::Done);
     let out = done.result.unwrap().output;
-    assert!(!out.contains("sudo-pass-VALUE-1"), "{out}");
-    assert!(out.contains("[REDACTED]"), "{out}");
-    // Delivered once only.
-    assert!(e.c.runner_result("box", answer(&fr.sign, "0")).is_err());
+    assert!(
+        !out.contains("sudo-pass-VALUE-1") && out.contains("[REDACTED]"),
+        "{out}"
+    );
+    assert!(
+        e.c.runner_result("box", fr.answer(&job.job, &r.id, "0", false))
+            .is_err(),
+        "only once"
+    );
 
     // The agent sees the runner and its rules, never its keys.
     let list = e.c.runners_for_agent().unwrap();
     assert_eq!(list[0]["name"], "box");
-    assert!(!list[0].to_string().contains(&fr.token));
 
-    // Removed: the token stops working and new requests are refused.
     e.c.delete_runner("box").unwrap();
-    assert!(e.c.runner_auth(&fr.token).is_err());
+    let now = unix(SystemTime::now());
+    assert!(matches!(
+        e.c.runner_verify(
+            &fr.auth("/v1/runner/poll", now, b"{}"),
+            "POST",
+            "/v1/runner/poll",
+            b"{}"
+        ),
+        Err(Error::Forbidden)
+    ));
     assert!(e.c.runner_poll("box", Default::default()).await.is_err());
-    let err = e.c.submit_call(&t, &sudo_call("box"), "").unwrap_err();
-    assert_eq!(err.agent_code().0, "unknown_runner");
+    assert_eq!(
+        e.c.submit_call(&t, &plain_call("box"), "")
+            .unwrap_err()
+            .agent_code()
+            .0,
+        "unknown_runner"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn runner_rules_for_sudo_and_refusals() {
-    use crate::runner::proto::{Job, JobResult, Signed, VERSION};
+async fn runner_requests_must_be_signed_fresh_and_new() {
+    let e = new_env("en", false).await;
+    e.c.setup(PASS.as_bytes()).unwrap();
+    let fr = enroll_fake(&e.c, "box", Default::default());
+    let now = unix(SystemTime::now());
+    let p = "/v1/runner/poll";
+    let a = fr.auth(p, now, b"{}");
+    assert_eq!(e.c.runner_verify(&a, "POST", p, b"{}").unwrap(), "box");
+    assert!(
+        e.c.runner_verify(&a, "POST", p, b"{}").is_err(),
+        "replayed nonce"
+    );
+    let a = fr.auth(p, now, b"{}");
+    assert!(
+        e.c.runner_verify(&a, "POST", p, b"{\"x\":1}").is_err(),
+        "body changed"
+    );
+    let a = fr.auth(p, now, b"{}");
+    assert!(
+        e.c.runner_verify(&a, "POST", "/v1/runner/result", b"{}")
+            .is_err(),
+        "path changed"
+    );
+    let a = fr.auth(p, now - 3600, b"{}");
+    assert!(
+        e.c.runner_verify(&a, "POST", p, b"{}").is_err(),
+        "an hour old"
+    );
+    let mut a = fr.auth(p, now, b"{}");
+    a.runner = "nobody".into();
+    assert!(matches!(
+        e.c.runner_verify(&a, "POST", p, b"{}"),
+        Err(Error::Forbidden)
+    ));
+    // Locked: nothing is answered.
+    e.c.lock("web");
+    let a = fr.auth(p, now, b"{}");
+    assert!(matches!(
+        e.c.runner_verify(&a, "POST", p, b"{}"),
+        Err(Error::Locked)
+    ));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn runner_rules_for_sudo_totp_and_refusals() {
     let e = new_env("en", false).await;
     e.c.setup(PASS.as_bytes()).unwrap();
     e.c.put_secret("pw", b"sudo-pass-VALUE-2").unwrap();
-    e.c.set_secret_meta(
-        "pw",
-        SecretMeta {
-            allow_commands: true,
-            ..Default::default()
-        },
-    )
-    .unwrap();
+    e.c.set_secret_meta("pw", auto_never()).unwrap();
     let (t, _) = e.token("claude", &[]);
-    let fr = enroll_fake(&e.c, "box");
-    // sudo without a runner, and env with sudo, are refused.
-    let mut c = sudo_call("");
-    assert!(e.c.submit_call(&t, &c, "").is_err());
-    c = sudo_call("box");
+    let fr = enroll_fake(&e.c, "box", Default::default());
+    // sudo without a runner, env with sudo, and sudo as argv[0] are refused.
+    assert!(e.c.submit_call(&t, &sudo_call(""), "").is_err());
+    let mut c = sudo_call("box");
     c.exec
         .as_mut()
         .unwrap()
         .env
         .insert("X".into(), "{{secret:pw}}".into());
-    let err = e.c.submit_call(&t, &c, "").unwrap_err().to_string();
-    assert!(err.contains("sudo drops env"), "{err}");
-    // sudo as argv[0] stays forbidden; the runner adds sudo itself.
-    c = sudo_call("box");
+    assert!(
+        e.c.submit_call(&t, &c, "")
+            .unwrap_err()
+            .to_string()
+            .contains("sudo drops env")
+    );
+    let mut c = sudo_call("box");
     c.exec.as_mut().unwrap().argv[0] = "/usr/bin/sudo".into();
     assert!(e.c.submit_call(&t, &c, "").is_err());
-    // A Windows path is fine for a runner, not for the server.
-    c = Call {
+    // Root never runs by itself, even with a secret set to auto and no TOTP.
+    let r = e.c.submit_call(&t, &sudo_call("box"), "").unwrap();
+    assert_eq!(r.state, ReqState::Pending, "sudo ran without a person");
+    // A Windows path is fine for a runner; cmd.exe is a shell.
+    let mut c = Call {
         http: None,
         exec: Some(policy::ExecSpec {
             argv: vec![r"C:\Windows\System32\ipconfig.exe".into()],
@@ -2267,50 +2406,51 @@ async fn runner_rules_for_sudo_and_refusals() {
         }),
         runner: "box".into(),
     };
-    let r = e.c.submit_call(&t, &c, "").unwrap();
-    assert_eq!(
-        r.state,
-        ReqState::Pending,
-        "no secret, still needs approval"
-    );
-    assert!(r.totp, "a command is high risk");
+    let w = e.c.submit_call(&t, &c, "").unwrap();
+    assert!(w.totp, "a command without secrets is high risk");
     c.exec.as_mut().unwrap().argv[0] = r"C:\Windows\System32\cmd.exe".into();
-    assert!(e.c.submit_call(&t, &c, "").is_err(), "cmd.exe is a shell");
+    assert!(e.c.submit_call(&t, &c, "").is_err());
 
-    // A refusal from the runner reaches the agent as a failure.
-    let r = e.c.submit_call(&t, &sudo_call("box"), "").unwrap();
-    e.c.decide(&r.id, &r.hash, true, "web", "", "").unwrap_err();
-    // TOTP is off on this server, so approve the TOTP-free path instead.
-    e.c.set_secret_meta(
-        "pw",
-        SecretMeta {
-            allow_commands: true,
-            totp: "never".into(),
-            ..Default::default()
-        },
-    )
-    .unwrap();
-    let r = e.c.submit_call(&t, &sudo_call("box"), "").unwrap();
+    // Approve the sudo request; a refusal from the runner ends it as failed.
     e.c.decide(&r.id, &r.hash, true, "web", "", "").unwrap();
     let jobs = e.c.runner_poll("box", Default::default()).await.unwrap();
-    let job: Job = jobs[0].open(&fr.server).unwrap();
-    let refused = Signed::new(
-        &fr.sign,
-        &JobResult {
-            v: VERSION,
-            job: job.job,
-            id: job.id,
-            runner: "box".into(),
-            ok: true,
-            exit: -1,
-            output: "runner box refused: sudo is off in runner.toml".into(),
-            refused: true,
-        },
-    );
-    e.c.runner_result("box", refused).unwrap();
+    let (job, body) = fr.open(&jobs[0]);
+    assert_eq!(body.exec.sudo, "{{secret:pw}}");
+    e.c.runner_result(
+        "box",
+        fr.answer(
+            &job.job,
+            &body.id,
+            "runner box refused: sudo is off in runner.toml",
+            true,
+        ),
+    )
+    .unwrap();
     let done = e.c.wait(&r.id, Some(Duration::from_secs(5))).await.unwrap();
     assert_eq!(done.state, ReqState::Failed);
     assert!(done.result.unwrap().output.contains("refused"));
+
+    // A runner that requires TOTP makes the server ask for it at approval.
+    let strict = enroll_fake(
+        &e.c,
+        "strict",
+        crate::runner::proto::Info {
+            require_totp: true,
+            ..Default::default()
+        },
+    );
+    let _ = strict;
+    let r = e.c.submit_call(&t, &plain_call("strict"), "").unwrap();
+    assert!(
+        r.totp && r.state == ReqState::Pending,
+        "auto secret, but the runner wants TOTP"
+    );
+    // The checklist flags the loose settings this test used.
+    let h = e.c.health().unwrap();
+    let level = |k: &str| h.iter().find(|i| i.key == k).map(|i| i.level.clone());
+    assert_eq!(level("runner_totp").as_deref(), Some("warn"));
+    assert_eq!(level("auto_commands").as_deref(), Some("bad"));
+    assert_eq!(level("runner_root").as_deref(), Some("ok"));
 }
 
 #[tokio::test(flavor = "multi_thread")]

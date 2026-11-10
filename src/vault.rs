@@ -208,6 +208,20 @@ impl Vault {
         Ok(out)
     }
 
+    /// The vault's public age recipient, for data sealed to the server.
+    pub fn recipient(&self) -> Result<String> {
+        Ok(fs::read_to_string(self.recipient_path())?
+            .trim()
+            .to_string())
+    }
+
+    /// Opens data sealed to the vault's recipient. Needs the vault open.
+    pub fn unseal_bytes(&self, sealed: &str) -> Result<Zeroizing<Vec<u8>>> {
+        let g = self.identity.read().unwrap();
+        let id = g.as_ref().ok_or(Error::Locked)?;
+        crate::runner::proto::unseal_bytes(id, sealed).map_err(Error::Msg)
+    }
+
     /// Seed of the key that signs runner jobs. Derived from the identity like
     /// the state key, so it needs no storage and exists only while unlocked.
     pub fn runner_seed(&self) -> Result<Zeroizing<[u8; 32]>> {

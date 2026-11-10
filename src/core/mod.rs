@@ -25,7 +25,7 @@ mod tests;
 pub use crate::state::{TelegramCfg, Token};
 pub use fields::{FieldInfo, SecretInfo};
 pub use health::HealthItem;
-pub use runners::RunnerView;
+pub use runners::{RunnerAuth, RunnerView, unsigned as runners_unsigned};
 pub use system::SystemInfo;
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -641,6 +641,10 @@ fn profile_secrets(p: &Profile) -> Vec<String> {
         .collect();
     v.extend(p.secret_choices.iter().cloned());
     v
+}
+
+fn a_sudo(a: &Action) -> bool {
+    a.exec.as_ref().is_some_and(|e| !e.sudo.is_empty())
 }
 
 fn action_of(p: &Profile) -> Action {
@@ -1717,7 +1721,10 @@ impl Core {
                 let mut names = a.secrets();
                 names.extend(p.secret_choices.iter().cloned());
                 let meta = g.st.as_ref().map(|s| &s.secrets);
+                // A runner that only takes TOTP-approved jobs would refuse
+                // anything else after the human already approved it.
                 meta.is_some_and(|m| policy::needs_totp(&p.risk, &names, m))
+                    || self.runner_needs_totp_locked(g, &p.runner)
             },
             hash: policy::hash(&p, &a, &t.name),
             display: a.display(),
@@ -1768,7 +1775,9 @@ impl Core {
             && g.st
                 .as_ref()
                 .is_some_and(|s| policy::auto_approved(&g.reqs[&id].action.secrets(), &s.secrets));
-        if (p.auto_approve || secret_auto) && !req.totp {
+        // Root on a runner always needs a person, whatever the secrets say.
+        let sudo = a_sudo(&g.reqs[&id].action);
+        if (p.auto_approve || secret_auto) && !req.totp && !sudo {
             self.start_locked(g, &id, "auto");
             return Ok(g.reqs[&id].req.clone());
         }
