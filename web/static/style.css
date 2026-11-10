@@ -256,3 +256,11 @@ button.link.danger { color: var(--danger); }
 .card.system .grow { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .card.system .dot { margin-top: 0; transform: translateY(-1px); }
 .warn-text { color: var(--warn); }
+.enroll ol.steps-list { margin: 0; padding-left: 1.3em; display: grid; gap: 10px; }
+.enroll ol.steps-list li { display: grid; gap: 4px; min-width: 0; }
+.enroll .inline-field { display: flex; gap: 6px; align-items: center; }
+.enroll .inline-field input { width: 12em; }
+.enroll .row.tight { flex-wrap: wrap; gap: 8px; }
+.enroll ol.steps-list { grid-template-columns: minmax(0, 1fr); padding-left: 0; list-style: none; }
+.enroll .copyline { min-width: 0; }
+.enroll .seg { flex-wrap: wrap; } .enroll .seg button { white-space: nowrap; flex: 1 1 auto; }
