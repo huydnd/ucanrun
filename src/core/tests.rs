@@ -2312,3 +2312,22 @@ async fn runner_rules_for_sudo_and_refusals() {
     assert_eq!(done.state, ReqState::Failed);
     assert!(done.result.unwrap().output.contains("refused"));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn system_reports_version_links_and_agents() {
+    let e = setup().await;
+    e.pair().await;
+    let s = e.c.system();
+    assert_eq!(s.version, env!("CARGO_PKG_VERSION"));
+    assert!(!s.locked);
+    assert!(s.audit_entries > 0);
+    assert!(s.telegram.configured);
+    wait_for("telegram polled", || e.c.system().telegram.connected).await;
+    let (t, _) = e.token("c", &[]);
+    e.c.submit(&t, "create", params(&[("repo", "a")]), "")
+        .unwrap();
+    let s = e.c.system();
+    assert_eq!((s.tokens, s.agents_24h), (1, 1));
+    e.c.lock("web");
+    assert!(e.c.system().locked);
+}

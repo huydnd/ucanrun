@@ -18,6 +18,7 @@ mod fields;
 mod health;
 mod lang;
 mod runners;
+mod system;
 #[cfg(test)]
 mod tests;
 
@@ -25,6 +26,7 @@ pub use crate::state::{TelegramCfg, Token};
 pub use fields::{FieldInfo, SecretInfo};
 pub use health::HealthItem;
 pub use runners::RunnerView;
+pub use system::SystemInfo;
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fmt;
@@ -430,6 +432,7 @@ pub struct Core {
     rt: Handle,
     me: Weak<Core>,
     shutdown: watch::Sender<bool>,
+    started: SystemTime,
 }
 
 /// Lets the bot reach the core without keeping it alive.
@@ -684,6 +687,7 @@ impl Core {
             rt,
             me: me.clone(),
             shutdown,
+            started: SystemTime::now(),
         });
         let weak = Arc::downgrade(&c);
         let mut stop = c.shutdown.subscribe();

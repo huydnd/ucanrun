@@ -1142,7 +1142,8 @@ async function viewOverview(body, s, steps, stepList) {
   const done = steps.filter(x => x.done).length, all = done === steps.length;
   const [secrets, tokens, profiles, reqs, runs, health] = await Promise.all([api("GET", "/api/secrets"), api("GET", "/api/tokens"), api("GET", "/api/profiles"),
     api("GET", "/api/requests"), api("GET", "/api/runs").catch(() => ({runs: []})), api("GET", "/api/health").catch(() => [])]);
-  const [devs, rinfo] = await Promise.all([api("GET", "/api/devices").catch(() => null), api("GET", "/api/runners").catch(() => null)]);
+  const [devs, rinfo, sys] = await Promise.all([api("GET", "/api/devices").catch(() => null), api("GET", "/api/runners").catch(() => null),
+    api("GET", "/api/system").catch(() => null)]);
   const go = tab => () => { state.tab = tab; renderShell(); };
   const pending = reqs.filter(r => r.state === "pending");
   const ws = workspacesOf(secrets);
@@ -1174,6 +1175,7 @@ async function viewOverview(body, s, steps, stepList) {
         line(bad ? false : warn ? null : true, bad || warn ? `${tr("Sức khoẻ bảo mật")}: ${bad} ${tr("lỗi")}, ${warn} ${tr("cảnh báo")}.` : tr("Sức khoẻ bảo mật ổn."), "settings"),
         line(true, `${profiles.length} ${tr("hành động cố định")}${s.exec ? " · " + tr("chạy lệnh đang bật") : ""}.`, "profiles"),
         idle.length ? line(null, tr(`Agent chưa tự gọi được ${idle.length} secret vì chưa có máy chủ: ${idle.map(x => x.name).join(", ")}.`), "secrets") : null)),
+    sys ? systemCard(sys, go) : null,
     devs ? devicesCard(devs, s, secrets, rinfo) : null,
     h("div", {class: "card"}, h("h2", null, "Lần chạy gần đây"),
       recent.length ? recent.map(runRow) : h("p", {class: "muted"}, "Chưa có lần chạy nào."),
@@ -1186,6 +1188,35 @@ async function viewOverview(body, s, steps, stepList) {
 // Who calls ucanrun from where, and where it runs commands with which rights.
 // Built from the audit log and fixed actions; device names are what each
 // agent reported about itself.
+// What the server is and what it is connected to.
+function systemCard(x, go) {
+  const dur = sec => { const d = Math.floor(sec / 86400), hh = Math.floor(sec % 86400 / 3600), m = Math.floor(sec % 3600 / 60);
+    return d ? `${d} ${tr("ngày")} ${hh} ${tr("giờ")}` : hh ? `${hh} ${tr("giờ")} ${m} ${tr("phút")}` : `${m} ${tr("phút")}`; };
+  const size = mb => mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`;
+  const row = (k, v) => [h("dt", null, tr(k)), h("dd", null, v)];
+  const line = (ok, name, text, tab) => h("li", null, h("span", {class: "dot " + (ok === true ? "ok" : ok === false ? "bad" : "warn"), "aria-hidden": "true"}),
+    h("span", {class: "grow"}, h("b", null, tr(name)), " ", h("span", {class: "muted"}, text)), tab ? h("button", {class: "link", onclick: go(tab)}, "Xem") : null);
+  const t = x.telegram || {};
+  const tg = !t.configured ? [null, tr("chưa cấu hình bot")] : t.connected ? [true, `${tr("đang kết nối")}${t.paired ? "" : " · " + tr("chưa ghép tài khoản")}`]
+    : [false, [tr("mất kết nối"), t.last_ok ? `${tr("lần cuối")} ${new Date(t.last_ok).toLocaleString()}` : "", t.error].filter(Boolean).join(" · ")];
+  const diskLow = x.disk_free_mb != null && x.disk_total_mb && x.disk_free_mb < x.disk_total_mb * 0.1;
+  return h("div", {class: "card system"}, h("h2", null, "Hệ thống"),
+    h("dl", {class: "kv"},
+      row("Phiên bản", `ucanrun ${x.version}`),
+      row("Đang chạy", `${dur(x.uptime_secs)} · ${tr("từ")} ${new Date(x.started).toLocaleString()}`),
+      row("Máy", [x.container ? `${x.host} (${tr("trong container")})` : x.host, `${x.os}/${x.arch}`, `uid ${x.uid}${x.uid === 0 ? " (root)" : ""}`].filter(Boolean).join(" · ")),
+      x.memory_mb != null ? row("Bộ nhớ", size(x.memory_mb)) : null,
+      x.disk_free_mb != null ? row("Ổ dữ liệu", h("span", {class: diskLow ? "warn-text" : ""}, `${tr("còn")} ${size(x.disk_free_mb)} / ${size(x.disk_total_mb)}`)) : null,
+      row("Nhật ký", `${x.audit_entries} ${tr("mục")}`),
+      row("Chạy lệnh trên server", x.exec ? tr("bật") : tr("tắt"))),
+    h("h3", null, "Kết nối"),
+    h("ul", {class: "health"},
+      line(x.gate ? true : null, "Web", [x.public_url || x.web_addr, x.gate ? tr("có mã truy cập") : tr("không có mã truy cập"), x.secure_cookie ? "cookie Secure" : ""].filter(Boolean).join(" · ")),
+      line(true, "Agent API", [x.agent_url || x.agent_addr, `${x.tokens} token`, `${x.agents_24h} ${tr("agent gọi trong 24 giờ")}`].join(" · "), "tokens"),
+      line(tg[0], "Telegram", tg[1], "settings"),
+      line(x.runners ? x.runners_online === x.runners : null, "Runner", x.runners ? `${x.runners_online}/${x.runners} ${tr("đang kết nối")}` : tr("chưa có runner"))));
+}
+
 // One row per enrolled runner, from what it reports on each poll.
 function runnerRow(r, redraw) {
   const i = r.info || {};
