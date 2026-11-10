@@ -11,12 +11,12 @@ The host and the sign-in always come from the connection, so an action can never
 
 ## Adding one
 
-Advanced tab, **Connections**, **Add connection**: name, base URL, how to sign in and the secret. Then **New action** on that connection: method, path and the values an agent may fill in. The secret itself is saved on the Secrets tab, where [templates](templates.md) cover common services.
+Actions tab, **API services**, **Add service**: name, base URL, how to sign in and the secret. Then **New action** on that connection: method, path and the values an agent may fill in. The secret itself is saved on the Secrets tab, where [templates](templates.md) cover common services.
 
 ## Several accounts for one service
 
 Edit the connection and choose **Choose when approving**, then tick the secrets. Telegram shows one **Use name** button per secret, and the result names the secret used.
 
-Export and import on the Advanced tab carry connections and profiles between servers. The file holds secret names, never values.
+**Back up or copy to another server** on the Actions tab carries API services and actions between servers. The file holds secret names, never values.
 
 Create tokens with the narrowest scope that works. One token per service makes revoking easy.

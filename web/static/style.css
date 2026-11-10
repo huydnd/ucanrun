@@ -264,3 +264,23 @@ button.link.danger { color: var(--danger); }
 .enroll ol.steps-list { grid-template-columns: minmax(0, 1fr); padding-left: 0; list-style: none; }
 .enroll .copyline { min-width: 0; }
 .enroll .seg { flex-wrap: wrap; } .enroll .seg button { white-space: nowrap; flex: 1 1 auto; }
+
+/* Setup flow: step intro above a tab, next step below it */
+.intro { display: grid; gap: 4px; margin: 0 0 12px; padding: 10px 14px; border-left: 3px solid var(--accent-line); background: var(--accent-soft); border-radius: 0 var(--radius) var(--radius) 0; }
+.intro p { margin: 0; }
+.intro .stepno { font-size: 12px; font-weight: 600; color: var(--accent); text-transform: uppercase; letter-spacing: .04em; }
+.flow-next { justify-content: space-between; margin: 16px 0 8px; }
+.flow-next :only-child { margin-left: auto; }
+nav .sep { flex: none; width: 1px; align-self: stretch; margin: 6px 4px; background: var(--line); }
+ol.steps li.opt b { font-weight: 500; }
+/* Runner tab */
+.runner-card { border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; margin-top: 10px; display: grid; gap: 8px; min-width: 0; }
+.runner-card dl.kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px; margin: 0; }
+.runner-card dl.kv dt { color: var(--muted); }
+.runner-card dl.kv dd { margin: 0; overflow-wrap: anywhere; }
+.runner-card .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.runner-card details.runs > summary { cursor: pointer; color: var(--muted); }
+ul.plain { margin: 0 0 8px; padding-left: 1.2em; display: grid; gap: 4px; }
+.card > .enroll { margin-top: 12px; }
+@media (max-width: 640px) { .runner-card dl.kv { grid-template-columns: minmax(0, 1fr); gap: 0 0; } .runner-card dl.kv dd { margin-bottom: 6px; } }
+.card ul.health { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }

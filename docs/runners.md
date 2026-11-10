@@ -38,7 +38,7 @@ from somewhere else, such as your own mirror.
 
 ## Enroll a runner
 
-1. In the web UI: **Overview → Devices and rights → Add runner**. You get a
+1. In the web UI: the **Runner** tab → **Add runner**. You get a
    single-use code, valid for ten minutes, and the commands to run.
 2. On the machine, as the user the runner will run as (not root):
 
