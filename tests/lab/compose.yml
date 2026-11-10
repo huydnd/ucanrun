@@ -1,0 +1,31 @@
+# An isolated lab: the server, a machine in the middle, and two runners.
+# Runners only reach the server through the middle machine.
+name: ucr-lab
+services:
+  server:
+    image: ${UCANRUN_IMAGE:-ucanrun:lab}
+    environment:
+      - UCANRUN_WEB_ADDR=0.0.0.0:8780
+      - UCANRUN_AGENT_ADDR=0.0.0.0:8781
+      - UCANRUN_GATE=off
+      - UCANRUN_LANG=en
+      - UCANRUN_DATA=/data
+    tmpfs:
+      - /data:uid=10001,gid=10001,mode=0700
+    ports: ["127.0.0.1:28780:8780", "127.0.0.1:28781:8781"]
+    networks: [core]
+  mitm:
+    image: python:3.13-alpine
+    command: ["python", "-u", "/lab/mitm.py"]
+    volumes: ["./mitm.py:/lab/mitm.py:ro", "./out:/out", "./dl:/dl:ro"]
+    ports: ["127.0.0.1:29001:9001"]
+    networks: [core, edge]
+  runner1: &runner
+    image: alpine:latest
+    command: ["sleep", "infinity"]
+    volumes: ["./ucr:/w/ucr:ro", "./runner-setup.sh:/w/setup.sh:ro"]
+    networks: [edge]
+  runner2: *runner
+networks:
+  core: {}
+  edge: {}

@@ -259,6 +259,70 @@ impl Core {
             "bad",
         );
 
+        // Runners: what each machine lets an approved job do.
+        let runners = self.runners().unwrap_or_default();
+        if !runners.is_empty() {
+            let with = |f: &dyn Fn(&crate::runner::proto::Info) -> bool| -> Vec<String> {
+                runners
+                    .iter()
+                    .filter(|r| r.info.as_ref().is_some_and(f))
+                    .map(|r| r.name.clone())
+                    .collect()
+            };
+            add(
+                &mut out,
+                "runner_root",
+                with(&|i| i.root),
+                "Không runner nào chạy bằng root hoặc admin.",
+                "Runner chạy bằng root hoặc admin. Chạy bằng user riêng, dùng sudo khi cần.",
+                "bad",
+            );
+            add(
+                &mut out,
+                "runner_policy",
+                with(&|i| !i.policy_error.is_empty()),
+                "runner.toml của mọi runner đọc được.",
+                "runner.toml bị lỗi, runner không chạy việc nào.",
+                "bad",
+            );
+            add(
+                &mut out,
+                "runner_any",
+                with(&|i| i.allow.iter().any(|a| a == "*")),
+                "Mọi runner đều giới hạn chương trình được chạy.",
+                "Runner cho chạy mọi chương trình. Hãy liệt kê đúng chương trình cần trong runner.toml.",
+                "warn",
+            );
+            add(
+                &mut out,
+                "runner_totp",
+                with(&|i| !i.require_totp),
+                "Mọi runner đều bắt buộc TOTP.",
+                "Runner không bắt buộc TOTP: việc duyệt chỉ bằng một lần bấm là chạy được.",
+                "warn",
+            );
+        }
+        if !runners.is_empty() || self.opt.allow_exec {
+            let mut auto: Vec<String> = meta
+                .iter()
+                .filter(|(_, m)| {
+                    m.allow_commands
+                        && m.approve == policy::APPROVE_AUTO
+                        && m.totp == policy::TOTP_NEVER
+                })
+                .map(|(n, _)| n.clone())
+                .collect();
+            auto.sort();
+            add(
+                &mut out,
+                "auto_commands",
+                auto,
+                "Không secret nào cho agent chạy lệnh mà không ai duyệt.",
+                "Secret dùng trong lệnh, tự chạy và không cần TOTP: agent chạy lệnh mà không ai duyệt.",
+                "bad",
+            );
+        }
+
         if audit::verify(&self.audit_path()).is_err() || cut {
             out.push(item(
                 "audit",

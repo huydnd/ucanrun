@@ -1,9 +1,10 @@
 //! The server side of runners: enrolment, the job queue each runner polls,
 //! and handing an approved command to its runner.
 //!
-//! A job leaves here signed with a key derived from the vault identity, and
-//! its secrets sealed to the runner's own age key. The result comes back
-//! signed by the runner and is checked against the key pinned at enrolment.
+//! A job leaves here sealed to the runner's age key and signed with a key
+//! derived from the vault identity. The result comes back sealed to the
+//! vault's recipient and signed by the runner. Every runner request is signed
+//! with the runner's own key, a timestamp and a single-use nonce.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::sync::Arc;
@@ -12,24 +13,33 @@ use std::time::{Duration, SystemTime};
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use serde::Serialize;
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
-use subtle::ConstantTimeEq;
 use tokio::sync::{Notify, oneshot};
 use zeroize::Zeroizing;
 
 use super::{Core, Error, Inner, Result, fields, pick, rand_hex, rfc3339_nano, unix};
 use crate::policy::{self, Action, RunResult, gourl};
 use crate::runner::proto::{
-    self, EnrollIn, EnrollOut, Info, JOB_GRACE_SECS, Job, JobResult, ONLINE_SECS, POLL_WAIT_SECS,
-    Signed, TOKEN_PREFIX, VERSION,
+    self, EnrollIn, EnrollOut, Info, JOB_GRACE_SECS, Job, JobBody, JobResult, ONLINE_SECS,
+    POLL_WAIT_SECS, REQUEST_SKEW_SECS, ResultBody, Signed, VERSION, Values,
 };
 use crate::state::RunnerRec;
 
 const CODE_TTL: Duration = Duration::from_secs(10 * 60);
 const CODE_LETTERS: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+/// 12 letters of 31: about 59 bits, far beyond what fits in ten minutes.
+const CODE_LEN: usize = 12;
 const MAX_CODE_FAILS: u32 = 3;
 const MAX_RUNNERS: usize = 50;
 const MAX_QUEUE: usize = 20;
+/// Nonces of signed requests kept against replays; more than this many in
+/// the skew window means something is flooding, and requests are refused.
+const MAX_NONCES: usize = 20_000;
+/// The error of a runner request whose signature, time or nonce is wrong.
+const UNSIGNED: &str = "bad request signature";
+
+pub fn unsigned() -> &'static str {
+    UNSIGNED
+}
 
 struct Live {
     seen: SystemTime,
@@ -40,7 +50,7 @@ struct Waiter {
     runner: String,
     key: VerifyingKey,
     id: String,
-    tx: oneshot::Sender<JobResult>,
+    tx: oneshot::Sender<ResultBody>,
 }
 
 /// Runner state that lives only in memory.
@@ -50,6 +60,7 @@ pub(super) struct Hub {
     queue: HashMap<String, VecDeque<(String, Signed)>>,
     wait: HashMap<String, Waiter>,
     bell: HashMap<String, Arc<Notify>>,
+    nonces: HashMap<String, i64>,
     code: String,
     code_till: Option<SystemTime>,
     fails: u32,
@@ -68,15 +79,13 @@ pub struct RunnerView {
     pub info: Option<Info>,
 }
 
-fn normalize_code(s: &str) -> String {
-    s.chars()
-        .filter(|c| c.is_ascii_alphanumeric())
-        .map(|c| c.to_ascii_uppercase())
-        .collect()
-}
-
-fn token_hash(t: &str) -> String {
-    hex::encode(Sha256::digest(t.as_bytes()))
+/// The headers of one signed runner request.
+#[derive(Debug, Clone, Default)]
+pub struct RunnerAuth {
+    pub runner: String,
+    pub date: String,
+    pub nonce: String,
+    pub sig: String,
 }
 
 fn failed(msg: impl Into<String>) -> RunResult {
@@ -113,16 +122,20 @@ impl Core {
         if g.st.is_none() {
             return Err(Error::Locked);
         }
-        let raw: String = (0..10).map(|_| pick(CODE_LETTERS) as char).collect();
+        let raw: String = (0..CODE_LEN).map(|_| pick(CODE_LETTERS) as char).collect();
         let till = self.now() + CODE_TTL;
         g.runners.code = raw.clone();
         g.runners.code_till = Some(till);
         g.runners.fails = 0;
         self.log("runner_code", "web", Value::Null);
-        Ok((format!("{}-{}", &raw[..5], &raw[5..]), rfc3339_nano(till)))
+        Ok((
+            format!("{}-{}-{}", &raw[..4], &raw[4..8], &raw[8..]),
+            rfc3339_nano(till),
+        ))
     }
 
-    /// Enrolls a runner with a code from the web UI.
+    /// Enrolls a runner that proves it knows the current code, and answers
+    /// with a proof of the server's own keys under the same code.
     pub fn enroll_runner(&self, input: EnrollIn) -> Result<EnrollOut> {
         let mut g = self.inner();
         if g.st.is_none() {
@@ -130,23 +143,23 @@ impl Core {
         }
         let now = self.now();
         let live = !g.runners.code.is_empty() && g.runners.code_till.is_some_and(|t| now < t);
-        let given = normalize_code(&input.code);
-        let ok = live && bool::from(given.as_bytes().ct_eq(g.runners.code.as_bytes()));
-        if !ok {
+        let code = g.runners.code.clone();
+        if !live || input.v != VERSION || !input.proves(&code) {
+            // Logged only while a code is open, so an unauthenticated caller
+            // cannot grow the audit log; three tries close the code.
             if live {
                 g.runners.fails += 1;
                 if g.runners.fails >= MAX_CODE_FAILS {
                     g.runners.code.clear();
                 }
+                let name: String = input.name.chars().take(64).collect();
+                self.log("runner_enroll_failed", "runner", json!({"name": name}));
             }
-            self.log(
-                "runner_enroll_failed",
-                "runner",
-                json!({"name": input.name}),
-            );
-            return Err(Error::Msg(
-                "the code is wrong or has expired; create a new one in the web UI".into(),
-            ));
+            return Err(Error::Msg(if input.v != VERSION {
+                "this ucr is too old or too new for the server; use the same version".into()
+            } else {
+                "the code is wrong or has expired; create a new one in the web UI".into()
+            }));
         }
         let name = input.name.trim().to_string();
         if !policy::name_ok(&name) {
@@ -165,18 +178,21 @@ impl Core {
             return Err(Error::Msg(format!("at most {MAX_RUNNERS} runners")));
         }
         proto::verifying_key(&input.sign_key).map_err(Error::Msg)?;
-        if !input.age_key.starts_with("age1")
-            || proto::seal(&input.age_key, &BTreeMap::new()).is_err()
-        {
+        if !input.age_key.starts_with("age1") || proto::seal(&input.age_key, &()).is_err() {
             return Err(Error::Msg("bad age key".into()));
         }
-        let server_key = self.runner_server_key()?;
-        let token = format!("{TOKEN_PREFIX}{}", rand_hex(24));
+        let mut out = EnrollOut {
+            name: name.clone(),
+            server_key: self.runner_server_key()?,
+            server_age: self.vault.recipient()?,
+            ..Default::default()
+        };
+        out.proof = out.proof_for(&code, &input.sign_key);
         let rec = RunnerRec {
             name: name.clone(),
             sign_key: input.sign_key.clone(),
             age_key: input.age_key.clone(),
-            token_hash: token_hash(&token),
+            token_hash: String::new(),
             created: rfc3339_nano(now),
         };
         g.st.as_mut().unwrap().runners.insert(name.clone(), rec);
@@ -194,27 +210,45 @@ impl Core {
             "runner",
             json!({"name": name, "key": proto::fingerprint(&input.sign_key)}),
         );
-        Ok(EnrollOut {
-            name,
-            token,
-            server_key,
-        })
+        Ok(out)
     }
 
-    /// The runner a token belongs to. Polls do not count as activity, so a
-    /// runner never keeps the vault from locking itself.
-    pub fn runner_auth(&self, token: &str) -> Result<String> {
-        if !token.starts_with(TOKEN_PREFIX) {
-            return Err(Error::Forbidden);
-        }
-        let h = token_hash(token);
-        let g = self.inner();
+    /// Checks a signed runner request and returns the runner's name. Polls
+    /// do not count as activity, so a runner never keeps the vault open.
+    pub fn runner_verify(
+        &self,
+        a: &RunnerAuth,
+        method: &str,
+        path: &str,
+        body: &[u8],
+    ) -> Result<String> {
+        let mut g = self.inner();
         let st = g.st.as_ref().ok_or(Error::Locked)?;
-        st.runners
-            .values()
-            .find(|r| bool::from(r.token_hash.as_bytes().ct_eq(h.as_bytes())))
-            .map(|r| r.name.clone())
-            .ok_or(Error::Forbidden)
+        let Some(rec) = st.runners.get(&a.runner) else {
+            return Err(Error::Forbidden);
+        };
+        let key = proto::verifying_key(&rec.sign_key).map_err(|_| Error::Forbidden)?;
+        let date: i64 = a.date.parse().map_err(|_| Error::Msg(UNSIGNED.into()))?;
+        let now = unix(self.now());
+        if (now - date).abs() > REQUEST_SKEW_SECS || a.nonce.len() != 32 {
+            return Err(Error::Msg(UNSIGNED.into()));
+        }
+        let msg = proto::request_message(method, path, date, &a.nonce, body);
+        if proto::verify(&key, &msg, &a.sig).is_err() {
+            return Err(Error::Msg(UNSIGNED.into()));
+        }
+        let n = &mut g.runners.nonces;
+        n.retain(|_, t| *t >= now - REQUEST_SKEW_SECS);
+        if n.len() >= MAX_NONCES {
+            return Err(Error::Busy);
+        }
+        let k = format!("{}/{}", a.runner, a.nonce);
+        if n.contains_key(&k) {
+            self.log("runner_replay", &a.runner, json!({"path": path}));
+            return Err(Error::Msg(UNSIGNED.into()));
+        }
+        n.insert(k, date);
+        Ok(a.runner.clone())
     }
 
     /// Holds a poll open until a job for this runner is queued, or for
@@ -254,7 +288,7 @@ impl Core {
         }
     }
 
-    /// Takes a signed result from the runner that ran the job.
+    /// Takes a signed, sealed result from the runner that ran the job.
     pub fn runner_result(&self, name: &str, s: Signed) -> Result<()> {
         // Which job it claims to be, to find the key; then the signature.
         let claimed: JobResult =
@@ -270,11 +304,17 @@ impl Core {
             self.log("runner_bad_result", name, json!({"job": claimed.job}));
             Error::Msg(e)
         })?;
-        if r.runner != name || r.id != w.id || r.v != VERSION {
+        if r.runner != name || r.v != VERSION {
+            return Err(Error::Msg("the result does not match the job".into()));
+        }
+        let plain = self.vault.unseal_bytes(&r.sealed)?;
+        let body: ResultBody =
+            serde_json::from_slice(&plain).map_err(|_| Error::Msg("bad result".into()))?;
+        if body.job != r.job || body.id != w.id {
             return Err(Error::Msg("the result does not match the job".into()));
         }
         let w = g.runners.wait.remove(&claimed.job).unwrap();
-        let _ = w.tx.send(r);
+        let _ = w.tx.send(body);
         Ok(())
     }
 
@@ -352,6 +392,15 @@ impl Core {
         Ok(())
     }
 
+    /// Whether the runner said it only takes jobs approved with TOTP.
+    pub(super) fn runner_needs_totp_locked(&self, g: &Inner, name: &str) -> bool {
+        !name.is_empty()
+            && g.runners
+                .live
+                .get(name)
+                .is_some_and(|l| l.info.require_totp)
+    }
+
     /// Sends an approved command to its runner and waits for the result.
     pub(super) async fn run_on_runner(
         &self,
@@ -393,11 +442,6 @@ impl Core {
                 Err(_) => return failed(format!("secret {} unavailable", gourl::quote(&r))),
             }
         }
-        let sealed = match proto::seal(&rec.age_key, &values) {
-            Ok(s) => s,
-            Err(e) => return failed(format!("cannot seal the secrets: {e}")),
-        };
-        drop(values);
         let signer = match self.signing_key() {
             Ok(k) => k,
             Err(_) => return failed("vault locked"),
@@ -408,19 +452,30 @@ impl Core {
             30
         };
         let nonce = rand_hex(16);
-        let job = Job {
-            v: VERSION,
-            id: id.to_string(),
+        let body = JobBody {
             job: nonce.clone(),
             runner: name.clone(),
-            not_after: unix(self.now()) + timeout + JOB_GRACE_SECS,
+            id: id.to_string(),
             hash,
             approved_by: by,
             totp,
             exec,
             timeout_sec: timeout,
             public: public.iter().cloned().collect(),
-            secrets: sealed,
+            secrets: Values::from_bytes(&values),
+        };
+        drop(values);
+        let sealed = match proto::seal(&rec.age_key, &body) {
+            Ok(s) => s,
+            Err(e) => return failed(format!("cannot seal the job: {e}")),
+        };
+        drop(body);
+        let job = Job {
+            v: VERSION,
+            runner: name.clone(),
+            job: nonce.clone(),
+            not_after: unix(self.now()) + timeout + JOB_GRACE_SECS,
+            sealed,
         };
         let signed = Signed::new(&signer, &job);
         let (tx, rx) = oneshot::channel();
@@ -475,7 +530,7 @@ impl Core {
         }
     }
 
-    /// How long ago, in seconds, each runner last polled. For tests.
+    /// How long ago, in seconds, a runner last polled. For tests.
     #[cfg(test)]
     pub(crate) fn runner_seen_secs(&self, name: &str) -> Option<u64> {
         let g = self.inner();

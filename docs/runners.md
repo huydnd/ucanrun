@@ -14,10 +14,26 @@ back the result.
   a laptop. It needs to reach the agent API (for example over Tailscale).
 - **The runner decides.** `runner.toml` on that machine lists the programs it
   may start. A job outside it is refused even when the server approved it.
-- **Secrets travel sealed.** Each job is signed by the server and carries only
-  the secrets it needs, encrypted to that runner's own key. The result is
-  signed by the runner. Someone who can read or change the traffic can neither
-  read a secret nor forge a job or a result.
+- **Everything travels sealed.** Each job (command, arguments and the secrets
+  it needs) is encrypted to that runner's own key and signed by the server.
+  The result is encrypted to the server and signed by the runner. Only routing
+  data is readable: the runner's name, a single-use job id and a deadline.
+- **No token to steal.** Every request a runner makes is signed with its own
+  key, with the time and a single-use nonce; a copied request is refused.
+
+## The protocol (version 2)
+
+| Step | Protection |
+|---|---|
+| Pairing | The code never travels. The runner sends an HMAC made with the code over its keys; the server answers with an HMAC over its own keys and the runner's. A machine in the middle cannot swap either key, and `enroll` stops if the server's proof is wrong. Codes have 12 letters, last ten minutes, and close after three wrong tries. |
+| Requests | `X-Ucanrun-Runner`, `-Date`, `-Nonce`, `-Sig`: ed25519 over method, path, time, nonce and the body's hash. More than 60 seconds off, or a nonce seen before, is refused. |
+| Jobs | Signed (strict ed25519) and sealed with age to the runner. The sealed part repeats the job id and runner name, so it cannot be moved to another envelope. A runner refuses a job valid for longer than about 13 minutes. |
+| Replays | The runner records each job id in `seen.json` until it expires, so a copy is refused even after a restart. |
+| Results | Sealed to the server's age key and signed by the runner; the server checks the job id and request id inside. |
+| Approval | A runner that requires TOTP makes the server ask for TOTP when approving. A job with `sudo` never runs by itself, whatever its secrets allow. |
+
+Someone in the middle can still delay or drop traffic: a dropped job ends as
+"did not answer in time". Encryption cannot prevent that.
 
 ## Install ucr
 
@@ -138,8 +154,9 @@ with `runner NAME refused: …`.
 
 | Where | What |
 |---|---|
-| Server `state.json` | runner name, public keys, hash of its token |
-| Runner `runner.json` (0600) | server URL, token, pinned server key, its own keys |
+| Server `state.json` | runner name, its public signing and age keys |
+| Runner `runner.json` (0600) | server URL, pinned server keys, its own private keys |
+| Runner `seen.json` (0600) | job ids already received, until they expire |
 | Runner `runner.log` | one line per job, each holding the hash of the line before |
 
 The server signs jobs with a key derived from the vault identity, so a locked
@@ -151,4 +168,16 @@ vault sends no jobs. Polls do not count as activity for the auto lock.
   `runner.toml` allows as its own user. It cannot read the vault.
 - A server taken over while unlocked can send any job that each runner's
   rules allow. Keep `allow` short and `require_totp` on.
-- Only a job's id is kept against replays, in memory until the job expires.
+- Whoever reads `runner.json` on a runner can act as that runner. Remove the
+  runner in the web UI if a machine is lost.
+- Runners enrolled with ucanrun 0.8 must enroll again: version 2 changes the
+  protocol.
+
+## Testing against a machine in the middle
+
+`sh tests/lab/run.sh` builds the image and starts an isolated lab with Docker:
+the server, two runners, and a proxy between them that records, changes and
+replays their traffic. It checks pairing with a swapped key, that no secret,
+command, output, id or token is readable on the wire, replayed and forged
+requests, a job changed on the way, a job replayed after a runner restart,
+sudo, the runner's allow list, and the checksum of the install command.
