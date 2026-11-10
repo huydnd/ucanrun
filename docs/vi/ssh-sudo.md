@@ -25,7 +25,7 @@ Trong giao diện:
 
 1. Tab **Secret**, mẫu **Khoá SSH**, dán nội dung khoá.
 2. Tab **Secret**, mẫu **Mật khẩu sudo**, nhập mật khẩu sudo. Mẫu này luôn cần TOTP.
-3. Tab **Nâng cao**, mục **Tự tạo profile**, bấm **Trống**, mở **Nâng cao: xem hoặc dán JSON** rồi dán profile dưới đây.
+3. Tab **Hành động**, mục **Tạo hành động mới**, bấm **Trống**, mở **Nâng cao: xem hoặc dán JSON** rồi dán profile dưới đây.
 4. Sửa `deploy@server.example.com` và danh sách dịch vụ, rồi lưu.
 
 ```json

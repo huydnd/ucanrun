@@ -17,4 +17,4 @@ Tab Nâng cao, mục **Kết nối**, bấm **Thêm kết nối**: tên, địa 
 
 Sửa kết nối, chọn **Chọn khi duyệt**, tích các secret. Telegram hiện mỗi secret một nút **Dùng tên**, kết quả ghi rõ secret đã dùng.
 
-Xuất và nhập ở tab Nâng cao mang theo cả kết nối và profile. File chỉ có tên secret, không có giá trị.
+Mục **Sao lưu và chép sang máy khác** ở tab Hành động mang theo cả dịch vụ API và hành động. File chỉ có tên secret, không có giá trị.

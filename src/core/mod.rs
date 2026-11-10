@@ -156,7 +156,7 @@ impl Error {
                 } else if m.starts_with("unknown runner") {
                     (
                         "unknown_runner",
-                        ask("Enroll the runner: Overview, Devices and rights, Add runner."),
+                        ask("Enroll the runner: Runner tab, Add runner."),
                     )
                 } else if m.contains("is offline; ") {
                     ("runner_offline", how(tail))

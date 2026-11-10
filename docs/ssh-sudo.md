@@ -25,7 +25,7 @@ In the UI:
 
 1. **Secrets**, template **SSH key**, paste the key.
 2. **Secrets**, template **sudo password**, enter the sudo password. It always asks for TOTP.
-3. **Advanced**, **Create a profile**, **Blank**, open **Advanced: view or paste JSON** and paste the profile below.
+3. **Actions** tab, **New action**, **Blank**, open **Advanced: view or paste JSON** and paste the profile below.
 4. Edit `deploy@server.example.com` and the service list, then save.
 
 ```json

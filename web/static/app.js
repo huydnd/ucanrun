@@ -74,20 +74,45 @@ function renderLogin(locked) {
   }, locked ? h("p", {class: "muted"}, "Kho đang khoá, agent chưa chạy được lệnh nào.") : null)));
 }
 
-const tabs = {start: "Bắt đầu", requests: "Yêu cầu", secrets: "Secret", tokens: "Token agent", profiles: "Nâng cao", settings: "Cài đặt", audit: "Nhật ký"};
+// Setup tabs come in the order they are needed, then the daily ones.
+const tabs = {start: "Bắt đầu", secrets: "Secret", runners: "Runner", tokens: "Token agent", profiles: "Hành động", requests: "Yêu cầu", audit: "Nhật ký", settings: "Cài đặt"};
+const flow = [
+  {tab: "secrets", text: "Lưu token, mật khẩu, khoá SSH mà agent cần. Mỗi secret ghi rõ dùng để làm gì và được gửi tới máy chủ nào. Agent thấy tên và mô tả, không bao giờ thấy giá trị."},
+  {tab: "runners", optional: true, text: "Cần khi agent phải chạy lệnh trên một máy (PC, laptop, server, Raspberry Pi). Runner là ucr chạy trên máy đó, tự kết nối về đây lấy việc đã duyệt; máy không cần mở cổng. Chỉ gọi API qua HTTP thì bỏ qua bước này."},
+  {tab: "tokens", text: "Mỗi agent (Claude Code, Antigravity…) cần một token để gửi yêu cầu tới ucanrun. Có thể giới hạn token theo workspace hoặc theo hành động."},
+  {tab: "profiles", optional: true, text: "Để siết chặt hơn: định sẵn từng việc agent được làm, và dịch vụ API nó được gọi tới. Thường không cần: agent tự soạn yêu cầu, bạn xem và duyệt."},
+];
+
+function flowIntro(tab) {
+  const i = flow.findIndex(f => f.tab === tab);
+  if (i < 0) return null;
+  const f = flow[i];
+  return h("div", {class: "intro"}, h("span", {class: "stepno"}, `${tr("Bước")} ${i + 1}/${flow.length}${f.optional ? " · " + tr("tuỳ chọn") : ""}`), h("p", null, tr(f.text)));
+}
+
+function flowNext(tab) {
+  const i = flow.findIndex(f => f.tab === tab);
+  if (i < 0) return null;
+  const go = t => () => { state.tab = t; renderShell(); window.scrollTo(0, 0); };
+  const nx = flow[i + 1];
+  return h("div", {class: "row flow-next"}, i > 0 ? h("button", {onclick: go(flow[i - 1].tab)}, `← ${tr(tabs[flow[i - 1].tab])}`) : null,
+    nx ? h("button", {class: "primary", onclick: go(nx.tab)}, `${tr("Tiếp")}: ${tr(tabs[nx.tab])} →`) : h("button", {class: "primary", onclick: go("start")}, tr("Xong, về Tổng quan")));
+}
 
 function renderShell() {
-  const body = h("main");
+  // Views fill `body`; the step intro and the next button stay around it.
+  const body = h("div", {class: "view"});
+  const main = h("main", null, flowIntro(state.tab), body, flowNext(state.tab));
   // Once setup is done, the first tab becomes an overview.
   const label = (k, v) => k === "start" && state.overview ? "Tổng quan" : v;
-  const nav = h("nav", null, Object.entries(tabs).map(([k, v]) =>
-    h("button", {class: state.tab === k ? "on" : "", "data-req": k === "requests" ? "1" : null, onclick: () => { state.tab = k; renderShell(); }}, label(k, v))));
+  const nav = h("nav", null, Object.entries(tabs).flatMap(([k, v]) => [k === "requests" ? h("span", {class: "sep", "aria-hidden": "true"}) : null,
+    h("button", {class: state.tab === k ? "on" : "", "data-req": k === "requests" ? "1" : null, onclick: () => { state.tab = k; renderShell(); }}, label(k, v))]));
   const waiting = h("span", {class: "count"});
   api("GET", "/api/requests").then(l => { const n = l.filter(r => r.state === "pending").length; if (n) { waiting.textContent = n; nav.querySelector("[data-req]").append(" ", waiting); } }).catch(() => {});
   app.replaceChildren(h("header", null, h("img", {class: "brand", src: "logo.svg", alt: "", width: 28, height: 28}), h("b", null, "ucanrun"), nav,
-    h("button", {onclick: async () => { await api("POST", "/api/lock"); boot(); }}, "Khoá kho")), body);
+    h("button", {onclick: async () => { await api("POST", "/api/lock"); boot(); }}, "Khoá kho")), main);
   clearInterval(state.timer);
-  const views = {start: viewStart, requests: viewRequests, secrets: viewSecrets, profiles: viewProfiles, tokens: viewTokens, settings: viewSettings, audit: viewAudit};
+  const views = {start: viewStart, requests: viewRequests, secrets: viewSecrets, runners: viewRunners, profiles: viewProfiles, tokens: viewTokens, settings: viewSettings, audit: viewAudit};
   const draw = () => views[state.tab](body).catch(e => { if (e.status === 401) boot(); else fill(body, h("div", {class: "err"}, e.message)); });
   draw();
   if (state.tab === "requests") state.timer = setInterval(() => { if (!body.querySelector("input:focus, select:focus")) draw(); }, 3000);
@@ -161,7 +186,7 @@ async function viewSecrets(body, editing, tpl) {
   const toggle = h("input", {type: "checkbox", onchange: e => { multi.hidden = !e.target.checked; v.el.hidden = e.target.checked; }});
   const cmd = h("input", {type: "checkbox", onchange: () => { hostWarn(); drawSummary(); }});
   // Empty hosts mean agents cannot use the secret in calls they write.
-  const noHosts = h("small", {class: "warn-line", hidden: true}, "Agent chưa tự gọi được secret này vì chưa có máy chủ nào. Thêm máy chủ, ví dụ api.github.com, để agent gửi được yêu cầu. Hành động cố định ở tab Nâng cao vẫn dùng được.");
+  const noHosts = h("small", {class: "warn-line", hidden: true}, "Agent chưa tự gọi được secret này vì chưa có máy chủ nào. Thêm máy chủ, ví dụ api.github.com, để agent gửi được yêu cầu. Hành động cố định ở tab Hành động vẫn dùng được.");
   const hostWarn = () => { noHosts.hidden = !!hosts.input.value.trim() || (cmd.checked && execOn); };
   hosts.input.addEventListener("input", hostWarn);
   // A secret is one value, or several named fields such as a database login.
@@ -334,7 +359,7 @@ const slugify = s => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(
   .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 64);
 
 const errorText = [
-  [/profile name/, "Tên profile chỉ gồm chữ thường, số, dấu gạch."],
+  [/profile name/, "Tên hành động chỉ gồm chữ thường, số, dấu gạch."],
   [/url must start/, "Địa chỉ phải bắt đầu bằng http:// hoặc https:// và có tên máy cố định."],
   [/template is not allowed in the url host/, "Tên máy phải cố định, agent không được chọn nơi gửi."],
   [/secrets are not allowed in the url/, "Không đặt secret trong địa chỉ."],
@@ -352,16 +377,16 @@ const errorText = [
   [/bad host "(.+?)"/, m => `Máy chủ "${m[1]}" không hợp lệ, hãy ghi dạng api.example.com.`],
   [/value is required for a new secret/, "Secret mới cần có giá trị."],
   [/description is limited/, "Mô tả tối đa 300 ký tự."],
-  [/with a connection the url is a path/, "Với kết nối, chỉ ghi đường dẫn bắt đầu bằng /."],
-  [/is set by the connection/, "Header này do kết nối đặt, profile không ghi đè được."],
+  [/with a connection the url is a path/, "Với dịch vụ API, chỉ ghi đường dẫn bắt đầu bằng /."],
+  [/is set by the connection/, "Header này do dịch vụ API đặt, hành động không ghi đè được."],
   [/base url must/, "Địa chỉ gốc phải có dạng https://api.example.com, không có ? hay #."],
   [/the base url of a connection is fixed/, "Địa chỉ gốc phải cố định, không chứa giá trị của agent."],
   [/auth needs either one secret or a list/, "Chọn một secret, hoặc tích các secret được chọn khi duyệt."],
-  [/connection name must/, "Tên kết nối chỉ gồm chữ thường, số, dấu gạch."],
-  [/connection is used by: (.+)/, m => `Kết nối đang được dùng bởi: ${m[1]}. Xoá các hành động đó trước.`],
+  [/connection name must/, "Tên dịch vụ chỉ gồm chữ thường, số, dấu gạch."],
+  [/connection is used by: (.+)/, m => `Dịch vụ đang được dùng bởi: ${m[1]}. Xoá các hành động đó trước.`],
   // Name the action and say why, so the fix is obvious.
   [/profile "(.+?)" would break: (.+)/, m => `Thay đổi này làm hỏng hành động "${m[1]}": ${viErr(m[2])}`],
-  [/unknown connection/, "Kết nối không tồn tại."],
+  [/unknown connection/, "Dịch vụ API không tồn tại."],
   [/secret_choices is required/, "Hãy tích ít nhất một secret được phép chọn."],
   [/secret choice needs a human/, "Chọn secret khi duyệt thì phải có người duyệt. Đổi hành động đó sang \"Luôn hỏi tôi\" trước."],
 ];
@@ -542,7 +567,7 @@ async function viewProfiles(body, keptImport) {
         return;
       }
       if (!data || data.ucanrun_profiles !== 1 || !Array.isArray(data.profiles)) {
-        ioErr.textContent = tr("File profile không đúng định dạng.");
+        ioErr.textContent = tr("File không đúng định dạng.");
         return;
       }
       const rows = data.profiles.map(p => {
@@ -577,8 +602,8 @@ async function viewProfiles(body, keptImport) {
         }
         importBtn.disabled = false;
         await viewProfiles(body, importBox);
-      }}, "Nhập các profile đã chọn");
-      fill(importBox, h("div", {class: "card"}, h("h3", null, "Nhập profile"), rows.map(r => r.el), h("div", {class: "row"}, importBtn)));
+      }}, "Nhập các mục đã chọn");
+      fill(importBox, h("div", {class: "card"}, h("h3", null, "Nhập từ file"), rows.map(r => r.el), h("div", {class: "row"}, importBtn)));
     };
     reader.readAsText(f);
   }});
@@ -593,36 +618,37 @@ async function viewProfiles(body, keptImport) {
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) { ioErr.textContent = viErr(e.message); }
-  }}, "Xuất profile");
-  const importOpenBtn = h("button", {type: "button", onclick: () => { fileInput.value = ""; fileInput.click(); }}, "Nhập profile");
-  fill(body, h("p", {class: "note"}, "Không bắt buộc. Thông thường chỉ cần lưu secret kèm mô tả ở tab Secret, agent tự soạn lệnh và bạn duyệt. Phần này để giới hạn chặt hơn: agent chỉ chạy đúng các hành động bạn định sẵn."),
-  h("div", {class: "card"}, h("h2", null, `Kết nối (${conns.length})`),
-    h("p", {class: "muted"}, "Một kết nối là một dịch vụ: nơi gọi tới và cách đăng nhập. Mọi hành động dùng chung, agent không đổi được máy chủ."),
-    h("div", {class: "row"}, h("button", {class: "primary", onclick: () => openConn({_new: true, name: "", base_url: "https://", auth: {type: "bearer", secret: ""}})}, "Thêm kết nối")),
-    conns.length ? conns.map(c => h("div", {class: "spread"}, h("span", null, h("b", null, c.title || c.name), " ", h("code", null, c.name),
-      h("div", {class: "muted"}, c.base_url + " · " + c.auth.type + (c.auth.secret ? " · " + c.auth.secret : c.auth.choices && c.auth.choices.length ? " · " + c.auth.choices.join(" / ") : ""))),
-      h("span", null, h("button", {onclick: () => openBuilder(newDraft({kind: "conn", connection: c.name, url: "/"}))}, "Hành động mới"), " ",
-        h("button", {onclick: () => openConn(c)}, "Sửa"), " ",
-        h("button", {class: "danger", onclick: async () => { if (confirm(tr(`Xoá kết nối ${c.name}?`))) { try { await api("DELETE", "/api/connections/" + encodeURIComponent(c.name)); viewProfiles(body); } catch (e) { alert(viErr(e.message)); } } }}, "Xoá")))) : h("p", {class: "muted"}, "Chưa có kết nối.")),
-  h("div", {class: "card"}, h("h2", null, "Tự tạo profile"),
-    h("p", {class: "muted"}, "Profile là một việc cụ thể bạn cho phép agent xin làm."),
-    h("div", {class: "row"}, Object.values(templates).map(t => h("button", {onclick: () => openBuilder(newDraft(t.d))}, t.label)))),
-  h("div", {class: "card"}, h("h2", null, `Profile (${list.length})`),
-    list.length ? list.map(p => h("div", {class: "spread"}, h("span", null, h("b", null, p.description || p.name), " ",
-      h("span", {class: "badge " + (p.risk === "high" ? "high" : "")}, p.risk === "high" ? "rủi ro cao" : p.auto_approve ? "tự chạy" : "hỏi duyệt"),
-      h("div", {class: "muted"}, h("code", null, "ucr run " + p.name + (p.params || []).map(q => ` ${q.name}=…`).join("")))),
-    h("span", null, h("button", {onclick: () => openTest(p)}, "Chạy thử"), " ", h("button", {onclick: () => openBuilder(fromProfile(p))}, "Sửa"), " ",
-      h("button", {class: "danger", onclick: async () => { if (confirm(tr(`Xoá profile ${p.name}?`))) { await api("DELETE", "/api/profiles/" + encodeURIComponent(p.name)); viewProfiles(body); } }}, "Xoá")))) : h("p", {class: "muted"}, "Chưa có profile."),
-    h("div", {class: "row"}, exportBtn, importOpenBtn, fileInput),
-    h("p", {class: "muted"}, "File chỉ có tên secret, không có giá trị."),
-    ioErr),
-  importBox);
+  }}, "Xuất file");
+  const importOpenBtn = h("button", {type: "button", onclick: () => { fileInput.value = ""; fileInput.click(); }}, "Nhập file");
+  const addConn = () => openConn({_new: true, name: "", base_url: "https://", auth: {type: "bearer", secret: ""}});
+  fill(body,
+    h("div", {class: "card"}, h("h2", null, `Hành động cố định (${list.length})`),
+      h("p", {class: "muted"}, "Một hành động là một việc cụ thể agent được xin làm, chỉ điền tham số. Agent chạy bằng ucr run hoặc công cụ run."),
+      list.length ? list.map(p => h("div", {class: "spread"}, h("span", null, h("b", null, p.description || p.name), " ",
+        h("span", {class: "badge " + (p.risk === "high" ? "high" : "")}, p.risk === "high" ? "rủi ro cao" : p.auto_approve ? "tự chạy" : "hỏi duyệt"),
+        p.runner ? h("span", {class: "chip"}, "runner " + p.runner) : null,
+        h("div", {class: "muted"}, h("code", null, "ucr run " + p.name + (p.params || []).map(q => ` ${q.name}=…`).join("")))),
+      h("span", {class: "acts"}, h("button", {onclick: () => openTest(p)}, "Chạy thử"), h("button", {onclick: () => openBuilder(fromProfile(p))}, "Sửa"),
+        h("button", {class: "danger", onclick: async () => { if (confirm(tr(`Xoá hành động ${p.name}?`))) { await api("DELETE", "/api/profiles/" + encodeURIComponent(p.name)); viewProfiles(body); } }}, "Xoá")))) : h("p", {class: "muted"}, "Chưa có hành động nào."),
+      h("h3", {class: "gap"}, "Tạo hành động mới"),
+      h("div", {class: "row"}, Object.values(templates).map(t => h("button", {onclick: () => openBuilder(newDraft(t.d))}, t.label)))),
+    h("div", {class: "card"}, h("div", {class: "spread"}, h("h2", null, `Dịch vụ API (${conns.length})`), h("button", {onclick: addConn}, "+ Thêm dịch vụ")),
+      h("p", {class: "muted"}, "Địa chỉ gốc và cách đăng nhập của một dịch vụ HTTP như GitHub, Gitea. Hành động gọi tới dịch vụ chỉ ghi đường dẫn, nên agent không đổi được máy chủ. Khác runner: dịch vụ API là nơi nhận request HTTP, runner là máy chạy lệnh."),
+      conns.length ? conns.map(c => h("div", {class: "spread"}, h("span", null, h("b", null, c.title || c.name), " ", h("code", null, c.name),
+        h("div", {class: "muted"}, c.base_url + " · " + c.auth.type + (c.auth.secret ? " · " + c.auth.secret : c.auth.choices && c.auth.choices.length ? " · " + c.auth.choices.join(" / ") : ""))),
+        h("span", {class: "acts"}, h("button", {onclick: () => openBuilder(newDraft({kind: "conn", connection: c.name, url: "/"}))}, "Hành động mới"),
+          h("button", {onclick: () => openConn(c)}, "Sửa"),
+          h("button", {class: "danger", onclick: async () => { if (confirm(tr(`Xoá dịch vụ ${c.name}?`))) { try { await api("DELETE", "/api/connections/" + encodeURIComponent(c.name)); viewProfiles(body); } catch (e) { alert(viErr(e.message)); } } }}, "Xoá")))) : h("p", {class: "muted"}, "Chưa có dịch vụ API nào.")),
+    h("details", {class: "card"}, h("summary", null, tr("Sao lưu và chép sang máy khác")),
+      h("p", {class: "muted"}, "Xuất hoặc nhập hành động và dịch vụ API dưới dạng JSON. File chỉ có tên secret, không có giá trị."),
+      h("div", {class: "row"}, exportBtn, importOpenBtn, fileInput), ioErr),
+    importBox);
 }
 
 function connForm(c, secrets, done) {
   const x = JSON.parse(JSON.stringify(c)); x.auth = x.auth || {type: "bearer"}; x.headers = x.headers || {};
   let mode = x.auth.choices && x.auth.choices.length ? "pick" : "one";
-  const name = field("Tên kết nối", {autocomplete: "off", spellcheck: "false"}); name.input.value = x.name || "";
+  const name = field("Tên dịch vụ", {autocomplete: "off", spellcheck: "false"}); name.input.value = x.name || "";
   if (!x._new) name.input.readOnly = true;
   const title = field("Tên hiển thị", {autocomplete: "off"}); title.input.value = x.title || "";
   const base = field("Địa chỉ gốc", {autocomplete: "off", spellcheck: "false", placeholder: "https://api.example.com/v1"}); base.input.value = x.base_url || "";
@@ -652,7 +678,7 @@ function connForm(c, secrets, done) {
     return h("div", {class: "kv"}, kk, vv, h("button", {"aria-label": "Xoá", onclick: () => { delete x.headers[k]; drawHead(); }}, "×"));
   }), h("button", {onclick: () => { x.headers["X-Header-" + (Object.keys(x.headers).length + 1)] = ""; drawHead(); }}, "+ Thêm header"));
   drawAuthC(); drawHead();
-  const card = form(x._new ? "Thêm kết nối" : "Sửa kết nối", [name, title, base], "Lưu kết nối", async () => {
+  const card = form(x._new ? "Thêm dịch vụ API" : "Sửa dịch vụ API", [name, title, base], "Lưu", async () => {
     const out = {name: name.input.value.trim() || slugify(title.input.value), title: title.input.value.trim(), base_url: base.input.value.trim(), auth: {type: x.auth.type}};
     if (x.auth.type === "header") out.auth.header = x.auth.header;
     if (x.auth.type !== "none") { if (mode === "one") out.auth.secret = x.auth.secret; else out.auth.choices = x.auth.choices; }
@@ -661,7 +687,7 @@ function connForm(c, secrets, done) {
     try { await api("PUT", "/api/connections", out); } catch (e) { throw new Error(viErr(e.message)); }
     if (x._new && c.service_actions) for (const p of c.service_actions) await api("PUT", "/api/profiles", p).catch(() => {});
     done();
-  }, h("p", {class: "muted"}, "Một kết nối là một dịch vụ: nơi gọi tới và cách đăng nhập. Mọi hành động dùng chung, agent không đổi được máy chủ."));
+  }, h("p", {class: "muted"}, "Địa chỉ gốc và cách đăng nhập. Mọi hành động gọi tới dịch vụ này dùng chung, agent không đổi được máy chủ."));
   card.append(h("h3", {class: "gap"}, "Đăng nhập"), authBox, h("h3", {class: "gap"}, "Header chung (tuỳ chọn)"), headBox, h("div", {class: "row"}, h("button", {onclick: done}, "Huỷ")));
   return card;
 }
@@ -707,10 +733,10 @@ function renderBuilder(body, d, secrets, conns = []) {
       const path = h("input", {autocomplete: "off", spellcheck: "false", placeholder: "/items/{{item_id}}", "aria-label": "Đường dẫn"});
       path.value = d.url; track(path);
       path.addEventListener("input", () => { d.url = path.value; refresh(); });
-      fill(where, h("label", null, h("span", null, "Kết nối"), select(d.connection, conns.map(x => [x.name, (x.title || x.name) + " · " + x.base_url]), v => { d.connection = v; drawWhere(); drawAuth(); refresh(); }, "Kết nối")),
+      fill(where, h("label", null, h("span", null, "Dịch vụ API"), select(d.connection, conns.map(x => [x.name, (x.title || x.name) + " · " + x.base_url]), v => { d.connection = v; drawWhere(); drawAuth(); refresh(); }, "Dịch vụ API")),
         h("div", {class: "url-row"}, methodSel(), path),
         h("small", {class: "muted"}, c ? c.base_url.replace(/\/$/, "") + (d.url || "/…") : ""),
-        h("small", {class: "muted"}, "Chỉ ghi đường dẫn bắt đầu bằng /. Máy chủ và đăng nhập lấy từ kết nối."));
+        h("small", {class: "muted"}, "Chỉ ghi đường dẫn bắt đầu bằng /. Máy chủ và đăng nhập lấy từ dịch vụ API."));
       return;
     }
     const url = h("input", {type: "url", autocomplete: "off", spellcheck: "false", placeholder: "https://api.example.com/v1/items/{{item_id}}", "aria-label": "Địa chỉ"});
@@ -720,7 +746,7 @@ function renderBuilder(body, d, secrets, conns = []) {
       h("small", {class: "muted"}, "Tên máy luôn cố định, agent chỉ điền được các giá trị ở mục 4."));
   };
   const step2 = h("section", {class: "card"}, h("h3", null, "2. Gọi tới đâu"),
-    choiceGroup("kind", d.kind, [].concat(conns.length ? [{value: "conn", title: "Dùng kết nối", help: "Máy chủ và đăng nhập đã khai báo sẵn"}] : [],
+    choiceGroup("kind", d.kind, [].concat(conns.length ? [{value: "conn", title: "Dùng dịch vụ API", help: "Máy chủ và đăng nhập đã khai báo sẵn"}] : [],
       [{value: "http", title: "Địa chỉ đầy đủ", help: "Tự ghi URL và cách đăng nhập"}],
       state.status && state.status.exec ? [{value: "exec", title: "Chạy lệnh", help: "Nâng cao, chạy trong container"}] : []),
       v => { d.kind = v; drawWhere(); drawAuth(); refresh(); }), where);
@@ -733,7 +759,7 @@ function renderBuilder(body, d, secrets, conns = []) {
   const drawAuth = () => {
     if (d.kind === "conn") {
       const c = conns.find(x => x.name === d.connection);
-      fill(authBox, h("p", {class: "muted"}, tr("Đăng nhập theo kết nối") + " " + (c ? (c.title || c.name) : "") + (c && c.auth.choices && c.auth.choices.length ? " · " + tr("chọn secret khi duyệt") : c && c.auth.secret ? " · " + c.auth.secret : "")));
+      fill(authBox, h("p", {class: "muted"}, tr("Đăng nhập theo dịch vụ API") + " " + (c ? (c.title || c.name) : "") + (c && c.auth.choices && c.auth.choices.length ? " · " + tr("chọn secret khi duyệt") : c && c.auth.secret ? " · " + c.auth.secret : "")));
       return;
     }
     if (d.kind === "exec") {
@@ -848,7 +874,7 @@ function renderBuilder(body, d, secrets, conns = []) {
   const saveBtn = h("button", {class: "primary", disabled: true, onclick: async () => {
     saveErr.textContent = "";
     try { await api("PUT", "/api/profiles", toProfile(d)); viewProfiles(body); } catch (e) { saveErr.textContent = viErr(e.message); }
-  }}, "Lưu profile");
+  }}, "Lưu hành động");
   async function runPreview() {
     const sample = Object.fromEntries(d.params.filter(p => p.name).map(p => [p.name, sampleOf(p)]));
     let r;
@@ -871,17 +897,19 @@ function renderBuilder(body, d, secrets, conns = []) {
 
 // Each agent keeps MCP servers in its own settings, so the token goes there
 // instead of a separate file.
-const jsonCfg = (u, t, key = "mcpServers", extra = {}) => JSON.stringify({[key]: {ucanrun: Object.assign(extra, {command: "ucr", args: ["mcp"], env: {UCANRUN_URL: u, UCANRUN_TOKEN: t}})}}, null, 2);
+// MCP settings for each agent. With `ucr login` the token stays in the
+// machine's credential store, so the settings carry no token.
+const jsonCfg = (cmd, key = "mcpServers", extra = {}) => JSON.stringify({[key]: {ucanrun: Object.assign(extra, {command: cmd, args: ["mcp"]})}}, null, 2);
 const agents = [
-  {id: "claude", name: "Claude Code", how: "Chạy trong terminal", make: (u, t) => `claude mcp add ucanrun -s user -e UCANRUN_URL=${u} -e UCANRUN_TOKEN=${t} -- ucr mcp`},
-  {id: "antigravity", name: "Antigravity CLI", how: "Thêm vào file", file: "~/.gemini/config/mcp_config.json", make: jsonCfg},
-  {id: "cursor", name: "Cursor", how: "Thêm vào file", file: "~/.cursor/mcp.json", make: jsonCfg},
-  {id: "claude-desktop", name: "Claude Desktop", how: "Thêm vào file", file: "claude_desktop_config.json", make: jsonCfg},
-  {id: "codex", name: "Codex CLI", how: "Thêm vào file", file: "~/.codex/config.toml", make: (u, t) => `[mcp_servers.ucanrun]\ncommand = "ucr"\nargs = ["mcp"]\nenv = { UCANRUN_URL = "${u}", UCANRUN_TOKEN = "${t}" }`},
-  {id: "gemini", name: "Gemini CLI", how: "Thêm vào file", file: "~/.gemini/settings.json", make: jsonCfg},
-  {id: "vscode", name: "VS Code", how: "Thêm vào file", file: "MCP: Open User Configuration", make: (u, t) => jsonCfg(u, t, "servers", {type: "stdio"})},
-  {id: "windsurf", name: "Windsurf", how: "Thêm vào file", file: "~/.codeium/windsurf/mcp_config.json", make: jsonCfg},
-  {id: "other", name: "Khác", how: "Đặt biến môi trường rồi chạy", make: (u, t) => `export UCANRUN_URL=${u}\nexport UCANRUN_TOKEN=${t}\nucr mcp`},
+  {id: "claude", name: "Claude Code", how: "Chạy trong terminal", make: cmd => `claude mcp add ucanrun -s user -- ${cmd} mcp`},
+  {id: "antigravity", name: "Antigravity CLI", how: "Thêm vào file", file: "~/.gemini/config/mcp_config.json", make: cmd => jsonCfg(cmd)},
+  {id: "cursor", name: "Cursor", how: "Thêm vào file", file: "~/.cursor/mcp.json", make: cmd => jsonCfg(cmd)},
+  {id: "claude-desktop", name: "Claude Desktop", how: "Thêm vào file", file: "claude_desktop_config.json", make: cmd => jsonCfg(cmd)},
+  {id: "codex", name: "Codex CLI", how: "Thêm vào file", file: "~/.codex/config.toml", make: cmd => `[mcp_servers.ucanrun]\ncommand = "${cmd.replace(/\\/g, "\\\\")}"\nargs = ["mcp"]`},
+  {id: "gemini", name: "Gemini CLI", how: "Thêm vào file", file: "~/.gemini/settings.json", make: cmd => jsonCfg(cmd)},
+  {id: "vscode", name: "VS Code", how: "Thêm vào file", file: "MCP: Open User Configuration", make: cmd => jsonCfg(cmd, "servers", {type: "stdio"})},
+  {id: "windsurf", name: "Windsurf", how: "Thêm vào file", file: "~/.codeium/windsurf/mcp_config.json", make: cmd => jsonCfg(cmd)},
+  {id: "other", name: "Khác", how: "Lệnh MCP qua stdio", make: cmd => `${cmd} mcp`},
 ];
 
 function agentPicker(cur, on) {
@@ -889,26 +917,33 @@ function agentPicker(cur, on) {
     h("label", {class: "choice"}, h("input", {type: "radio", name: "agent", value: a.id, checked: a.id === cur, onchange: () => on(a.id)}), h("span", null, h("b", null, a.name)))));
 }
 
+// After a token is made: install ucr where the agent runs, save the token
+// there, then point the agent at `ucr mcp`.
 function agentGuide(id, token, done) {
   const box = h("div");
-  let url = "http://127.0.0.1:8781";
+  let url = "http://127.0.0.1:8781", dl = "", os = guessOs();
+  const step = (n, title, ...kids) => h("li", null, h("b", null, `${n}. ${tr(title)}`), ...kids.map(c => typeof c === "string" ? copyLine(c) : c));
   const draw = () => {
     const a = agents.find(x => x.id === id);
-    const text = a.make(url, token), copied = h("span", {class: "muted"});
-    const u = h("input", {autocomplete: "off", spellcheck: "false", "aria-label": "Địa chỉ agent API"}); u.value = url;
+    const win = os === "windows";
+    const bin = win ? WIN_UCR : "~/.local/bin/ucr";
+    const cfg = a.make(win ? "C:\\Users\\<bạn>\\.local\\bin\\ucr.exe" : "ucr");
+    const u = h("input", {autocomplete: "off", spellcheck: "false", "aria-label": "Địa chỉ Agent API"}); u.value = url;
     u.addEventListener("change", () => { url = u.value.trim(); draw(); });
-    fill(box, h("div", {class: "card"}, h("h2", null, "Nối agent"),
-      agentPicker(id, v => { id = v; draw(); }),
-      h("label", null, h("span", null, "Địa chỉ agent API"), u),
-      h("h3", {class: "gap"}, a.how), a.file ? h("p", null, h("code", null, a.file)) : null,
-      h("pre", {class: "cfg"}, text),
-      h("div", {class: "row"}, h("button", {onclick: async () => {
-        try { await navigator.clipboard.writeText(text); copied.textContent = tr("Đã sao chép"); } catch (_) { copied.textContent = tr("Không sao chép được, hãy chép tay."); }
-      }}, "Sao chép"), copied),
-      h("p", {class: "note"}, "Token chỉ hiện một lần. ", "Token nằm trong cài đặt của agent. Không commit file này và không dán token vào chat với AI."),
-      h("p", {class: "muted"}, "Máy chạy agent cần lệnh ucr:"), h("pre", null, "docker cp ucanrun:/usr/local/bin/ucr ~/.local/bin/ucr"),
+    fill(box, h("div", {class: "card"}, h("h2", null, "Nối agent với ucanrun"),
+      h("p", {class: "note"}, "Token chỉ hiện lần này. Sau bước 2 nó nằm trong kho khoá của máy đó (Windows Credential Manager, hoặc ~/.config/ucanrun với quyền 0600), không nằm trong file cấu hình agent. Đừng dán token vào chat với AI."),
+      h("label", null, h("span", null, "Địa chỉ Agent API"), u),
+      h("h3", {class: "gap"}, "Máy chạy agent"), osSwitch(os, k => { os = k; draw(); }),
+      h("ol", {class: "steps-list"},
+        step(1, "Cài ucr", installCmd(dl, os)),
+        step(2, "Lưu token trên máy đó", `${win ? "& " : ""}${bin} login ${url}`, h("small", {class: "muted"}, tr("Dán token này khi được hỏi:")), token),
+        step(3, "Thêm ucanrun vào agent", agentPicker(id, v => { id = v; draw(); }),
+          h("small", {class: "muted"}, tr(a.how) + (a.file ? ": " : ""), a.file ? h("code", null, a.file) : null), h("pre", {class: "cfg"}, cfg),
+          h("div", {class: "row"}, h("button", {class: "small", onclick: () => navigator.clipboard && navigator.clipboard.writeText(cfg)}, "Sao chép"))),
+        step(4, "Kiểm tra", `${win ? "& " : ""}${bin} doctor`)),
       h("div", {class: "row"}, h("button", {class: "primary", onclick: done}, "Xong, về danh sách"))));
   };
+  api("GET", "/api/runners").then(r => { url = r.agent_url || url; dl = r.download_url || ""; draw(); }).catch(() => draw());
   draw();
   return box;
 }
@@ -919,8 +954,8 @@ function agentTokenForm(profiles, onCreated) {
   name.addEventListener("input", () => { touched = true; });
   const scope = h("div"), err = h("div", {class: "err", role: "alert"});
   const drawScope = () => {
-    if (!profiles.length) { fill(scope, h("p", {class: "muted"}, "Chưa có profile. Token này sẽ dùng được mọi profile thêm sau.")); return; }
-    fill(scope, choiceGroup("scope", mode, [{value: "all", title: "Mọi profile, kể cả profile thêm sau"}, {value: "some", title: "Chỉ các profile đã chọn"}], v => { mode = v; drawScope(); }),
+    if (!profiles.length) { fill(scope, h("p", {class: "muted"}, "Chưa có hành động cố định. Token này dùng được mọi hành động thêm sau.")); return; }
+    fill(scope, choiceGroup("scope", mode, [{value: "all", title: "Mọi hành động, kể cả hành động thêm sau", help: "Agent cũng tự soạn được yêu cầu"}, {value: "some", title: "Chỉ các hành động đã chọn", help: "Agent không tự soạn được yêu cầu"}], v => { mode = v; drawScope(); }),
       mode === "some" ? h("div", {class: "picklist"}, profiles.map(p => h("label", {class: "check"},
         h("input", {type: "checkbox", checked: picked.includes(p.name), onchange: e => { picked = e.target.checked ? picked.concat(p.name) : picked.filter(n => n !== p.name); }}),
         h("span", null, h("span", null, p.description || p.name), " ", h("code", null, p.name))))) : null);
@@ -937,10 +972,10 @@ function agentTokenForm(profiles, onCreated) {
   return h("div", {class: "card"}, h("h2", null, "Tạo token cho agent"),
     h("h3", null, "Agent bạn dùng"), agentPicker(id, v => { id = v; if (!touched) name.value = v; }),
     h("label", null, h("span", null, "Tên agent"), name),
-    h("h3", {class: "gap"}, "Giới hạn profile"), scope, wsScope,
+    h("h3", {class: "gap"}, "Giới hạn hành động"), scope, wsScope,
     h("div", {class: "row"}, h("button", {class: "primary", onclick: async () => {
       err.textContent = "";
-      if (mode === "some" && !picked.length) { err.textContent = tr("Hãy chọn ít nhất một profile."); return; }
+      if (mode === "some" && !picked.length) { err.textContent = tr("Hãy chọn ít nhất một hành động."); return; }
       if (wsMode === "some" && !wsPicked.length) { err.textContent = tr("Hãy chọn ít nhất một workspace."); return; }
       try {
         const r = await api("POST", "/api/tokens", {name: name.value, profiles: mode === "some" ? picked : [], workspaces: wsMode === "some" ? wsPicked : []});
@@ -956,7 +991,7 @@ async function viewTokens(body) {
   const addTok = h("details", {class: "card add", open: !list.length}, h("summary", null, tr("Tạo token cho agent")), tf);
   fill(body,
     h("div", {class: "card"}, h("h2", null, `Token (${list.length})`),
-    list.length ? list.map(t => h("div", {class: "spread"}, h("span", null, h("code", null, t.name), h("div", {class: "muted"}, (t.profiles && t.profiles.length ? t.profiles.join(", ") : tr("mọi profile")) + " · " + (t.workspaces && t.workspaces.length ? "workspace " + t.workspaces.map(wsLabel).join(", ") : tr("mọi workspace")) + " · " + new Date(t.created).toLocaleString())),
+    list.length ? list.map(t => h("div", {class: "spread"}, h("span", null, h("code", null, t.name), h("div", {class: "muted"}, (t.profiles && t.profiles.length ? tr("chỉ hành động") + " " + t.profiles.join(", ") : tr("tự soạn yêu cầu và mọi hành động")) + " · " + (t.workspaces && t.workspaces.length ? "workspace " + t.workspaces.map(wsLabel).join(", ") : tr("mọi workspace")) + " · " + new Date(t.created).toLocaleString())),
       h("button", {class: "danger", onclick: async () => { if (confirm(tr(`Thu hồi token ${t.name}?`))) { await api("DELETE", "/api/tokens/" + t.id); viewTokens(body); } }}, "Thu hồi"))) : h("p", {class: "muted"}, "Chưa có token.")), addTok);
 }
 
@@ -1077,9 +1112,10 @@ async function viewSettings(body) {
   const n = field("Mật khẩu mới", {type: "password", autocomplete: "new-password"});
   const langSel = select(lang, [["vi", "Tiếng Việt"], ["en", "English"]], v => { try { localStorage.setItem("ucr_lang", v); } catch (_) {} location.reload(); }, "Ngôn ngữ");
   const tplCard = await myTemplatesCard();
-  fill(body, healthCard(health), h("div", {class: "card"}, h("h2", null, "Ngôn ngữ"), langSel), autoLockCard(s), tplCard, telegramCard(s), totpCard(s), form("Đổi mật khẩu chính", [o, n], "Đổi", async () => {
+  // Same order as setup: how you approve, how you sign in, then the rest.
+  fill(body, healthCard(health), telegramCard(s), totpCard(s), autoLockCard(s), form("Đổi mật khẩu chính", [o, n], "Đổi", async () => {
     await api("POST", "/api/passphrase", {old: o.input.value, new: n.input.value}); o.input.value = n.input.value = "";
-  }));
+  }), tplCard, h("div", {class: "card"}, h("h2", null, "Ngôn ngữ"), langSel));
 }
 
 function skipped() { try { return JSON.parse(localStorage.getItem("ucr_skip") || "[]"); } catch (_) { return []; } }
@@ -1087,12 +1123,17 @@ function unskip(k) { try { localStorage.setItem("ucr_skip", JSON.stringify(skipp
 function skip(k) { try { localStorage.setItem("ucr_skip", JSON.stringify([...new Set(skipped().concat(k))])); } catch (_) {} }
 
 async function loadSteps() {
-  const [s, profiles, tokens] = await Promise.all([api("GET", "/api/status"), api("GET", "/api/profiles"), api("GET", "/api/tokens")]);
+  const [s, profiles, tokens, secrets, rinfo] = await Promise.all([api("GET", "/api/status"), api("GET", "/api/profiles"), api("GET", "/api/tokens"),
+    api("GET", "/api/secrets"), api("GET", "/api/runners").catch(() => ({runners: []}))]);
+  // In the order they are needed. Optional steps are listed but never hold
+  // back the overview.
   const steps = [
     {key: "telegram", title: "Nối Telegram", why: "Để nhận yêu cầu duyệt trên điện thoại.", done: !!(s.telegram && s.telegram.paired)},
     {key: "totp", title: "Bật TOTP và lưu mã khôi phục", why: "Lớp bảo vệ thứ hai khi đăng nhập và duyệt việc rủi ro cao.", done: !!s.totp && s.recovery_left > 0},
-    {key: "service", title: "Lưu secret đầu tiên", why: "Kèm một dòng mô tả và máy chủ được phép gửi tới.", done: (await api("GET", "/api/secrets")).some(x => (x.hosts || []).length) || profiles.length > 0},
+    {key: "service", title: "Lưu secret đầu tiên", why: "Kèm một dòng mô tả và máy chủ được phép gửi tới.", done: secrets.some(x => (x.hosts || []).length) || profiles.length > 0},
+    {key: "runner", tab: "runners", optional: true, title: "Thêm runner", why: "Khi agent cần chạy lệnh trên một máy.", done: (rinfo.runners || []).length > 0},
     {key: "agent", title: "Tạo token cho agent", why: "Để agent gửi được yêu cầu tới ucanrun.", done: tokens.length > 0},
+    {key: "actions", tab: "profiles", optional: true, title: "Định sẵn hành động", why: "Khi muốn agent chỉ làm đúng các việc bạn cho phép.", done: profiles.length > 0},
   ];
   return {s, steps};
 }
@@ -1101,10 +1142,12 @@ async function viewStart(body) {
   const {s, steps} = await loadSteps();
   const redraw = () => viewStart(body);
   const skips = skipped();
-  const cur = steps.find(x => !x.done && x.key === state.startStep) || steps.find(x => !x.done && !skips.includes(x.key));
-  const open = k => { state.startStep = k; unskip(k); redraw(); };
-  const list = h("ol", {class: "steps"}, steps.map(x => h("li", {class: x.done ? "ok" : x === cur ? "on" : ""}, h("b", null, x.title), h("small", {class: "muted"}, x.done ? "Xong" : x.why),
-    !x.done && x !== cur ? h("button", {class: "stepgo", onclick: () => open(x.key)}, "Làm bước này") : null)));
+  const need = steps.filter(x => !x.optional);
+  const cur = need.find(x => !x.done && x.key === state.startStep) || need.find(x => !x.done && !skips.includes(x.key));
+  const open = x => { if (x.tab) { state.tab = x.tab; renderShell(); return; } state.startStep = x.key; unskip(x.key); redraw(); };
+  const list = h("ol", {class: "steps"}, steps.map(x => h("li", {class: x.done ? "ok" : x === cur ? "on" : x.optional ? "opt" : ""},
+    h("b", null, tr(x.title), x.optional ? h("span", {class: "muted"}, ` · ${tr("tuỳ chọn")}`) : null), h("small", {class: "muted"}, x.done ? "Xong" : x.why),
+    !x.done && x !== cur ? h("button", {class: "stepgo", onclick: () => open(x)}, x.tab ? "Mở" : "Làm bước này") : null)));
   const head = h("div", {class: "card"}, h("h2", null, "Bắt đầu"), list);
   clearInterval(state.timer);
   // Keep the tab name in step with what the page shows.
@@ -1139,7 +1182,8 @@ async function viewStart(body) {
 
 // The landing page once setup is done: what is stored, what waits, what ran.
 async function viewOverview(body, s, steps, stepList) {
-  const done = steps.filter(x => x.done).length, all = done === steps.length;
+  const need = steps.filter(x => !x.optional);
+  const done = need.filter(x => x.done).length, all = done === need.length;
   const [secrets, tokens, profiles, reqs, runs, health] = await Promise.all([api("GET", "/api/secrets"), api("GET", "/api/tokens"), api("GET", "/api/profiles"),
     api("GET", "/api/requests"), api("GET", "/api/runs").catch(() => ({runs: []})), api("GET", "/api/health").catch(() => [])]);
   const [devs, rinfo, sys] = await Promise.all([api("GET", "/api/devices").catch(() => null), api("GET", "/api/runners").catch(() => null),
@@ -1158,7 +1202,11 @@ async function viewOverview(body, s, steps, stepList) {
   const lockLabel = m => !m ? tr("Không tự khoá") : m % 1440 === 0 ? `${m / 1440} ${tr("ngày")}` : m % 60 === 0 ? `${m / 60} ${tr("giờ")}` : `${m} ${tr("phút")}`;
   const line = (ok, text, tab) => h("li", null, h("span", {class: "dot " + (ok === true ? "ok" : ok === false ? "bad" : "warn"), "aria-hidden": "true"}),
     h("span", null, text), tab ? h("button", {class: "link", onclick: go(tab)}, "Xem") : null);
+  // Unfinished setup comes first, in order; once done it folds away at the end.
+  const setup = h("details", {class: "card setup", open: !all}, h("summary", null, all ? tr("Thiết lập ban đầu: đã xong") : `${tr("Thiết lập ban đầu")}: ${done}/${need.length}`), stepList,
+    all ? null : h("p", {class: "muted"}, "Các bước còn lại có thể làm bất cứ lúc nào."));
   fill(body,
+    all ? null : setup,
     pending.length ? h("div", {class: "card attention"}, h("h2", null, `Đang chờ duyệt (${pending.length})`),
       pending.slice(0, 3).map(r => h("div", {class: "muted"}, h("b", null, r.profile === "agent-call" ? tr("Agent tự soạn") : r.profile), " · ", r.caller, r.reason ? " · " + r.reason : "")),
       h("div", {class: "row"}, h("button", {class: "primary", onclick: go("requests")}, "Mở trang duyệt"))) : null,
@@ -1173,15 +1221,14 @@ async function viewOverview(body, s, steps, stepList) {
         line(!!s.totp, s.totp ? tr(`TOTP đang bật, còn ${s.recovery_left} mã khôi phục.`) : tr("TOTP đang tắt."), "settings"),
         line(s.auto_lock_min ? true : null, `${tr("Tự khoá kho")}: ${lockLabel(s.auto_lock_min)}.`, "settings"),
         line(bad ? false : warn ? null : true, bad || warn ? `${tr("Sức khoẻ bảo mật")}: ${bad} ${tr("lỗi")}, ${warn} ${tr("cảnh báo")}.` : tr("Sức khoẻ bảo mật ổn."), "settings"),
-        line(true, `${profiles.length} ${tr("hành động cố định")}${s.exec ? " · " + tr("chạy lệnh đang bật") : ""}.`, "profiles"),
+        line(true, `${profiles.length} ${tr("hành động cố định")}.`, "profiles"),
         idle.length ? line(null, tr(`Agent chưa tự gọi được ${idle.length} secret vì chưa có máy chủ: ${idle.map(x => x.name).join(", ")}.`), "secrets") : null)),
     sys ? systemCard(sys, go) : null,
     devs ? devicesCard(devs, s, secrets, rinfo) : null,
     h("div", {class: "card"}, h("h2", null, "Lần chạy gần đây"),
       recent.length ? recent.map(runRow) : h("p", {class: "muted"}, "Chưa có lần chạy nào."),
       h("div", {class: "row"}, h("button", {onclick: go("audit")}, "Xem nhật ký"), h("button", {onclick: go("secrets")}, "Thêm secret"), h("button", {onclick: go("tokens")}, "Tạo token"))),
-    h("details", {class: "card setup", open: !all}, h("summary", null, all ? tr("Thiết lập ban đầu: đã xong") : `${tr("Thiết lập ban đầu")}: ${done}/${steps.length}`), stepList,
-      all ? null : h("p", {class: "muted"}, "Các bước còn lại có thể làm bất cứ lúc nào.")));
+    all ? setup : null);
   window.scrollTo(0, 0);
 }
 
@@ -1214,94 +1261,136 @@ function systemCard(x, go) {
       line(x.gate ? true : null, "Web", [x.public_url || x.web_addr, x.gate ? tr("có mã truy cập") : tr("không có mã truy cập"), x.secure_cookie ? "cookie Secure" : ""].filter(Boolean).join(" · ")),
       line(true, "Agent API", [x.agent_url || x.agent_addr, `${x.tokens} token`, `${x.agents_24h} ${tr("agent gọi trong 24 giờ")}`].join(" · "), "tokens"),
       line(tg[0], "Telegram", tg[1], "settings"),
-      line(x.runners ? x.runners_online === x.runners : null, "Runner", x.runners ? `${x.runners_online}/${x.runners} ${tr("đang kết nối")}` : tr("chưa có runner"))));
+      line(x.runners ? x.runners_online === x.runners : null, "Runner", x.runners ? `${x.runners_online}/${x.runners} ${tr("đang kết nối")}` : tr("chưa có runner"), "runners")));
 }
 
-// One row per enrolled runner, from what it reports on each poll.
-function runnerRow(r, redraw) {
-  const i = r.info || {};
-  const rights = i.root ? h("span", {class: "badge root"}, "root") : i.sudo ? h("span", {class: "badge high"}, "sudo") : h("span", {class: "badge"}, tr("thường"));
-  const allow = !i.allow || !i.allow.length ? tr("chưa cho chạy chương trình nào") : i.allow.includes("*") ? tr("mọi chương trình") : i.allow.join(", ");
-  return h("li", {class: "runner"},
-    h("span", {class: "dot " + (r.online ? "ok" : "bad"), "aria-hidden": "true", title: r.online ? tr("đang kết nối") : tr("mất kết nối")}),
-    h("div", {class: "grow"},
-      h("div", null, h("b", null, r.name), " ", rights, " ",
-        h("span", {class: "muted"}, [r.online ? tr("đang kết nối") : tr("mất kết nối"), [i.os, i.arch].filter(Boolean).join("/"),
-          i.user ? `${tr("user")} ${i.user}` : "", i.require_totp ? tr("bắt buộc TOTP") : "", r.last_seen ? new Date(r.last_seen).toLocaleString() : ""].filter(Boolean).join(" · "))),
-      h("div", {class: "muted small"}, `${tr("Cho chạy")}: ${allow}`),
-      i.policy_error ? h("div", {class: "warn-line"}, `${tr("Lỗi runner.toml")}: ${i.policy_error}`) : null,
-      i.root ? h("div", {class: "warn-line"}, tr("Runner đang có quyền root hoặc admin. Nên chạy bằng user riêng, dùng sudo khi cần.")) : null,
-      h("small", {class: "muted"}, `${tr("Khoá runner")}: ${r.fingerprint}`)),
-    h("button", {class: "link danger", onclick: async () => {
-      if (!confirm(tr(`Gỡ runner ${r.name}? Máy đó sẽ không nhận việc nữa.`))) return;
-      await api("DELETE", "/api/runners/" + encodeURIComponent(r.name)); redraw();
-    }}, "Gỡ"));
+// Shell commands to put ucr on a machine, for the agent and runner guides.
+const systems = [["linux-amd64", "Linux x86_64"], ["linux-arm64", "Linux ARM64"], ["darwin", "macOS"], ["windows", "Windows"]];
+const guessOs = () => /Windows/.test(navigator.userAgent) ? "windows" : /Mac/.test(navigator.userAgent) ? "darwin" : "linux-amd64";
+const WIN_UCR = '"$env:USERPROFILE\\.local\\bin\\ucr.exe"';
+function installCmd(dl, os) {
+  if (os === "windows") return `New-Item -ItemType Directory -Force "$env:USERPROFILE\\.local\\bin" | Out-Null; Invoke-WebRequest ${dl}/ucr-windows-amd64.exe -OutFile ${WIN_UCR}`;
+  const file = os === "darwin" ? "ucr-darwin-$(uname -m | sed s/x86_64/amd64/)" : `ucr-${os}`;
+  return `mkdir -p ~/.local/bin && curl -fsSL -o ~/.local/bin/ucr ${dl}/${file} && chmod +x ~/.local/bin/ucr`;
 }
 
-function runnersBlock(d, rinfo) {
-  const list = d.runners || [];
-  const box = h("ul", {class: "health runners"});
-  const redraw = () => { state.tab = "start"; renderShell(); };
-  fill(box, list.map(r => runnerRow(r, redraw)));
-  const add = h("div", {class: "enroll", hidden: true});
+function copyLine(text) {
+  return h("div", {class: "copyline"}, h("code", null, text),
+    h("button", {class: "icon", "aria-label": tr("Chép"), title: tr("Chép"), onclick: () => navigator.clipboard && navigator.clipboard.writeText(text)}, "⧉"));
+}
+
+function osSwitch(os, on) {
+  return h("div", {class: "seg", role: "radiogroup", "aria-label": tr("Hệ điều hành")}, systems.map(([k, t]) =>
+    h("button", {type: "button", role: "radio", "aria-checked": String(k === os), class: k === os ? "on" : "", onclick: () => on(k)}, t)));
+}
+
+// Pairing a new runner: a code, then the commands for the chosen system.
+function enrollBox(rinfo, done) {
+  const box = h("div", {class: "enroll", hidden: true});
   const url = (rinfo && rinfo.agent_url) || "http://<agent-api>:8781";
   const dl = (rinfo && rinfo.download_url) || "";
-  // Step by step for the chosen system; every command can be copied.
-  const copy = text => h("div", {class: "copyline"}, h("code", null, text),
-    h("button", {class: "icon", "aria-label": tr("Chép"), title: tr("Chép"), onclick: () => navigator.clipboard && navigator.clipboard.writeText(text)}, "⧉"));
-  const step = (n, title, ...cmds) => h("li", null, h("b", null, `${n}. ${tr(title)}`), ...cmds.map(c => typeof c === "string" ? copy(c) : c));
-  const systems = [["linux-amd64", "Linux x86_64"], ["linux-arm64", "Linux ARM64"], ["darwin", "macOS"], ["windows", "Windows"]];
+  const step = (n, title, ...cmds) => h("li", null, h("b", null, `${n}. ${tr(title)}`), ...cmds.map(c => typeof c === "string" ? copyLine(c) : c));
   const guide = (code, os, name) => {
     const enroll = bin => `${bin} runner enroll ${url} ${code} --name ${name}`;
-    if (os === "windows") {
-      const exe = '"$env:USERPROFILE\\.local\\bin\\ucr.exe"';
-      return [
-        step(1, "Tải ucr.exe (PowerShell)", `New-Item -ItemType Directory -Force "$env:USERPROFILE\\.local\\bin" | Out-Null; Invoke-WebRequest ${dl}/ucr-windows-amd64.exe -OutFile ${exe}`),
-        step(2, "Ghép nối", `& ${exe} ${enroll("").trim()}`),
-        step(3, "Liệt kê chương trình được chạy", 'notepad "$env:APPDATA\\ucanrun\\runner.toml"',
-          h("small", {class: "muted"}, tr("Ví dụ: allow = ['C:\\Windows\\System32\\ipconfig.exe']. Mặc định không chạy gì."))),
-        step(4, "Chạy nền khi khởi động, quyền user thường (PowerShell admin)",
-          `Invoke-WebRequest ${dl}/runner-windows.ps1 -OutFile "$env:TEMP\\runner-windows.ps1"; powershell -ExecutionPolicy Bypass -File "$env:TEMP\\runner-windows.ps1"`)];
-    }
-    if (os === "darwin") {
-      return [
-        step(1, "Tải ucr", `mkdir -p ~/.local/bin && curl -fsSL -o ~/.local/bin/ucr ${dl}/ucr-darwin-$(uname -m | sed s/x86_64/amd64/) && chmod +x ~/.local/bin/ucr`),
-        step(2, "Ghép nối", enroll("~/.local/bin/ucr")),
-        step(3, "Liệt kê chương trình được chạy", "open -e ~/.config/ucanrun/runner.toml"),
-        step(4, "Chạy", "~/.local/bin/ucr runner serve")];
-    }
+    if (os === "windows") return [
+      step(1, "Tải ucr.exe (PowerShell)", installCmd(dl, os)),
+      step(2, "Ghép nối", `& ${WIN_UCR} ${enroll("").trim()}`),
+      step(3, "Liệt kê chương trình được chạy", 'notepad "$env:APPDATA\\ucanrun\\runner.toml"',
+        h("small", {class: "muted"}, tr("Ví dụ: allow = ['C:\\Windows\\System32\\ipconfig.exe']. Mặc định không chạy gì."))),
+      step(4, "Chạy nền khi khởi động, quyền user thường (PowerShell admin)",
+        `Invoke-WebRequest ${dl}/runner-windows.ps1 -OutFile "$env:TEMP\\runner-windows.ps1"; powershell -ExecutionPolicy Bypass -File "$env:TEMP\\runner-windows.ps1"`)];
+    if (os === "darwin") return [
+      step(1, "Tải ucr", installCmd(dl, os)),
+      step(2, "Ghép nối", enroll("~/.local/bin/ucr")),
+      step(3, "Liệt kê chương trình được chạy", "open -e ~/.config/ucanrun/runner.toml"),
+      step(4, "Chạy", "~/.local/bin/ucr runner serve")];
     return [
       step(1, "Tải ucr và script cài đặt", `curl -fsSL -o /tmp/ucr ${dl}/ucr-${os} && chmod +x /tmp/ucr && curl -fsSL -o /tmp/runner-setup-linux.sh ${dl}/runner-setup-linux.sh`),
       step(2, "Tạo user ucr-runner và service (cần sudo)", 'sudo SUDO_CMDS="/usr/bin/systemctl /usr/bin/journalctl" sh /tmp/runner-setup-linux.sh /tmp/ucr',
         h("small", {class: "muted"}, tr("SUDO_CMDS là chương trình được chạy bằng root. Script in ra mật khẩu sudo của ucr-runner một lần: lưu nó thành secret, bật dùng trong lệnh và luôn cần TOTP. Bỏ SUDO_CMDS nếu không cần root."))),
-      step(3, "Ghép nối", `sudo -u ucr-runner UCANRUN_RUNNER_DIR=/var/lib/ucr-runner ${enroll("ucr").replace(/^ucr /, "/usr/local/bin/ucr ")}`),
+      step(3, "Ghép nối", `sudo -u ucr-runner UCANRUN_RUNNER_DIR=/var/lib/ucr-runner ${enroll("/usr/local/bin/ucr")}`),
       step(4, "Liệt kê chương trình được chạy", "sudoedit /var/lib/ucr-runner/runner.toml"),
       step(5, "Chạy nền", "sudo systemctl enable --now ucr-runner")];
   };
-  const start = h("button", {class: "small", onclick: async () => {
+  const open = async () => {
     const c = await api("POST", "/api/runners/code");
-    let os = /Windows/.test(navigator.userAgent) ? "windows" : /Mac/.test(navigator.userAgent) ? "darwin" : "linux-amd64";
+    let os = guessOs();
     const name = h("input", {value: "ten-may", "aria-label": tr("Tên runner"), autocomplete: "off", spellcheck: "false", maxlength: 64});
     const steps = h("ol", {class: "steps-list"});
-    const seg = h("div", {class: "seg", role: "radiogroup", "aria-label": tr("Hệ điều hành")});
+    const sw = h("div");
     const draw = () => {
       const n = name.value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-") || "ten-may";
-      fill(seg, systems.map(([k, t]) => h("button", {type: "button", role: "radio", "aria-checked": String(k === os), class: k === os ? "on" : "", onclick: () => { os = k; draw(); }}, t)));
+      fill(sw, osSwitch(os, k => { os = k; draw(); }));
       fill(steps, guide(c.code, os, n));
     };
     name.addEventListener("input", draw);
     draw();
-    fill(add,
+    fill(box,
+      h("h3", null, "Thêm runner"),
       h("p", null, tr("Mã ghép nối, dùng một lần, hết hạn lúc"), " ", new Date(c.expires).toLocaleTimeString(), ": ", h("b", {class: "code"}, c.code)),
-      h("div", {class: "row tight"}, seg, h("label", {class: "inline-field"}, h("span", null, tr("Tên runner")), name)),
+      h("div", {class: "row tight"}, sw, h("label", {class: "inline-field"}, h("span", null, tr("Tên runner")), name)),
       steps,
       h("p", {class: "muted"}, `${tr("Khi ghép xong, máy kia in ra khoá server; khoá đúng là")}: ${rinfo ? rinfo.server_key : "?"}.`),
-      h("div", {class: "row"}, h("button", {onclick: redraw}, "Xong, tải lại")));
-    add.hidden = false;
-  }}, "+ Thêm runner");
-  return [h("div", {class: "spread"}, h("h3", null, "Runner"), start),
-    list.length ? box : h("p", {class: "muted"}, "Chưa có runner. Runner là ucr chạy trên một máy khác, chủ động lấy việc đã duyệt từ đây và chạy theo luật runner.toml của chính máy đó. Máy chạy runner không cần mở cổng."),
-    add];
+      h("div", {class: "row"}, h("button", {class: "primary", onclick: done}, "Đã chạy xong, tải lại"), h("button", {onclick: () => { box.hidden = true; }}, "Huỷ")));
+    box.hidden = false;
+    box.scrollIntoView({block: "nearest"});
+  };
+  return {el: box, open};
+}
+
+// One runner: state, what it reports about itself, its last jobs.
+function runnerCard(r, runs, redraw) {
+  const i = r.info || {};
+  const rights = i.root ? h("span", {class: "badge root"}, "root") : i.sudo ? h("span", {class: "badge high"}, "sudo") : h("span", {class: "badge"}, tr("quyền user"));
+  const allow = !i.allow || !i.allow.length ? [h("span", {class: "muted"}, tr("chưa cho chạy chương trình nào, sửa runner.toml trên máy đó"))]
+    : i.allow.includes("*") ? [h("span", {class: "chip warn"}, tr("mọi chương trình"))] : i.allow.map(a => h("span", {class: "chip"}, a));
+  const mine = (runs || []).filter(x => (x.command || "").includes("\nrunner: " + r.name)).slice(0, 3);
+  const row = (k, v) => [h("dt", null, tr(k)), h("dd", null, v)];
+  return h("div", {class: "runner-card"},
+    h("div", {class: "spread"},
+      h("span", null, h("span", {class: "dot " + (r.online ? "ok" : "bad"), "aria-hidden": "true"}), " ", h("b", null, r.name), " ", rights, " ",
+        h("span", {class: "muted"}, r.online ? tr("đang kết nối") : r.last_seen ? `${tr("mất kết nối từ")} ${new Date(r.last_seen).toLocaleString()}` : tr("chưa kết nối từ khi server khởi động"))),
+      h("button", {class: "link danger", onclick: async () => {
+        if (!confirm(tr(`Gỡ runner ${r.name}? Máy đó sẽ không nhận việc nữa.`))) return;
+        await api("DELETE", "/api/runners/" + encodeURIComponent(r.name)); redraw();
+      }}, "Gỡ")),
+    i.policy_error ? h("div", {class: "warn-line"}, `${tr("Lỗi runner.toml")}: ${i.policy_error}`) : null,
+    i.root ? h("div", {class: "warn-line"}, tr("Runner đang có quyền root hoặc admin. Nên chạy bằng user riêng, dùng sudo khi cần.")) : null,
+    h("dl", {class: "kv"},
+      row("Máy", [i.host, [i.os, i.arch].filter(Boolean).join("/")].filter(Boolean).join(" · ") || "—"),
+      row("Chạy bằng", i.user ? `${i.user}${i.uid >= 0 ? " (uid " + i.uid + ")" : ""}` : "—"),
+      row("Root qua sudo", i.sudo ? tr("cho phép, mật khẩu đi kèm từng việc") : tr("không")),
+      row("TOTP", i.require_totp ? tr("bắt buộc khi duyệt") : tr("không bắt buộc")),
+      row("Được chạy", h("span", {class: "chips"}, allow)),
+      row("Phiên bản", i.version || "—"),
+      row("Khoá runner", h("code", null, r.fingerprint))),
+    mine.length ? h("details", {class: "runs"}, h("summary", null, `${tr("Lần chạy gần đây")} (${mine.length})`), mine.map(runRow)) : null);
+}
+
+async function viewRunners(body) {
+  const [rinfo, runs, sys] = await Promise.all([api("GET", "/api/runners"), api("GET", "/api/runs").catch(() => ({runs: []})), api("GET", "/api/system").catch(() => null)]);
+  const list = rinfo.runners || [];
+  const redraw = () => viewRunners(body);
+  const add = enrollBox(rinfo, redraw);
+  const online = list.filter(r => r.online).length;
+  const example = JSON.stringify({argv: ["/usr/bin/systemctl", "restart", "nginx"], runner: list[0] ? list[0].name : "ten-may", sudo: "{{secret:ten_may_sudo}}"}, null, 2);
+  fill(body,
+    h("div", {class: "card"},
+      h("div", {class: "spread"}, h("h2", null, `Runner (${online}/${list.length} ${tr("đang kết nối")})`), h("button", {class: "primary", onclick: add.open}, "+ Thêm runner")),
+      list.length ? list.map(r => runnerCard(r, runs.runs, redraw)) : h("p", {class: "muted"}, "Chưa có runner. Bấm Thêm runner để lấy mã ghép nối và lệnh cài cho từng hệ điều hành."),
+      add.el),
+    h("details", {class: "card"}, h("summary", null, tr("Runner hoạt động thế nào")),
+      h("ul", {class: "plain"},
+        h("li", null, tr("Runner tự gọi về Agent API để xin việc, nên chạy được sau NAT, trên laptop, không mở cổng nào.")),
+        h("li", null, tr("Mỗi việc được ucanrun ký và chỉ mang secret nó cần, mã hoá riêng cho runner đó. Kết quả do runner ký.")),
+        h("li", null, tr("runner.toml trên máy đó quyết định chương trình nào được chạy. Việc ngoài danh sách bị từ chối kể cả khi bạn đã duyệt.")),
+        h("li", null, tr("Lệnh cần root đi qua sudo bằng mật khẩu của user runner, lưu thành secret trong ucanrun. Windows chỉ chạy bằng quyền user."))),
+      h("p", {class: "muted"}, "Agent gọi list_runners để xem runner, rồi run_command kèm runner, ví dụ:"), h("pre", null, example)),
+    h("div", {class: "card"}, h("h2", null, "Chạy lệnh ngay trên server"),
+      h("p", {class: "muted"}, sys && sys.exec
+        ? tr(`Đang bật: lệnh không ghi runner chạy trong ${sys.container ? "container ucanrun" : "máy chủ ucanrun"}, bằng uid ${sys.uid}.`)
+        : tr("Đang tắt: lệnh chỉ chạy trên runner.")),
+      h("p", {class: "muted"}, `${tr("Khoá server (runner ghim khi ghép nối)")}: `, h("code", null, rinfo.server_key))));
 }
 
 function devicesCard(d, s, secrets, rinfo) {
@@ -1315,8 +1404,7 @@ function devicesCard(d, s, secrets, rinfo) {
     h("span", null, h("b", null, t.host === "ucanrun" ? tr("Container ucanrun") : t.host), " ",
       h("span", {class: "muted"}, [t.user ? `${tr("user")} ${t.user}` : "", t.via.map(v => v === "agent" ? tr("agent tự soạn") : v.replace(/^profile /, "")).join(", "),
         t.runs ? `${t.runs} ${tr("lần")}, ${tr("gần nhất")} ${when(t.last_run)}` : tr("chưa chạy")].filter(Boolean).join(" · ")))));
-  return h("div", {class: "card devices"}, h("h2", null, "Thiết bị và quyền"),
-    ...runnersBlock(d, rinfo),
+  return h("div", {class: "card devices"}, h("h2", null, "Agent và nơi chạy lệnh"),
     h("h3", null, "Agent gọi từ"),
     agents.length ? h("ul", {class: "health"}, agents) : h("p", {class: "muted"}, "Chưa có token agent."),
     h("h3", null, "Nơi ucanrun chạy lệnh"),

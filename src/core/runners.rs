@@ -339,7 +339,7 @@ impl Core {
         let known = g.st.as_ref().is_some_and(|s| s.runners.contains_key(name));
         if !known {
             return Err(Error::Msg(format!(
-                "unknown runner {}; ask the owner to enroll it (Overview, Devices and rights)",
+                "unknown runner {}; ask the owner to enroll it on the Runner tab",
                 gourl::quote(name)
             )));
         }

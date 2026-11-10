@@ -59,7 +59,7 @@ Thông tin đăng nhập database có máy chủ, cổng, user và mật khẩu.
 - Trường riêng theo các quy tắc ở trên và bị che trong kết quả.
 - `{{secret:db}}` không ghi trường sẽ bị từ chối.
 
-Muốn giới hạn chặt hơn, tab Nâng cao định nghĩa các hành động cố định, xem [hành động cố định](fixed-actions.md).
+Muốn giới hạn chặt hơn, tab Hành động định nghĩa các hành động cố định, xem [hành động cố định](fixed-actions.md).
 
 ## Cài đặt
 
