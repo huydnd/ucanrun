@@ -1245,18 +1245,57 @@ function runnersBlock(d, rinfo) {
   fill(box, list.map(r => runnerRow(r, redraw)));
   const add = h("div", {class: "enroll", hidden: true});
   const url = (rinfo && rinfo.agent_url) || "http://<agent-api>:8781";
+  const dl = (rinfo && rinfo.download_url) || "";
+  // Step by step for the chosen system; every command can be copied.
+  const copy = text => h("div", {class: "copyline"}, h("code", null, text),
+    h("button", {class: "icon", "aria-label": tr("Chép"), title: tr("Chép"), onclick: () => navigator.clipboard && navigator.clipboard.writeText(text)}, "⧉"));
+  const step = (n, title, ...cmds) => h("li", null, h("b", null, `${n}. ${tr(title)}`), ...cmds.map(c => typeof c === "string" ? copy(c) : c));
+  const systems = [["linux-amd64", "Linux x86_64"], ["linux-arm64", "Linux ARM64"], ["darwin", "macOS"], ["windows", "Windows"]];
+  const guide = (code, os, name) => {
+    const enroll = bin => `${bin} runner enroll ${url} ${code} --name ${name}`;
+    if (os === "windows") {
+      const exe = '"$env:USERPROFILE\\.local\\bin\\ucr.exe"';
+      return [
+        step(1, "Tải ucr.exe (PowerShell)", `New-Item -ItemType Directory -Force "$env:USERPROFILE\\.local\\bin" | Out-Null; Invoke-WebRequest ${dl}/ucr-windows-amd64.exe -OutFile ${exe}`),
+        step(2, "Ghép nối", `& ${exe} ${enroll("").trim()}`),
+        step(3, "Liệt kê chương trình được chạy", 'notepad "$env:APPDATA\\ucanrun\\runner.toml"',
+          h("small", {class: "muted"}, tr("Ví dụ: allow = ['C:\\Windows\\System32\\ipconfig.exe']. Mặc định không chạy gì."))),
+        step(4, "Chạy nền khi khởi động, quyền user thường (PowerShell admin)",
+          `Invoke-WebRequest ${dl}/runner-windows.ps1 -OutFile "$env:TEMP\\runner-windows.ps1"; powershell -ExecutionPolicy Bypass -File "$env:TEMP\\runner-windows.ps1"`)];
+    }
+    if (os === "darwin") {
+      return [
+        step(1, "Tải ucr", `mkdir -p ~/.local/bin && curl -fsSL -o ~/.local/bin/ucr ${dl}/ucr-darwin-$(uname -m | sed s/x86_64/amd64/) && chmod +x ~/.local/bin/ucr`),
+        step(2, "Ghép nối", enroll("~/.local/bin/ucr")),
+        step(3, "Liệt kê chương trình được chạy", "open -e ~/.config/ucanrun/runner.toml"),
+        step(4, "Chạy", "~/.local/bin/ucr runner serve")];
+    }
+    return [
+      step(1, "Tải ucr và script cài đặt", `curl -fsSL -o /tmp/ucr ${dl}/ucr-${os} && chmod +x /tmp/ucr && curl -fsSL -o /tmp/runner-setup-linux.sh ${dl}/runner-setup-linux.sh`),
+      step(2, "Tạo user ucr-runner và service (cần sudo)", 'sudo SUDO_CMDS="/usr/bin/systemctl /usr/bin/journalctl" sh /tmp/runner-setup-linux.sh /tmp/ucr',
+        h("small", {class: "muted"}, tr("SUDO_CMDS là chương trình được chạy bằng root. Script in ra mật khẩu sudo của ucr-runner một lần: lưu nó thành secret, bật dùng trong lệnh và luôn cần TOTP. Bỏ SUDO_CMDS nếu không cần root."))),
+      step(3, "Ghép nối", `sudo -u ucr-runner UCANRUN_RUNNER_DIR=/var/lib/ucr-runner ${enroll("ucr").replace(/^ucr /, "/usr/local/bin/ucr ")}`),
+      step(4, "Liệt kê chương trình được chạy", "sudoedit /var/lib/ucr-runner/runner.toml"),
+      step(5, "Chạy nền", "sudo systemctl enable --now ucr-runner")];
+  };
   const start = h("button", {class: "small", onclick: async () => {
     const c = await api("POST", "/api/runners/code");
-    const line = (bin, name) => `${bin} runner enroll ${url} ${c.code} --name ${name}`;
-    const copy = text => h("div", {class: "copyline"}, h("code", null, text),
-      h("button", {class: "icon", "aria-label": tr("Chép"), title: tr("Chép"), onclick: () => navigator.clipboard && navigator.clipboard.writeText(text)}, "⧉"));
+    let os = /Windows/.test(navigator.userAgent) ? "windows" : /Mac/.test(navigator.userAgent) ? "darwin" : "linux-amd64";
+    const name = h("input", {value: "ten-may", "aria-label": tr("Tên runner"), autocomplete: "off", spellcheck: "false", maxlength: 64});
+    const steps = h("ol", {class: "steps-list"});
+    const seg = h("div", {class: "seg", role: "radiogroup", "aria-label": tr("Hệ điều hành")});
+    const draw = () => {
+      const n = name.value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-") || "ten-may";
+      fill(seg, systems.map(([k, t]) => h("button", {type: "button", role: "radio", "aria-checked": String(k === os), class: k === os ? "on" : "", onclick: () => { os = k; draw(); }}, t)));
+      fill(steps, guide(c.code, os, n));
+    };
+    name.addEventListener("input", draw);
+    draw();
     fill(add,
       h("p", null, tr("Mã ghép nối, dùng một lần, hết hạn lúc"), " ", new Date(c.expires).toLocaleTimeString(), ": ", h("b", {class: "code"}, c.code)),
-      h("p", {class: "muted"}, "Chạy trên máy cần làm runner, bằng user riêng (không phải root). Linux, macOS, WSL:"),
-      copy(line("ucr", "ten-may")), copy("ucr runner serve"),
-      h("p", {class: "muted"}, "Windows (PowerShell):"),
-      copy(line("ucr.exe", "ten-may")), copy("ucr.exe runner serve"),
-      h("p", {class: "muted"}, `${tr("Sau khi ghép, so khoá server máy kia in ra với khoá này")}: ${rinfo ? rinfo.server_key : "?"}. ${tr("Rồi sửa runner.toml trên máy đó để liệt kê chương trình được chạy; mặc định không chạy gì.")}`),
+      h("div", {class: "row tight"}, seg, h("label", {class: "inline-field"}, h("span", null, tr("Tên runner")), name)),
+      steps,
+      h("p", {class: "muted"}, `${tr("Khi ghép xong, máy kia in ra khoá server; khoá đúng là")}: ${rinfo ? rinfo.server_key : "?"}.`),
       h("div", {class: "row"}, h("button", {onclick: redraw}, "Xong, tải lại")));
     add.hidden = false;
   }}, "+ Thêm runner");

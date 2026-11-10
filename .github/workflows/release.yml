@@ -10,6 +10,10 @@ permissions:
 jobs:
   image:
     runs-on: ubuntu-latest
+    # Docker Hub is optional: set the repository secrets DOCKERHUB_USERNAME and
+    # DOCKERHUB_TOKEN (an access token with write scope) to also push there.
+    env:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
     strategy:
       matrix:
         include:
@@ -26,6 +30,11 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - if: env.DOCKERHUB_USERNAME != ''
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
       - id: build
         uses: docker/build-push-action@v6
         with:
@@ -38,8 +47,12 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository }}:${{ github.ref_name }}${{ matrix.suffix }}
             ghcr.io/${{ github.repository }}:latest${{ matrix.suffix }}
+            ${{ env.DOCKERHUB_USERNAME != '' && format('docker.io/{0}/ucanrun:{1}{2}', env.DOCKERHUB_USERNAME, github.ref_name, matrix.suffix) || '' }}
+            ${{ env.DOCKERHUB_USERNAME != '' && format('docker.io/{0}/ucanrun:latest{1}', env.DOCKERHUB_USERNAME, matrix.suffix) || '' }}
       - uses: sigstore/cosign-installer@v3
       - run: cosign sign --yes "ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}"
+      - if: env.DOCKERHUB_USERNAME != ''
+        run: cosign sign --yes "docker.io/${{ env.DOCKERHUB_USERNAME }}/ucanrun@${{ steps.build.outputs.digest }}"
   binaries:
     strategy:
       matrix:
@@ -71,10 +84,13 @@ jobs:
     needs: binaries
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
+      # The runner guide in the web UI downloads these from the release.
+      - run: cp scripts/runner-setup-linux.sh scripts/runner-windows.ps1 dist/
       - run: cd dist && sha256sum * > SHA256SUMS
       - uses: softprops/action-gh-release@v2
         with:

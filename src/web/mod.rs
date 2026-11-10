@@ -1464,8 +1464,17 @@ async fn runners_list(State(s): State<Arc<Server>>, h: HeaderMap) -> Response {
     write_json(
         200,
         &json!({"runners": list, "server_key": crate::runner::proto::fingerprint(&key),
-            "agent_url": std::env::var("UCANRUN_AGENT_URL").unwrap_or_default()}),
+            "agent_url": std::env::var("UCANRUN_AGENT_URL").unwrap_or_default(),
+            "download_url": download_url()}),
     )
+}
+
+/// Where the runner guide downloads ucr and the setup scripts from.
+fn download_url() -> String {
+    match std::env::var("UCANRUN_DOWNLOAD_URL") {
+        Ok(v) if !v.is_empty() => v.trim_end_matches('/').to_string(),
+        _ => "https://github.com/huydnd/ucanrun/releases/latest/download".into(),
+    }
 }
 
 async fn system_info(State(s): State<Arc<Server>>, h: HeaderMap) -> Response {

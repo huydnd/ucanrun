@@ -19,6 +19,23 @@ back the result.
   signed by the runner. Someone who can read or change the traffic can neither
   read a secret nor forge a job or a result.
 
+## Install ucr
+
+Each release on GitHub carries `ucr` for every platform, and the two setup
+scripts:
+
+| System | File |
+|---|---|
+| Linux x86_64 (PC, WSL) | `ucr-linux-amd64` |
+| Linux ARM64 (Raspberry Pi, ARM servers) | `ucr-linux-arm64` |
+| macOS | `ucr-darwin-arm64`, `ucr-darwin-amd64` |
+| Windows | `ucr-windows-amd64.exe` |
+
+`https://github.com/huydnd/ucanrun/releases/latest/download/<file>` always
+points at the newest one. The **Add runner** box in the web UI shows the exact
+commands for each system; set `UCANRUN_DOWNLOAD_URL` on the server to download
+from somewhere else, such as your own mirror.
+
 ## Enroll a runner
 
 1. In the web UI: **Overview → Devices and rights → Add runner**. You get a
