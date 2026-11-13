@@ -101,6 +101,12 @@ pub struct State {
     /// this file is signed, not encrypted.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub templates: Vec<SecretTemplate>,
+    /// Passkeys that sign in and approve, next to TOTP.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub passkeys: Vec<crate::webauthn::Passkey>,
+    /// The WebAuthn user handle, random, base64url.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub webauthn_user: String,
     /// Paired accounts on approval channels besides Telegram, by kind.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub chats: BTreeMap<String, crate::chat::Owner>,

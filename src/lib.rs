@@ -30,3 +30,5 @@ pub mod totp;
 pub mod vault;
 #[cfg(unix)]
 pub mod web;
+#[cfg(unix)]
+pub mod webauthn;
