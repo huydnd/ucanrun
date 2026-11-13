@@ -326,3 +326,11 @@ ul.plain { margin: 0 0 8px; padding-left: 1.2em; display: grid; gap: 4px; }
 .pk-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .pk-list li { display: flex; gap: 8px; align-items: baseline; }
 .pk-list .grow { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+/* Step lists number themselves in the text, everywhere. */
+ol.steps-list { list-style: none; padding-left: 0; margin: 0; display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); }
+ol.steps-list > li { display: grid; gap: 6px; min-width: 0; }
+.copyblock { position: relative; min-width: 0; }
+.copyblock pre { margin: 0; padding: 8px 40px 8px 10px; white-space: pre-wrap; word-break: break-all; font-size: 12.5px; max-height: 14em; overflow: auto; }
+.copyblock .icon { position: absolute; top: 4px; right: 4px; }
+.copyblock .muted { display: block; font-size: 12px; margin-top: 2px; }
+.copyline { min-width: 0; } ol.steps-list > li > * { min-width: 0; max-width: 100%; }

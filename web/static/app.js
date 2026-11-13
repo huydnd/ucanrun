@@ -953,24 +953,69 @@ function renderBuilder(body, d, secrets, conns = []) {
 // instead of a separate file.
 // MCP settings for each agent. With `ucr login` the token stays in the
 // machine's credential store, so the settings carry no token.
-const jsonCfg = (cmd, key = "mcpServers", extra = {}) => JSON.stringify({[key]: {ucanrun: Object.assign(extra, {command: cmd, args: ["mcp"]})}}, null, 2);
+// MCP settings for each agent. With `ucr login` the token stays in the
+// machine's credential store, so the settings carry no token.
+// `file` gives the settings file per system: unix (Linux, WSL), mac, win
+// (PowerShell syntax). `key` is the object that lists MCP servers.
 const agents = [
-  {id: "claude", name: "Claude Code", how: "Chạy trong terminal", make: cmd => `claude mcp add ucanrun -s user -- ${cmd} mcp`},
-  {id: "antigravity", name: "Antigravity CLI", how: "Thêm vào file", file: "~/.gemini/config/mcp_config.json", make: cmd => jsonCfg(cmd)},
-  {id: "cursor", name: "Cursor", how: "Thêm vào file", file: "~/.cursor/mcp.json", make: cmd => jsonCfg(cmd)},
-  {id: "claude-desktop", name: "Claude Desktop", how: "Thêm vào file", file: "claude_desktop_config.json", make: cmd => jsonCfg(cmd)},
-  {id: "codex", name: "Codex CLI", how: "Thêm vào file", file: "~/.codex/config.toml", make: cmd => `[mcp_servers.ucanrun]\ncommand = "${cmd.replace(/\\/g, "\\\\")}"\nargs = ["mcp"]`},
-  {id: "gemini", name: "Gemini CLI", how: "Thêm vào file", file: "~/.gemini/settings.json", make: cmd => jsonCfg(cmd)},
-  {id: "vscode", name: "VS Code", how: "Thêm vào file", file: "MCP: Open User Configuration", make: cmd => jsonCfg(cmd, "servers", {type: "stdio"})},
-  {id: "windsurf", name: "Windsurf", how: "Thêm vào file", file: "~/.codeium/windsurf/mcp_config.json", make: cmd => jsonCfg(cmd)},
-  {id: "other", name: "Khác", how: "Lệnh MCP qua stdio", make: cmd => `${cmd} mcp`},
+  {id: "claude", name: "Claude Code", kind: "cli"},
+  {id: "antigravity", name: "Antigravity CLI", kind: "json", key: "mcpServers",
+    file: {unix: "~/.gemini/config/mcp_config.json", win: "$env:USERPROFILE\\.gemini\\config\\mcp_config.json"}},
+  {id: "cursor", name: "Cursor", kind: "json", key: "mcpServers",
+    file: {unix: "~/.cursor/mcp.json", win: "$env:USERPROFILE\\.cursor\\mcp.json"}},
+  {id: "claude-desktop", name: "Claude Desktop", kind: "json", key: "mcpServers",
+    file: {unix: "~/.config/Claude/claude_desktop_config.json", mac: "~/Library/Application Support/Claude/claude_desktop_config.json", win: "$env:APPDATA\\Claude\\claude_desktop_config.json"}},
+  {id: "codex", name: "Codex CLI", kind: "toml",
+    file: {unix: "~/.codex/config.toml", win: "$env:USERPROFILE\\.codex\\config.toml"}},
+  {id: "gemini", name: "Gemini CLI", kind: "json", key: "mcpServers",
+    file: {unix: "~/.gemini/settings.json", win: "$env:USERPROFILE\\.gemini\\settings.json"}},
+  {id: "vscode", name: "VS Code", kind: "json", key: "servers", extra: {type: "stdio"},
+    file: {unix: "~/.config/Code/User/mcp.json", mac: "~/Library/Application Support/Code/User/mcp.json", win: "$env:APPDATA\\Code\\User\\mcp.json"}},
+  {id: "windsurf", name: "Windsurf", kind: "json", key: "mcpServers",
+    file: {unix: "~/.codeium/windsurf/mcp_config.json", win: "$env:USERPROFILE\\.codeium\\windsurf\\mcp_config.json"}},
+  {id: "other", name: "Khác", kind: "stdio"},
 ];
+
+// What one agent needs on one system: commands to run, and a snippet to
+// paste by hand. Merging keeps every other MCP server and saves a .bak copy.
+function mcpSetup(a, os) {
+  const win = os === "windows";
+  const sys = win ? "win" : os === "darwin" ? "mac" : "unix";
+  const file = a.file ? (a.file[sys] || a.file.unix) : "";
+  const ucr = win ? "$env:USERPROFILE\\.local\\bin\\ucr.exe" : "~/.local/bin/ucr";
+  const shown = win ? "C:\\Users\\<you>\\.local\\bin\\ucr.exe" : "/home/<you>/.local/bin/ucr";
+  if (a.kind === "cli") return {cmd: win ? `claude mcp add ucanrun -s user -- "${ucr}" mcp` : `claude mcp add ucanrun -s user -- ${ucr} mcp`};
+  if (a.kind === "stdio") return {cmd: win ? `& "${ucr}" mcp` : `${ucr} mcp`, note: "Lệnh MCP qua stdio, không cần biến môi trường."};
+  if (a.kind === "toml") {
+    const cmd = win
+      ? `$f = "${file}"; New-Item -ItemType Directory -Force (Split-Path $f) | Out-Null; if ((Test-Path $f) -and (Select-String -Path $f -Pattern '^\\[mcp_servers\\.ucanrun\\]' -Quiet)) { "ucanrun is already in $f" } else { Add-Content -Path $f -Value "\`n[mcp_servers.ucanrun]\`ncommand = '${ucr}'\`nargs = [\`"mcp\`"]"; "ucanrun added to $f" }`
+      : `f=${file}; mkdir -p "$(dirname "$f")"; if grep -q '^\\[mcp_servers\\.ucanrun\\]' "$f" 2>/dev/null; then echo "ucanrun is already in $f"; else printf '\\n[mcp_servers.ucanrun]\\ncommand = "%s"\\nargs = ["mcp"]\\n' "$HOME/.local/bin/ucr" >> "$f" && echo "ucanrun added to $f"; fi`;
+    return {cmd, file, snippet: `[mcp_servers.ucanrun]\ncommand = "${shown.replace(/\\/g, "\\\\")}"\nargs = ["mcp"]`, where: "Thêm khối này vào cuối file"};
+  }
+  const entry = Object.assign({}, a.extra || {}, {args: ["mcp"]});
+  const cmd = win
+    ? `$p = "${file}"; $d = if (Test-Path $p) { Copy-Item $p "$p.bak"; Get-Content $p -Raw | ConvertFrom-Json } else { [pscustomobject]@{} }; if (-not ($d.PSObject.Properties.Name -contains "${a.key}")) { $d | Add-Member -NotePropertyName "${a.key}" -NotePropertyValue ([pscustomobject]@{}) }; $e = [pscustomobject]@{${a.extra ? Object.entries(a.extra).map(([k, v]) => `${k} = "${v}"; `).join("") : ""}command = "${ucr}"; args = @("mcp")}; $d."${a.key}" | Add-Member -Force -NotePropertyName ucanrun -NotePropertyValue $e; New-Item -ItemType Directory -Force (Split-Path $p) | Out-Null; [IO.File]::WriteAllText($p, ($d | ConvertTo-Json -Depth 32)); "ucanrun added to $p"`
+    : `python3 -c 'import json,os,shutil,sys;p=os.path.expanduser(sys.argv[1]);d=json.load(open(p)) if os.path.exists(p) else {};os.path.exists(p) and shutil.copy(p,p+".bak");d.setdefault(sys.argv[2],{})["ucanrun"]=dict(json.loads(sys.argv[3]),command=os.path.expanduser("~/.local/bin/ucr"));os.makedirs(os.path.dirname(p),exist_ok=True);json.dump(d,open(p,"w"),indent=2);print("ucanrun added to",p)' "${file}" ${a.key} '${JSON.stringify(entry)}'`;
+  const snippet = `"ucanrun": ${JSON.stringify(Object.assign({}, a.extra || {}, {command: shown, args: ["mcp"]}), null, 2)}`;
+  return {cmd, file, snippet, where: `Hoặc dán vào trong mục "${a.key}" của file (thêm dấu phẩy nếu đã có server khác)`};
+}
+
+// Copyable text that keeps its line breaks.
+function copyBlock(text) {
+  const done = h("span", {class: "muted"});
+  return h("div", {class: "copyblock"}, h("pre", null, text),
+    h("button", {class: "icon", "aria-label": tr("Chép"), title: tr("Chép"), onclick: async () => {
+      try { await navigator.clipboard.writeText(text); done.textContent = tr("Đã sao chép"); } catch (_) { done.textContent = tr("Không sao chép được, hãy chép tay."); }
+    }}, "⧉"), done);
+}
 
 function agentPicker(cur, on) {
   return h("div", {class: "choices", role: "radiogroup", "aria-label": "Agent bạn dùng"}, agents.map(a =>
     h("label", {class: "choice"}, h("input", {type: "radio", name: "agent", value: a.id, checked: a.id === cur, onchange: () => on(a.id)}), h("span", null, h("b", null, a.name)))));
 }
 
+// After a token is made: install ucr where the agent runs, save the token
+// there, then point the agent at `ucr mcp`.
 // After a token is made: install ucr where the agent runs, save the token
 // there, then point the agent at `ucr mcp`.
 function agentGuide(id, token, done) {
@@ -981,7 +1026,7 @@ function agentGuide(id, token, done) {
     const a = agents.find(x => x.id === id);
     const win = os === "windows";
     const bin = win ? WIN_UCR : "~/.local/bin/ucr";
-    const cfg = a.make(win ? "C:\\Users\\<bạn>\\.local\\bin\\ucr.exe" : "ucr");
+    const m = mcpSetup(a, os);
     const u = h("input", {autocomplete: "off", spellcheck: "false", "aria-label": "Địa chỉ Agent API"}); u.value = url;
     u.addEventListener("change", () => { url = u.value.trim(); draw(); });
     fill(box, h("div", {class: "card"}, h("h2", null, "Nối agent với ucanrun"),
@@ -992,9 +1037,13 @@ function agentGuide(id, token, done) {
         step(1, "Cài ucr", installCmd(dl, os)),
         step(2, "Lưu token trên máy đó", `${win ? "& " : ""}${bin} login ${url}`, h("small", {class: "muted"}, tr("Dán token này khi được hỏi:")), token),
         step(3, "Thêm ucanrun vào agent", agentPicker(id, v => { id = v; draw(); }),
-          h("small", {class: "muted"}, tr(a.how) + (a.file ? ": " : ""), a.file ? h("code", null, a.file) : null), h("pre", {class: "cfg"}, cfg),
-          h("div", {class: "row"}, h("button", {class: "small", onclick: () => navigator.clipboard && navigator.clipboard.writeText(cfg)}, "Sao chép"))),
-        step(4, "Kiểm tra", `${win ? "& " : ""}${bin} doctor`)),
+          m.file ? h("small", {class: "muted"}, tr(a.kind === "json" ? "Chạy lệnh này để thêm ucanrun vào file, giữ nguyên các MCP khác (bản cũ lưu thành .bak):" : "Chạy lệnh này để thêm ucanrun vào cuối file nếu chưa có:"), " ", h("code", null, m.file))
+            : h("small", {class: "muted"}, m.note ? tr(m.note) : tr("Chạy trong terminal:")),
+          copyBlock(m.cmd),
+          m.snippet ? h("small", {class: "muted"}, tr(m.where) + ":") : null,
+          m.snippet ? copyBlock(m.snippet) : null,
+          a.kind === "json" && !win ? h("small", {class: "muted"}, tr("Lệnh cần python3. Nếu file có chú thích (JSONC), lệnh dừng mà không ghi gì; khi đó dán tay đoạn trên.")) : null),
+        step(4, "Khởi động lại agent rồi kiểm tra", `${win ? "& " : ""}${bin} doctor`)),
       h("div", {class: "row"}, h("button", {class: "primary", onclick: done}, "Xong, về danh sách"))));
   };
   api("GET", "/api/runners").then(r => { url = r.agent_url || url; dl = r.download_url || ""; draw(); }).catch(() => draw());
