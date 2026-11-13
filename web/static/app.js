@@ -67,7 +67,7 @@ async function boot() {
   if (!s.authed) return renderLogin(s.locked);
   const {steps} = await loadSteps();
   state.incomplete = steps.some(x => !x.done);
-  state.overview = steps.every(x => x.done || skipped().includes(x.key));
+  state.overview = steps.filter(x => !x.optional).every(x => x.done || skipped().includes(x.key));
   if (!state.opened) state.tab = tabOfHash() || "start";
   state.opened = true;
   renderShell();
@@ -152,20 +152,32 @@ const blurbs = {
   settings: "Kênh duyệt, đăng nhập, khoá kho và ngôn ngữ.",
 };
 
+// Guides (page blurbs, step bar, how-it-works notes) can be hidden once
+// understood; the choice stays in this browser.
+const guidesOff = () => { try { return localStorage.getItem("ucr_guides") === "off"; } catch (_) { return false; } };
+function setGuides(on) {
+  try { localStorage.setItem("ucr_guides", on ? "on" : "off"); } catch (_) {}
+  document.body.classList.toggle("no-guides", !on);
+  document.querySelectorAll(".guide-toggle").forEach(b => { b.textContent = tr(on ? "Ẩn hướng dẫn" : "Hiện hướng dẫn"); b.setAttribute("aria-pressed", String(!on)); });
+}
+
 function flowIntro(tab) {
   const i = flow.findIndex(f => f.tab === tab);
   const f = flow[i];
   const title = tab === "start" && !state.overview ? "Bắt đầu" : tab === "start" ? "Tổng quan" : tabs[tab];
+  const off = guidesOff();
   return h("div", {class: "page-head"},
-    f ? h("span", {class: "stepno"}, `${tr("Bước")} ${i + 1}/${flow.length}${f.optional ? " · " + tr("tuỳ chọn") : ""}`) : null,
-    h("h1", null, title), h("p", null, tr(f ? f.text : blurbs[tab] || "")));
+    f ? h("span", {class: "stepno guide"}, `${tr("Bước")} ${i + 1}/${flow.length}${f.optional ? " · " + tr("tuỳ chọn") : ""}`) : null,
+    h("div", {class: "title-row"}, h("h1", null, title),
+      h("button", {class: "link guide-toggle", "aria-pressed": String(off), onclick: () => setGuides(guidesOff())}, off ? "Hiện hướng dẫn" : "Ẩn hướng dẫn")),
+    h("p", {class: "guide"}, tr(f ? f.text : blurbs[tab] || "")));
 }
 
 function flowNext(tab) {
   const i = flow.findIndex(f => f.tab === tab);
   if (i < 0) return null;
   const nx = flow[i + 1];
-  return h("div", {class: "row flow-next"}, i > 0 ? h("button", {onclick: () => go(flow[i - 1].tab)}, `← ${tr(tabs[flow[i - 1].tab])}`) : null,
+  return h("div", {class: "row flow-next guide"}, i > 0 ? h("button", {onclick: () => go(flow[i - 1].tab)}, `← ${tr(tabs[flow[i - 1].tab])}`) : null,
     nx ? h("button", {class: "primary", onclick: () => go(nx.tab)}, `${tr("Tiếp")}: ${tr(tabs[nx.tab])} →`) : h("button", {class: "primary", onclick: () => go("start")}, tr("Xong, về Tổng quan")));
 }
 
@@ -177,6 +189,7 @@ document.addEventListener("keydown", e => { const n = document.querySelector("he
 window.addEventListener("popstate", () => { const t = tabOfHash(); if (t && t !== state.tab && document.querySelector("header nav")) go(t); });
 
 function renderShell() {
+  document.body.classList.toggle("no-guides", guidesOff());
   // Views fill `body`; the step intro and the next button stay around it.
   const body = h("div", {class: "view"});
   const main = h("main", null, flowIntro(state.tab), body, flowNext(state.tab));
@@ -733,7 +746,7 @@ async function viewProfiles(body, keptImport) {
   const addConn = () => openConn({_new: true, name: "", base_url: "https://", auth: {type: "bearer", secret: ""}});
   fill(body,
     h("div", {class: "card"}, h("h2", null, `Hành động cố định (${list.length})`),
-      h("p", {class: "muted"}, "Một hành động là một việc cụ thể agent được xin làm, chỉ điền tham số. Agent chạy bằng ucr run hoặc công cụ run."),
+      h("p", {class: "muted guide"}, "Một hành động là một việc cụ thể agent được xin làm, chỉ điền tham số. Agent chạy bằng ucr run hoặc công cụ run."),
       list.length ? list.map(p => h("div", {class: "spread"}, h("span", null, h("b", null, p.description || p.name), " ",
         h("span", {class: "badge " + (p.risk === "high" ? "high" : "")}, p.risk === "high" ? "rủi ro cao" : p.auto_approve ? "tự chạy" : "hỏi duyệt"),
         p.runner ? h("span", {class: "chip"}, "runner " + p.runner) : null,
@@ -743,14 +756,14 @@ async function viewProfiles(body, keptImport) {
       h("h3", {class: "gap"}, "Tạo hành động mới"),
       h("div", {class: "row"}, Object.values(templates).map(t => h("button", {onclick: () => openBuilder(newDraft(t.d))}, t.label)))),
     h("div", {class: "card"}, h("div", {class: "spread"}, h("h2", null, `Dịch vụ API (${conns.length})`), h("button", {onclick: addConn}, "+ Thêm dịch vụ")),
-      h("p", {class: "muted"}, "Địa chỉ gốc và cách đăng nhập của một dịch vụ HTTP như GitHub, Gitea. Hành động gọi tới dịch vụ chỉ ghi đường dẫn, nên agent không đổi được máy chủ. Khác runner: dịch vụ API là nơi nhận request HTTP, runner là máy chạy lệnh."),
+      h("p", {class: "muted guide"}, "Địa chỉ gốc và cách đăng nhập của một dịch vụ HTTP như GitHub, Gitea. Hành động gọi tới dịch vụ chỉ ghi đường dẫn, nên agent không đổi được máy chủ. Khác runner: dịch vụ API là nơi nhận request HTTP, runner là máy chạy lệnh."),
       conns.length ? conns.map(c => h("div", {class: "spread"}, h("span", null, h("b", null, c.title || c.name), " ", h("code", null, c.name),
         h("div", {class: "muted"}, c.base_url + " · " + c.auth.type + (c.auth.secret ? " · " + c.auth.secret : c.auth.choices && c.auth.choices.length ? " · " + c.auth.choices.join(" / ") : ""))),
         h("span", {class: "acts"}, h("button", {onclick: () => openBuilder(newDraft({kind: "conn", connection: c.name, url: "/"}))}, "Hành động mới"),
           h("button", {onclick: () => openConn(c)}, "Sửa"),
           h("button", {class: "danger", onclick: async () => { if (confirm(tr(`Xoá dịch vụ ${c.name}?`))) { try { await api("DELETE", "/api/connections/" + encodeURIComponent(c.name)); viewProfiles(body); } catch (e) { alert(sentence(viErr(e.message))); } } }}, "Xoá")))) : h("p", {class: "muted"}, "Chưa có dịch vụ API nào.")),
     h("details", {class: "card"}, h("summary", null, tr("Sao lưu và chép sang máy khác")),
-      h("p", {class: "muted"}, "Xuất hoặc nhập hành động và dịch vụ API dưới dạng JSON. File chỉ có tên secret, không có giá trị."),
+      h("p", {class: "muted guide"}, "Xuất hoặc nhập hành động và dịch vụ API dưới dạng JSON. File chỉ có tên secret, không có giá trị."),
       h("div", {class: "row"}, exportBtn, importOpenBtn, fileInput), ioErr),
     importBox);
 }
@@ -940,7 +953,7 @@ function renderBuilder(body, d, secrets, conns = []) {
     }), h("button", {onclick: () => { d.params.push(newDraft({params: [{}]}).params[0]); drawParams(); }}, "+ Thêm giá trị"));
   };
   const step4 = h("section", {class: "card"}, h("h3", null, "4. Agent được điền gì"),
-    h("p", {class: "muted"}, "Mọi thứ khác là cố định. Giá trị sai kiểu sẽ bị từ chối trước khi tới tay bạn."), paramBox, chips);
+    h("p", {class: "muted guide"}, "Mọi thứ khác là cố định. Giá trị sai kiểu sẽ bị từ chối trước khi tới tay bạn."), paramBox, chips);
 
   // 5. Request body
   const bodyBox = h("div");
@@ -1193,7 +1206,7 @@ function totpCard(s, after) {
   const box = h("div");
   const card = h("div", {class: "card"}, h("h2", null, "TOTP"), box);
   if (!s.totp) {
-    box.append(h("p", {class: "muted"}, "Mã 6 số từ ứng dụng xác thực như Aegis, Google Authenticator. Yêu cầu rủi ro cao không duyệt được cho đến khi bật TOTP."),
+    box.append(h("p", {class: "muted guide"}, "Mã 6 số từ ứng dụng xác thực như Aegis, Google Authenticator. Yêu cầu rủi ro cao không duyệt được cho đến khi bật TOTP."),
       h("button", {class: "primary", onclick: async () => {
         const r = await api("POST", "/api/totp/start");
         const c = field("Nhập mã 6 số để xác nhận", {inputmode: "numeric", maxlength: 6, autocomplete: "one-time-code"});
@@ -1238,7 +1251,7 @@ function autoLockCard(s) {
     catch (e) { err.textContent = tr(e.message); }
   }, "Tự khoá sau");
   return h("div", {class: "card"}, h("h2", null, "Tự khoá kho"),
-    h("p", {class: "muted"}, "Khoá kho khi không có hoạt động nào: không mở web, không duyệt, không có yêu cầu từ agent. Khi khoá, agent nhận lỗi 423 cho tới khi bạn đăng nhập. Nếu chọn Không tự khoá, kho chỉ khoá khi bạn bấm Khoá kho hoặc server khởi động lại."),
+    h("p", {class: "muted guide"}, "Khoá kho khi không có hoạt động nào: không mở web, không duyệt, không có yêu cầu từ agent. Khi khoá, agent nhận lỗi 423 cho tới khi bạn đăng nhập. Nếu chọn Không tự khoá, kho chỉ khoá khi bạn bấm Khoá kho hoặc server khởi động lại."),
     h("label", null, h("span", null, "Tự khoá sau"), sel), saved, err);
 }
 
@@ -1246,7 +1259,7 @@ function autoLockCard(s) {
 async function myTemplatesCard() {
   const box = h("div");
   const card = h("div", {class: "card"}, h("h2", null, "Mẫu secret của bạn"),
-    h("p", {class: "muted"}, "Mở form ở tab Secret, điền như mong muốn rồi bấm Lưu thành mẫu. Mẫu hiện trước các mẫu có sẵn."), box);
+    h("p", {class: "muted guide"}, "Mở form ở tab Secret, điền như mong muốn rồi bấm Lưu thành mẫu. Mẫu hiện trước các mẫu có sẵn."), box);
   const draw = async () => {
     const list = await api("GET", "/api/templates").catch(() => []);
     fill(box, list.length ? list.map(t => h("div", {class: "spread"}, h("span", null, h("b", null, t.title), " ", t.name ? h("code", null, t.name) : null,
@@ -1355,7 +1368,7 @@ function channelsCard(s, chats, sys, after) {
   };
   draw();
   return h("div", {class: "card channels"}, h("h2", null, "Kênh duyệt"),
-    h("p", {class: "muted"}, "Nơi bạn nhận và bấm duyệt yêu cầu. Nối một hoặc nhiều kênh; mỗi yêu cầu được gửi tới mọi kênh đã ghép nối, duyệt ở đâu cũng được."),
+    h("p", {class: "muted guide"}, "Nơi bạn nhận và bấm duyệt yêu cầu. Nối một hoặc nhiều kênh; mỗi yêu cầu được gửi tới mọi kênh đã ghép nối, duyệt ở đâu cũng được."),
     tiles, box);
 }
 
@@ -1412,11 +1425,14 @@ async function viewSettings(body) {
   const n = field("Mật khẩu mới", {type: "password", autocomplete: "new-password"});
   const langSel = select(lang, [["vi", "Tiếng Việt"], ["en", "English"]], v => { try { localStorage.setItem("ucr_lang", v); } catch (_) {} location.reload(); }, "Ngôn ngữ");
   const bad = health.filter(i => i.level === "bad").length, warn = health.filter(i => i.level === "warn").length;
-  const healthBox = h("details", {class: "card health-card", open: bad > 0},
+  const okN = health.filter(i => i.level === "ok").length;
+  const healthBox = h("details", {class: "card health-card"},
     h("summary", null, h("span", {class: "dot " + (bad ? "bad" : warn ? "warn" : "ok"), "aria-hidden": "true"}), " ",
       h("b", null, tr("Sức khoẻ bảo mật")), " ", h("span", {class: "muted"}, bad || warn ? `${bad} ${tr("lỗi")}, ${warn} ${tr("cảnh báo")}` : tr("ổn"))),
-    h("ul", {class: "health"}, health.filter(i => i.level !== "ok").concat(health.filter(i => i.level === "ok")).map(i =>
-      h("li", null, h("span", {class: "dot " + i.level, "aria-hidden": "true"}), h("span", null, i.message, (i.names || []).flatMap(x => [" ", h("code", null, x)]))))));
+    h("ul", {class: "health"}, health.filter(i => i.level !== "ok").map(i =>
+      h("li", null, h("span", {class: "dot " + i.level, "aria-hidden": "true"}), h("span", null, i.message, (i.names || []).flatMap(x => [" ", h("code", null, x)]))))),
+    okN ? h("details", {class: "oks"}, h("summary", null, `${okN} ${tr("mục ổn")}`), h("ul", {class: "health"}, health.filter(i => i.level === "ok").map(i =>
+      h("li", null, h("span", {class: "dot ok", "aria-hidden": "true"}), h("span", null, i.message))))) : null);
   // TOTP keeps its own flow (QR, recovery codes); here it opens in place.
   const totp = totpCard(s);
   totp.classList.remove("card");
@@ -1443,16 +1459,21 @@ async function viewSettings(body) {
     healthBox,
     channelsCard(s, chats, sys),
     h("div", {class: "card set-list"}, h("h2", null, "Đăng nhập và khoá kho"),
-      h("details", {class: "set-row-d", open: !s.totp},
+      h("details", {class: "set-row-d"},
         h("summary", null, h("div", {class: "set-text"}, h("b", null, "TOTP"),
           h("small", {class: "muted"}, s.totp ? `${tr("Đang bật")} · ${s.recovery_left} ${tr("mã khôi phục")}` : tr("Đang tắt: yêu cầu rủi ro cao chưa duyệt được.")))), totp),
-      h("details", {class: "set-row-d", open: !s.passkeys},
+      h("details", {class: "set-row-d"},
         h("summary", null, h("div", {class: "set-text"}, h("b", null, "Passkey"), pkSum)), pkBox),
       setRow("Tự khoá kho", tr("Khi không có hoạt động nào. Kho khoá thì agent nhận lỗi 423 tới khi bạn đăng nhập."), h("div", {class: "inline"}, lockSel, lockMsg)),
       h("details", {class: "set-row-d"}, h("summary", null, h("div", {class: "set-text"}, h("b", null, tr("Mật khẩu chính")),
         h("small", {class: "muted"}, tr("Dùng để mở kho. Không có cách khôi phục nếu quên.")))), pass)),
     h("div", {class: "card set-list"}, h("h2", null, "Khác"),
       setRow("Ngôn ngữ", "", langSel),
+      setRow("Hướng dẫn", tr("Mô tả đầu trang, nút bước tiếp theo và các ghi chú giải thích."), (() => {
+        const c = h("input", {type: "checkbox", "aria-label": tr("Hiện hướng dẫn")}); c.checked = !guidesOff();
+        c.addEventListener("change", () => setGuides(c.checked));
+        return h("label", {class: "switch"}, c, h("span", null, tr("Hiện")));
+      })()),
       h("details", {class: "set-row-d"}, h("summary", null, h("div", {class: "set-text"}, h("b", null, tr("Mẫu secret của bạn")),
         h("small", {class: "muted"}, tr("Lưu từ form ở tab Secret bằng Lưu thành mẫu.")))), tpl)));
 }
@@ -1545,8 +1566,8 @@ async function viewOverview(body, s, steps, stepList) {
   const line = (ok, text, tab) => h("li", null, h("span", {class: "dot " + (ok === true ? "ok" : ok === false ? "bad" : "warn"), "aria-hidden": "true"}),
     h("span", null, text), tab ? h("button", {class: "link", onclick: go(tab)}, "Xem") : null);
   // Unfinished setup comes first, in order; once done it folds away at the end.
-  const setup = h("details", {class: "card setup", open: !all}, h("summary", null, all ? tr("Thiết lập ban đầu: đã xong") : `${tr("Thiết lập ban đầu")}: ${done}/${need.length}`), stepList,
-    all ? null : h("p", {class: "muted"}, "Các bước còn lại có thể làm bất cứ lúc nào."));
+  const setup = h("details", {class: "card setup guide", open: !all}, h("summary", null, all ? tr("Thiết lập ban đầu: đã xong") : `${tr("Thiết lập ban đầu")}: ${done}/${need.length}`), stepList,
+    all ? null : h("p", {class: "muted guide"}, "Các bước còn lại có thể làm bất cứ lúc nào."));
   fill(body,
     all ? null : setup,
     pending.length ? h("div", {class: "card attention"}, h("h2", null, `Đang chờ duyệt (${pending.length})`),
@@ -1557,7 +1578,7 @@ async function viewOverview(body, s, steps, stepList) {
       stat(tokens.length, tr("Token agent"), "", "tokens"),
       stat(today.length, tr("Lần chạy 24 giờ qua"), failed ? `${failed} ${tr("lỗi")}` : "", "audit", failed ? "warn" : ""),
       stat(pending.length, tr("Đang chờ duyệt"), "", "requests", pending.length ? "attn" : "")),
-    h("div", {class: "card"}, h("h2", null, "Trạng thái"),
+    h("div", {class: "duo"}, h("div", {class: "card"}, h("h2", null, "Trạng thái"),
       h("ul", {class: "health"},
         line(!!s.any_channel, s.any_channel ? tr("Đã nối kênh duyệt.") : tr("Chưa nối kênh duyệt nào."), "settings"),
         line(!!s.totp, s.totp ? tr(`TOTP đang bật, còn ${s.recovery_left} mã khôi phục.`) : tr("TOTP đang tắt."), "settings"),
@@ -1565,11 +1586,11 @@ async function viewOverview(body, s, steps, stepList) {
         line(bad ? false : warn ? null : true, bad || warn ? `${tr("Sức khoẻ bảo mật")}: ${bad} ${tr("lỗi")}, ${warn} ${tr("cảnh báo")}.` : tr("Sức khoẻ bảo mật ổn."), "settings"),
         line(true, `${profiles.length} ${tr("hành động cố định")}.`, "profiles"),
         idle.length ? line(null, tr(`Agent chưa tự gọi được ${idle.length} secret vì chưa có máy chủ: ${idle.map(x => x.name).join(", ")}.`), "secrets") : null)),
-    sys ? systemCard(sys, go) : null,
-    devs ? devicesCard(devs, s, secrets, rinfo) : null,
+    sys ? systemCard(sys, go) : null),
+    h("div", {class: "duo"}, devs ? devicesCard(devs, s, secrets, rinfo) : null,
     h("div", {class: "card"}, h("h2", null, "Lần chạy gần đây"),
       recent.length ? recent.map(runRow) : h("p", {class: "muted"}, "Chưa có lần chạy nào."),
-      h("div", {class: "row"}, h("button", {onclick: go("audit")}, "Xem nhật ký"), h("button", {onclick: go("secrets")}, "Thêm secret"), h("button", {onclick: go("tokens")}, "Tạo token"))),
+      h("div", {class: "row"}, h("button", {onclick: go("audit")}, "Xem nhật ký"), h("button", {onclick: go("secrets")}, "Thêm secret"), h("button", {onclick: go("tokens")}, "Tạo token")))),
     all ? setup : null);
   window.scrollTo(0, 0);
 }
@@ -1766,8 +1787,8 @@ async function viewRunners(body) {
         h("li", null, tr("Mỗi việc được ucanrun ký và chỉ mang secret nó cần, mã hoá riêng cho runner đó. Kết quả do runner ký.")),
         h("li", null, tr("runner.toml trên máy đó quyết định chương trình nào được chạy. Việc ngoài danh sách bị từ chối kể cả khi bạn đã duyệt.")),
         h("li", null, tr("Lệnh cần root đi qua sudo bằng mật khẩu của user runner, lưu thành secret trong ucanrun. Windows chỉ chạy bằng quyền user."))),
-      h("p", {class: "muted"}, "Agent gọi list_runners để xem runner, rồi run_command kèm runner, ví dụ:"), h("pre", null, example)),
-    h("div", {class: "card"}, h("h2", null, "Chạy lệnh ngay trên server"),
+      h("p", {class: "muted"}, "Agent gọi list_runners để xem runner, rồi run_command kèm runner, ví dụ:"), h("pre", null, example),
+      h("h3", {class: "gap"}, "Chạy lệnh ngay trên server"),
       h("p", {class: "muted"}, sys && sys.exec
         ? tr(`Đang bật: lệnh không ghi runner chạy trong ${sys.container ? "container ucanrun" : "máy chủ ucanrun"}, bằng uid ${sys.uid}.`)
         : tr("Đang tắt: lệnh chỉ chạy trên runner.")),
@@ -1796,7 +1817,7 @@ function devicesCard(d, s, secrets, rinfo) {
         const f = [x.approve === "auto" ? tr("tự chạy, không hỏi") : "", x.totp === "never" ? tr("không cần TOTP") : x.totp === "always" ? tr("luôn cần TOTP") : ""].filter(Boolean);
         return f.length ? `${n} (${f.join(", ")})` : n; }).join(", ")}. ${tr("Lệnh chạy trên runner theo luật runner.toml của máy đó; qua SSH thì theo quyền của khoá.")}`
       : tr("Không secret nào cho phép dùng trong lệnh agent tự soạn.")) : null,
-    h("small", {class: "foot muted"}, "Tên máy do agent tự khai. Danh sách lấy từ nhật ký và hành động cố định, không dò trực tiếp."));
+    h("small", {class: "foot muted guide"}, "Tên máy do agent tự khai. Danh sách lấy từ nhật ký và hành động cố định, không dò trực tiếp."));
 }
 
 // One line per finished run; open it for the command and details.
@@ -1826,7 +1847,7 @@ async function viewAudit(body) {
   q.addEventListener("input", draw);
   draw();
   fill(body, h("div", {class: "card"}, h("h2", null, `Lần chạy (${list.length})`),
-      h("p", {class: "muted"}, "Mỗi lần chạy: agent, thiết bị (do máy agent tự khai), secret đã dùng, lệnh, kết quả và thời gian xử lý. Lấy từ nhật ký có chuỗi băm."),
+      h("p", {class: "muted guide"}, "Mỗi lần chạy: agent, thiết bị (do máy agent tự khai), secret đã dùng, lệnh, kết quả và thời gian xử lý. Lấy từ nhật ký có chuỗi băm."),
       q, box),
     h("div", {class: "card"}, h("h2", null, "Nhật ký"),
     h("p", {class: a.chain_ok ? "muted" : "note"}, a.chain_ok ? `Chuỗi băm hợp lệ, ${a.valid_entries} mục.` : `Chuỗi băm bị hỏng sau mục ${a.valid_entries}.`),

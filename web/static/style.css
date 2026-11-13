@@ -41,8 +41,8 @@ header>button.lock{margin-top:auto;border-top:1px solid rgba(255,255,255,.06);bo
 nav .count{background:#f0536a;color:#fff}
 
 /* Content is centred in the space right of the sidebar, at most 920px wide. */
-main{--w:920px;margin-left:var(--side-w);padding:28px max(32px,calc((100vw - var(--side-w) - var(--w)) / 2)) 48px}
-main:has(.builder){--w:1180px}
+main{--w:1120px;margin-left:var(--side-w);padding:28px max(32px,calc((100vw - var(--side-w) - var(--w)) / 2)) 48px}
+main:has(.builder){--w:1240px}
 .narrow{max-width:400px;margin:10vh auto;padding:0 16px}
 .auth-brand{display:grid;justify-items:center;gap:6px;margin-bottom:20px;text-align:center}
 .auth-brand img{border-radius:12px;box-shadow:var(--shadow)}
@@ -51,18 +51,21 @@ main:has(.builder){--w:1180px}
 .narrow .card{padding:20px}
 
 /* page title */
-.page-head{display:grid;gap:4px;margin:0 0 20px}
+.page-head{display:grid;gap:4px;margin:0 0 16px}
+.title-row{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.title-row .guide-toggle{margin-left:auto;font-size:12.5px;color:var(--muted)}
+.title-row .guide-toggle:hover{color:var(--accent)}
 .page-head h1{margin:0;font-size:24px;font-weight:700;line-height:1.25;letter-spacing:-.02em;text-wrap:balance}
 .page-head p{margin:0;color:var(--muted);font-size:14px;max-width:70ch}
 .page-head p:empty{display:none}
 .stepno{font-size:11.5px;font-weight:650;color:var(--accent);text-transform:uppercase;letter-spacing:.06em}
 
 /* cards and lists */
-.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:18px 20px;margin-bottom:16px;overflow-wrap:anywhere}
-h2{font-size:15.5px;font-weight:650;margin:0 0 12px;letter-spacing:-.01em}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:14px 18px;margin-bottom:12px;overflow-wrap:anywhere}
+h2{font-size:15px;font-weight:650;margin:0 0 8px;letter-spacing:-.01em}
 h3{font-size:13.5px;font-weight:600;margin:0 0 6px}
 h3.gap{margin-top:16px}
-.spread{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px;margin:0 -10px;border-radius:var(--radius-sm);border-top:1px solid var(--line);transition:background var(--fast) var(--ease)}
+.spread{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:8px 10px;margin:0 -10px;border-radius:var(--radius-sm);border-top:1px solid var(--line);transition:background var(--fast) var(--ease)}
 .spread:first-of-type{border-top:0}
 .spread:hover{background:var(--hover)}
 .spread>span:first-child{min-width:0}
@@ -141,9 +144,11 @@ button.tile.pick.on{border-color:var(--accent);background:var(--accent-soft)}
 .card.add h3{margin:14px 0 6px}
 .param{border-top:1px solid var(--line);padding:8px 0}
 .steps{list-style:none;margin:0;padding:0;counter-reset:s}
-.steps li{counter-increment:s;position:relative;padding:12px 0 12px 40px;border-top:1px solid var(--line)}
+.steps li{counter-increment:s;position:relative;display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:12px;align-items:center;padding:8px 0 8px 38px;border-top:1px solid var(--line)}
+.steps li>small{grid-column:1;margin:0}
+.steps li>.stepgo{grid-column:2;grid-row:1/span 2;margin:0}
 .steps li:first-child{border-top:0}
-.steps li::before{content:counter(s);position:absolute;left:0;top:12px;width:26px;height:26px;line-height:26px;border-radius:50%;text-align:center;font-size:12px;font-weight:600;background:var(--code);color:var(--muted);border:1px solid var(--line)}
+.steps li::before{content:counter(s);position:absolute;left:0;top:calc(50% - 13px);width:26px;height:26px;line-height:26px;border-radius:50%;text-align:center;font-size:12px;font-weight:600;background:var(--code);color:var(--muted);border:1px solid var(--line)}
 .steps li.on::before{background:var(--accent);border-color:var(--accent);color:var(--accent-text)}
 .steps li.ok::before{content:"✓";background:var(--ok-bg);border-color:transparent;color:var(--ok)}
 .steps li.ok b{color:var(--muted);font-weight:500}
@@ -384,3 +389,25 @@ ol.steps-list > li { display: grid; gap: 6px; min-width: 0; }
 .copyline { min-width: 0; } ol.steps-list > li > * { min-width: 0; max-width: 100%; }
 /* Messages read as sentences; the text itself stays as sent, for translation. */
 .err::first-letter, .warn-line::first-letter { text-transform: uppercase; }
+
+/* Guides: hidden everywhere once the user turns them off. */
+body.no-guides .guide{display:none!important}
+/* Two cards side by side where there is room. */
+.duo{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;align-items:start;margin-bottom:12px}
+.duo>.card{margin:0}
+@media (max-width:1180px){.duo{grid-template-columns:minmax(0,1fr);gap:0;margin:0}.duo>.card{margin-bottom:12px}}
+.stats{gap:12px}
+.stat{padding:10px 14px}
+.stat .num{font-size:22px}
+/* Settings: problems first; the fine items behind one line. */
+details.oks{margin-top:8px}
+details.oks>summary{font-weight:500;color:var(--muted);font-size:13px}
+details.oks>summary::before{width:18px;height:18px;font-size:12px}
+details.oks[open]>summary{margin-bottom:6px}
+.health-card .health{margin-top:4px}
+.switch{display:inline-flex;align-items:center;gap:8px;margin:0;color:var(--text);font-size:13.5px;cursor:pointer}
+.switch span{margin:0;font-weight:500}
+/* Channel tiles: one line each, logo beside name and state. */
+.chan-tile{grid-template-columns:28px minmax(0,1fr);column-gap:10px;row-gap:2px;align-items:center;padding:10px 12px}
+.chan-tile .chan-logo{grid-row:1/span 2}
+.chan-tile>b,.chan-tile>.pill{grid-column:2;justify-self:start}
