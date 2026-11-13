@@ -38,6 +38,14 @@ docker logs ucanrun
 
 No config file is needed. Open `http://127.0.0.1:8780`, enter the access code from the log, and follow the Start tab. See the [quick start](docs/quickstart.md).
 
+On each machine where an agent runs, `ucr` comes from npm (Node 18 or later):
+
+```json
+{ "mcpServers": { "ucanrun": { "command": "npx", "args": ["-y", "ucanrun", "mcp"] } } }
+```
+
+Sign in once with `npx -y ucanrun login <agent-api-url>` and the token from the Agent tokens tab. Without Node, take the binary from the [releases](https://github.com/huydnd/ucanrun/releases). Runners install as a service; follow the Runner tab.
+
 ## Documentation
 
 - [Quick start](docs/quickstart.md)
