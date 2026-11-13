@@ -311,9 +311,15 @@ impl Core {
             add(
                 &mut out,
                 "runner_totp",
-                with(&|i| !i.require_totp),
+                runners
+                    .iter()
+                    .filter(|r| {
+                        r.totp != "always" && !r.info.as_ref().is_some_and(|i| i.require_totp)
+                    })
+                    .map(|r| r.name.clone())
+                    .collect(),
                 "Mọi runner đều bắt buộc TOTP.",
-                "Runner không bắt buộc TOTP: việc duyệt chỉ bằng một lần bấm là chạy được.",
+                "Runner không bắt buộc TOTP: việc dùng secret không cần TOTP chạy được chỉ bằng một lần bấm duyệt.",
                 "warn",
             );
         }

@@ -259,6 +259,9 @@ pub struct Request {
     /// Approval asks for a TOTP code.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub totp: bool,
+    /// Why approval asks for TOTP, so the approver is not left guessing.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub totp_why: Vec<TotpWhy>,
     /// Only a passkey can approve it: its runner requires one.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub passkey: bool,
@@ -285,6 +288,18 @@ pub struct Request {
     pub secret: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<RunResult>,
+}
+
+/// One reason a request needs TOTP. `kind` is `secret` (the secret is set to
+/// always), `risk` (high risk and the secret does not waive it), `runner`
+/// (the runner is set to always on the Runner tab), `runner_file` (an older
+/// ucr on the runner still reads require_totp from runner.toml) or `passkey`
+/// (the runner requires a passkey). `name` is the secret or runner.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TotpWhy {
+    pub kind: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub name: String,
 }
 
 /// What the agent's side says about itself. Both values are self-declared:
@@ -1739,6 +1754,24 @@ impl Core {
         }
         kept.push(now);
         g.recent.insert(t.name.clone(), kept);
+        let why = {
+            let mut names = a.secrets();
+            names.extend(p.secret_choices.iter().cloned());
+            let mut why: Vec<TotpWhy> =
+                g.st.as_ref()
+                    .map(|s| policy::totp_reasons(&p.risk, &names, &s.secrets))
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|(k, n)| TotpWhy {
+                        kind: k.into(),
+                        name: n,
+                    })
+                    .collect();
+            // A runner that only takes TOTP-approved jobs would refuse
+            // anything else after the human already approved it.
+            why.extend(self.runner_totp_reasons_locked(g, &p.runner));
+            why
+        };
         let req = Request {
             id: rand_hex(6),
             profile: profile.to_string(),
@@ -1746,16 +1779,8 @@ impl Core {
             caller: t.name.clone(),
             reason: clean_reason(reason),
             risk: p.risk.clone(),
-            totp: {
-                let mut names = a.secrets();
-                names.extend(p.secret_choices.iter().cloned());
-                let meta = g.st.as_ref().map(|s| &s.secrets);
-                // A runner that only takes TOTP-approved jobs would refuse
-                // anything else after the human already approved it.
-                meta.is_some_and(|m| policy::needs_totp(&p.risk, &names, m))
-                    || self.runner_needs_totp_locked(g, &p.runner)
-                    || self.runner_needs_passkey_locked(g, &p.runner)
-            },
+            totp: !why.is_empty(),
+            totp_why: why,
             passkey: self.runner_needs_passkey_locked(g, &p.runner),
             hash: policy::hash(&p, &a, &t.name),
             display: a.display(),

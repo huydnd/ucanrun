@@ -55,7 +55,7 @@ impl Config {
 
 /// The owner's rules for this machine, in `runner.toml`. A job outside them
 /// is refused even when the server signed it.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Rules {
     /// Programs that may start, as absolute paths. `"*"` allows any.
@@ -63,23 +63,14 @@ pub struct Rules {
     /// Lets approved jobs run those programs through sudo, with the
     /// password the job carries.
     pub sudo: bool,
-    /// Refuses jobs that were approved without a TOTP code.
+    /// No longer used: TOTP for a runner is set on the server's Runner tab.
+    /// The flag a job carries is the server's own word, so checking it here
+    /// added nothing. Still read, so older files keep working.
     pub require_totp: bool,
     /// Runs only jobs approved with one of the passkeys pinned in
     /// `passkeys.json`, checked here, so a server taken over cannot order
     /// anything on its own.
     pub require_passkey: bool,
-}
-
-impl Default for Rules {
-    fn default() -> Rules {
-        Rules {
-            allow: vec![],
-            sudo: false,
-            require_totp: true,
-            require_passkey: false,
-        }
-    }
 }
 
 const RULES_TEMPLATE: &str = r#"# ucanrun runner rules. The runner reads this file before every job, so
@@ -95,8 +86,7 @@ allow = []
 # rights for them.
 sudo = false
 
-# Refuse jobs that were approved without a TOTP code.
-require_totp = true
+# Whether approving a job needs TOTP is set on the server, on the Runner tab.
 
 # Run only jobs approved with one of your passkeys, checked on this machine
 # against the passkeys pinned in passkeys.json. Even a server taken over
@@ -174,6 +164,11 @@ pub fn load_rules() -> Result<Rules, String> {
     let p = dir().join("runner.toml");
     let s = std::fs::read_to_string(&p).map_err(|e| format!("{}: {e}", p.display()))?;
     toml::from_str(&s).map_err(|e| format!("{}: {e}", p.display()))
+}
+
+/// Whether runner.toml still turns on the require_totp it no longer uses.
+fn rules_file_sets_totp() -> bool {
+    load_rules().is_ok_and(|r| r.require_totp)
 }
 
 /// The passkeys this runner trusts, from `passkeys.json`.
@@ -298,7 +293,9 @@ pub fn info() -> Info {
         uid: uid(),
         root: elevated(),
         sudo: rules.sudo && cfg!(unix),
-        require_totp: rules.require_totp,
+        // Older servers read this as "the runner refuses jobs without
+        // TOTP"; this runner no longer does.
+        require_totp: false,
         require_passkey: rules.require_passkey,
         passkeys: load_pins().map_or(0, |p| p.keys.len()),
         allow: rules.allow,
@@ -478,7 +475,10 @@ pub fn status() -> Result<(), String> {
     };
     println!("Allows:      {allow}");
     println!("sudo:        {}", if i.sudo { "yes" } else { "no" });
-    println!("TOTP needed: {}", if i.require_totp { "yes" } else { "no" });
+    println!("TOTP:        set on the server, Runner tab");
+    if rules_file_sets_totp() {
+        println!("             (require_totp in runner.toml is no longer used)");
+    }
     println!(
         "Passkey:     {} ({} pinned)",
         if i.require_passkey {
@@ -670,9 +670,6 @@ pub fn check_body(job: &Job, body: &JobBody, name: &str, rules: &Rules) -> Resul
     // another envelope.
     if body.job != job.job || body.runner != name {
         return Err("the sealed job does not match its envelope".into());
-    }
-    if rules.require_totp && !body.totp {
-        return Err("this runner only takes jobs approved with TOTP".into());
     }
     let e = &body.exec;
     let a0 = e.argv.first().map(String::as_str).unwrap_or("");
@@ -1139,7 +1136,10 @@ mod unit {
         assert!(e.contains("interpreters"), "{e}");
         let mut b = body_of(&j, &["/usr/bin/id"]);
         b.totp = false;
-        assert!(check_body(&j, &b, "box", &r).unwrap_err().contains("TOTP"));
+        assert!(
+            check_body(&j, &b, "box", &r).is_ok(),
+            "TOTP is the server's call now"
+        );
         let mut b = body_of(&j, &["/usr/bin/id"]);
         b.exec.sudo = "{{secret:pw}}".into();
         let mut off = r.clone();

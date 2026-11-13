@@ -78,11 +78,21 @@ the web UI; `ucr runner forget` deletes its keys on the machine.
 allow = ["/usr/bin/systemctl", "/usr/bin/journalctl"]
 # Let approved jobs run them through sudo with the password the job carries.
 sudo = true
-# Refuse jobs that were approved without a TOTP code.
-require_totp = true
 # Run only jobs approved with one of your passkeys, checked on this machine.
 require_passkey = false
 ```
+
+Whether approving a job needs TOTP is set on the server, not here: on the
+**Runner** tab, each runner has **TOTP on approval**. *Always* (the default
+for a new runner) asks for a code on every job; *Follow the secrets* lets the
+secrets used decide, so a secret set to no TOTP and run without asking runs
+at once. Turning it down needs a current TOTP code. Each approval card says
+why it needs TOTP.
+
+Before 0.13.2, runner.toml had `require_totp`, checked on the runner. The
+flag a job carries is the server's own word, so that check stopped nothing a
+taken-over server could not get around; newer runners ignore the line. An
+older ucr still enforces it, and the Runner tab says so.
 
 `require_passkey` is the strongest setting: see [passkeys.md](passkeys.md#runners-that-require-a-passkey).
 Pin or refresh the passkeys with `ucr runner trust-passkeys`.
@@ -214,7 +224,7 @@ vault sends no jobs. Polls do not count as activity for the auto lock.
 - A runner sees the secrets of the jobs it runs, and can run what its
   `runner.toml` allows as its own user. It cannot read the vault.
 - A server taken over while unlocked can send any job that each runner's
-  rules allow. Keep `allow` short and `require_totp` on.
+  rules allow. Keep `allow` short, or turn on `require_passkey`.
 - Whoever reads `runner.json` on a runner can act as that runner. Remove the
   runner in the web UI if a machine is lost.
 - Runners enrolled with ucanrun 0.8 must enroll again: version 2 changes the

@@ -411,3 +411,9 @@ details.oks[open]>summary{margin-bottom:6px}
 .chan-tile{grid-template-columns:28px minmax(0,1fr);column-gap:10px;row-gap:2px;align-items:center;padding:10px 12px}
 .chan-tile .chan-logo{grid-row:1/span 2}
 .chan-tile>b,.chan-tile>.pill{grid-column:2;justify-self:start}
+/* Why approval needs TOTP, on the request card. */
+.totp-why{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 6px;margin:8px 0 0;padding:8px 12px;border-radius:var(--radius-sm);background:var(--accent-soft);color:var(--text);font-size:13px}
+.totp-why .link{margin-left:auto}
+.runner-totp{display:grid;gap:4px;min-width:0}
+.runner-totp select{width:auto;max-width:100%}
+.runner-totp .code-in{width:8em}

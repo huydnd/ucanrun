@@ -88,16 +88,48 @@ pub const TOTP_NEVER: &str = "never";
 /// forces it; otherwise high risk needs it unless every secret involved is
 /// set to `never`. High risk with no secret at all still needs it.
 pub fn needs_totp(risk: &str, secrets: &[String], meta: &BTreeMap<String, SecretMeta>) -> bool {
-    let mode = |n: &String| -> &str {
-        let m = meta
-            .get(n.as_str())
-            .or_else(|| n.rsplit_once('.').and_then(|(base, _)| meta.get(base)));
-        m.map_or("", |m| m.totp.as_str())
+    !totp_reasons(risk, secrets, meta).is_empty()
+}
+
+/// Why approving needs a TOTP code, as (kind, secret) pairs: `secret` for a
+/// secret set to `always`; `risk` for high risk, naming each secret not set
+/// to `never` (empty when the request uses none). Empty means no TOTP.
+pub fn totp_reasons(
+    risk: &str,
+    secrets: &[String],
+    meta: &BTreeMap<String, SecretMeta>,
+) -> Vec<(&'static str, String)> {
+    let base = |n: &String| -> String {
+        if meta.contains_key(n.as_str()) {
+            return n.clone();
+        }
+        n.rsplit_once('.')
+            .filter(|(b, _)| meta.contains_key(*b))
+            .map_or(n.clone(), |(b, _)| b.to_string())
     };
-    if secrets.iter().any(|n| mode(n) == TOTP_ALWAYS) {
-        return true;
+    let mode = |n: &String| -> &str { meta.get(&base(n)).map_or("", |m| m.totp.as_str()) };
+    let mut out: Vec<(&'static str, String)> = Vec::new();
+    let mut push = |k: &'static str, n: String| {
+        if !out.iter().any(|(k2, n2)| *k2 == k && *n2 == n) {
+            out.push((k, n));
+        }
+    };
+    let always: Vec<&String> = secrets.iter().filter(|n| mode(n) == TOTP_ALWAYS).collect();
+    if !always.is_empty() {
+        for n in always {
+            push("secret", base(n));
+        }
+        return out;
     }
-    risk == RISK_HIGH && (secrets.is_empty() || secrets.iter().any(|n| mode(n) != TOTP_NEVER))
+    if risk == RISK_HIGH {
+        if secrets.is_empty() {
+            push("risk", String::new());
+        }
+        for n in secrets.iter().filter(|n| mode(n) != TOTP_NEVER) {
+            push("risk", base(n));
+        }
+    }
+    out
 }
 
 static HOST_RE: LazyLock<Regex> = LazyLock::new(|| {
