@@ -31,6 +31,15 @@ pub trait Handler: Send + Sync {
 
 pub type Translate = Arc<dyn Fn(&str) -> String + Send + Sync>;
 
+/// The message with a capital first letter, for people to read.
+pub fn sentence(s: &str) -> String {
+    let mut c = s.chars();
+    match c.next() {
+        Some(f) => f.to_uppercase().chain(c).collect(),
+        None => String::new(),
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct Config {
     pub base_url: String,
@@ -395,7 +404,17 @@ impl Bot {
         }
         match h.decide(id, short, approve, &format!("telegram:{from}"), "", &secret) {
             Ok(m) => answer(m).await,
-            Err(e) => answer(e).await,
+            Err(e) => answer(sentence(&self.t(&e))).await,
         }
+    }
+}
+
+#[cfg(test)]
+mod sentence_test {
+    #[test]
+    fn capitalizes_the_first_letter_only() {
+        assert_eq!(super::sentence("sai mã TOTP"), "Sai mã TOTP");
+        assert_eq!(super::sentence("đã duyệt"), "Đã duyệt");
+        assert_eq!(super::sentence(""), "");
     }
 }
