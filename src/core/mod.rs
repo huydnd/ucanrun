@@ -259,6 +259,9 @@ pub struct Request {
     /// Approval asks for a TOTP code.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub totp: bool,
+    /// Only a passkey can approve it: its runner requires one.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub passkey: bool,
     pub hash: String,
     pub display: String,
     pub state: ReqState,
@@ -406,6 +409,8 @@ struct Entry {
     req: Request,
     action: Action,
     done: watch::Sender<bool>,
+    /// The passkey answer that approved it, if one did.
+    proof: Option<crate::runner::proto::Approval>,
 }
 
 struct Inner {
@@ -1749,7 +1754,9 @@ impl Core {
                 // anything else after the human already approved it.
                 meta.is_some_and(|m| policy::needs_totp(&p.risk, &names, m))
                     || self.runner_needs_totp_locked(g, &p.runner)
+                    || self.runner_needs_passkey_locked(g, &p.runner)
             },
+            passkey: self.runner_needs_passkey_locked(g, &p.runner),
             hash: policy::hash(&p, &a, &t.name),
             display: a.display(),
             state: ReqState::Pending,
@@ -1771,6 +1778,7 @@ impl Core {
                 req: req.clone(),
                 action: a,
                 done,
+                proof: None,
             },
         );
         g.order.push_back(id.clone());
@@ -1942,6 +1950,12 @@ impl Core {
             return Ok("Đã từ chối".into());
         }
         let (choices, need_totp) = (e.req.choices.clone(), e.req.totp);
+        if e.req.passkey && !passkey {
+            return Err(Error::Msg(
+                "runner này chỉ nhận việc duyệt bằng passkey: hãy duyệt bằng passkey trên web"
+                    .into(),
+            ));
+        }
         if !choices.is_empty() {
             if !choices.iter().any(|n| n == secret) {
                 return Err(Error::Msg("hãy chọn một secret trong danh sách".into()));

@@ -65,6 +65,10 @@ pub struct Rules {
     pub sudo: bool,
     /// Refuses jobs that were approved without a TOTP code.
     pub require_totp: bool,
+    /// Runs only jobs approved with one of the passkeys pinned in
+    /// `passkeys.json`, checked here, so a server taken over cannot order
+    /// anything on its own.
+    pub require_passkey: bool,
 }
 
 impl Default for Rules {
@@ -73,6 +77,7 @@ impl Default for Rules {
             allow: vec![],
             sudo: false,
             require_totp: true,
+            require_passkey: false,
         }
     }
 }
@@ -92,6 +97,11 @@ sudo = false
 
 # Refuse jobs that were approved without a TOTP code.
 require_totp = true
+
+# Run only jobs approved with one of your passkeys, checked on this machine
+# against the passkeys pinned in passkeys.json. Even a server taken over
+# cannot order a job then. Pin or refresh them with: ucr runner trust-passkeys
+require_passkey = false
 "#;
 
 const WINDOWS_RULES_EXAMPLE: &str = r#"
@@ -164,6 +174,50 @@ pub fn load_rules() -> Result<Rules, String> {
     let p = dir().join("runner.toml");
     let s = std::fs::read_to_string(&p).map_err(|e| format!("{}: {e}", p.display()))?;
     toml::from_str(&s).map_err(|e| format!("{}: {e}", p.display()))
+}
+
+/// The passkeys this runner trusts, from `passkeys.json`.
+pub fn load_pins() -> Option<proto::PinnedPasskeys> {
+    let b = std::fs::read(dir().join("passkeys.json")).ok()?;
+    serde_json::from_slice(&b).ok()
+}
+
+fn save_pins(p: &proto::PinnedPasskeys) -> Result<(), String> {
+    let b = serde_json::to_vec_pretty(p).map_err(|e| e.to_string())?;
+    private_write(&dir().join("passkeys.json"), &b)
+}
+
+/// Checks the passkey answer that came with a job against the pinned
+/// passkeys and the job itself. Returns the pins with the used passkey's
+/// counter moved on.
+pub fn check_passkey(
+    body: &JobBody,
+    pins: Option<&proto::PinnedPasskeys>,
+) -> Result<proto::PinnedPasskeys, String> {
+    let Some(pins) = pins.filter(|p| !p.keys.is_empty()) else {
+        return Err("no passkey is pinned on this runner; run ucr runner trust-passkeys".into());
+    };
+    let Some(a) = &body.approval else {
+        return Err("this runner only takes jobs approved with a passkey".into());
+    };
+    // Recompute what was approved from what arrived: a server that changed
+    // the command cannot keep the signature valid.
+    let action = Action {
+        exec: Some(body.exec.clone()),
+        timeout_sec: body.timeout_sec,
+        runner: body.runner.clone(),
+        ..Default::default()
+    };
+    let ch = proto::approval_challenge(&proto::action_digest(&action), &body.hash, &a.nonce);
+    let rp = crate::webauthn::Rp {
+        id: pins.rp_id.clone(),
+        origin: pins.origin.clone(),
+    };
+    let (i, count) = crate::webauthn::finish_assert(&rp, &ch, &a.credential, &pins.keys)
+        .map_err(|e| format!("passkey approval rejected: {e}"))?;
+    let mut out = pins.clone();
+    out.keys[i].sign_count = count;
+    Ok(out)
 }
 
 fn now_unix() -> i64 {
@@ -245,6 +299,8 @@ pub fn info() -> Info {
         root: elevated(),
         sudo: rules.sudo && cfg!(unix),
         require_totp: rules.require_totp,
+        require_passkey: rules.require_passkey,
+        passkeys: load_pins().map_or(0, |p| p.keys.len()),
         allow: rules.allow,
         policy_error,
     }
@@ -380,6 +436,20 @@ pub async fn enroll(args: &[String]) -> Result<(), String> {
         "Rules:       {} (nothing runs until you list programs there)",
         rules.display()
     );
+    match fetch_pins(&cfg).await {
+        Ok(p) => {
+            let n = p.keys.len();
+            save_pins(&p)?;
+            println!(
+                "Passkeys:    {n} pinned for {} (require_passkey in runner.toml uses them)",
+                p.rp_id
+            );
+            for k in &p.keys {
+                println!("             {}  {}", proto::fingerprint(&k.key), k.name);
+            }
+        }
+        Err(e) => println!("Passkeys:    none pinned ({e})"),
+    }
     println!("Start it:    ucr runner serve");
     Ok(())
 }
@@ -409,6 +479,15 @@ pub fn status() -> Result<(), String> {
     println!("Allows:      {allow}");
     println!("sudo:        {}", if i.sudo { "yes" } else { "no" });
     println!("TOTP needed: {}", if i.require_totp { "yes" } else { "no" });
+    println!(
+        "Passkey:     {} ({} pinned)",
+        if i.require_passkey {
+            "required"
+        } else {
+            "not required"
+        },
+        i.passkeys
+    );
     if i.root {
         println!(
             "WARNING: this runner has administrator rights. Run it as its own user (on Windows, not elevated)."
@@ -417,11 +496,93 @@ pub fn status() -> Result<(), String> {
     Ok(())
 }
 
+/// The server's list of passkeys, checked against the pinned server key.
+async fn fetch_pins(cfg: &Config) -> Result<proto::PinnedPasskeys, String> {
+    let sign = cfg.signing_key()?;
+    let server_key = proto::verifying_key(&cfg.server_key)?;
+    let path = "/v1/runner/passkeys";
+    let mut req = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|e| e.to_string())?
+        .post(format!("{}{path}", cfg.server))
+        .header("content-type", "application/json");
+    for (k, v) in proto::sign_request(&sign, &cfg.name, "POST", path, now_unix(), b"{}") {
+        req = req.header(k, v);
+    }
+    let r = req
+        .body("{}")
+        .send()
+        .await
+        .map_err(|e| e.without_url().to_string())?;
+    let code = r.status().as_u16();
+    let v: serde_json::Value = r.json().await.unwrap_or_default();
+    if code != 200 {
+        return Err(v["error"]
+            .as_str()
+            .map_or(format!("HTTP {code}"), |m| format!("{m} (HTTP {code})")));
+    }
+    let signed: Signed = serde_json::from_value(v).map_err(|_| "bad answer")?;
+    let p: proto::PinnedPasskeys = signed.open(&server_key)?;
+    if p.runner != cfg.name {
+        return Err("the list is for another runner".into());
+    }
+    if p.keys.is_empty() {
+        return Err("the server has no passkeys yet".into());
+    }
+    Ok(p)
+}
+
+/// `ucr runner trust-passkeys [--yes]`: pins the passkeys the server lists
+/// now, after you check them. Run it on this machine after adding or
+/// removing a passkey in the web UI.
+pub async fn trust_passkeys(args: &[String]) -> Result<(), String> {
+    let cfg = load_config()?;
+    let p = fetch_pins(&cfg).await?;
+    println!("Passkeys for {} ({}):", p.rp_id, p.origin);
+    for k in &p.keys {
+        println!("  {}  {}", proto::fingerprint(&k.key), k.name);
+    }
+    if let Some(old) = load_pins() {
+        let same = old.keys.iter().map(|k| &k.id).collect::<Vec<_>>()
+            == p.keys.iter().map(|k| &k.id).collect::<Vec<_>>();
+        if same && old.rp_id == p.rp_id {
+            println!("Already pinned; nothing changed.");
+            return Ok(());
+        }
+    }
+    println!("Compare the fingerprints with Settings → Passkey in the web UI.");
+    if !args.iter().any(|a| a == "--yes") {
+        eprint!("Pin these passkeys on this runner? [y/N] ");
+        let mut line = String::new();
+        std::io::stdin()
+            .read_line(&mut line)
+            .map_err(|e| e.to_string())?;
+        if !matches!(line.trim(), "y" | "Y" | "yes") {
+            return Err("not pinned".into());
+        }
+    }
+    // Keep the counters already seen, so an old answer cannot come back.
+    let mut p = p;
+    if let Some(old) = load_pins() {
+        for k in p.keys.iter_mut() {
+            if let Some(o) = old.keys.iter().find(|o| o.id == k.id) {
+                k.sign_count = k.sign_count.max(o.sign_count);
+            }
+        }
+    }
+    save_pins(&p)?;
+    println!("Pinned {} passkeys.", p.keys.len());
+    Ok(())
+}
+
 /// `ucr runner forget`: removes the keys. The server still lists the runner
 /// until it is removed there.
 pub fn forget() -> Result<(), String> {
     let p = dir().join("runner.json");
     let _ = std::fs::remove_file(dir().join("seen.json"));
+    let _ = std::fs::remove_file(dir().join("passkeys.json"));
     match std::fs::remove_file(&p) {
         Ok(()) => {
             println!(
@@ -730,7 +891,15 @@ async fn handle(ctx: Arc<Ctx>, env: Signed) {
         Ok(b) => {
             let meta = serde_json::json!({"hash": b.hash, "approved_by": b.approved_by,
                 "argv0": b.exec.argv.first(), "sudo": !b.exec.sudo.is_empty()});
-            match load_rules().and_then(|r| check_body(&job, &b, &ctx.cfg.name, &r)) {
+            let verdict = load_rules().and_then(|r| {
+                check_body(&job, &b, &ctx.cfg.name, &r)?;
+                if r.require_passkey {
+                    let pins = check_passkey(&b, load_pins().as_ref())?;
+                    save_pins(&pins)?;
+                }
+                Ok(())
+            });
+            match verdict {
                 Err(why) => (
                     failed(format!("runner {} refused: {why}", ctx.cfg.name)),
                     true,
@@ -904,6 +1073,7 @@ mod unit {
             allow: allow.iter().map(|s| s.to_string()).collect(),
             sudo: true,
             require_totp: true,
+            require_passkey: false,
         }
     }
 
@@ -1024,6 +1194,71 @@ mod unit {
         assert!(r.ok, "{r:?}");
         assert!(!r.output.contains("s3cr3t-value"), "{}", r.output);
         assert!(r.output.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn passkey_approval_is_checked_against_the_job() {
+        use crate::webauthn::{self, testkit};
+        let rp = testkit::rp();
+        let mut key = testkit::Fake::new();
+        let ch = webauthn::new_challenge();
+        let made: webauthn::Credential = serde_json::from_value(
+            key.create(&rp, &webauthn::creation_options(&rp, b"u", &ch, &[])),
+        )
+        .unwrap();
+        let pk = webauthn::finish_register(&rp, &ch, &made).unwrap();
+        let pins = proto::PinnedPasskeys {
+            runner: "box".into(),
+            rp_id: rp.id.clone(),
+            origin: rp.origin.clone(),
+            keys: vec![pk],
+        };
+        let j = outer();
+        let mut b = body_of(&j, &["/usr/bin/systemctl", "restart", "nginx"]);
+        b.hash = "h123".into();
+        b.timeout_sec = 30;
+        // What the server does when the owner approves.
+        let sign = |b: &JobBody, key: &mut testkit::Fake| {
+            let action = Action {
+                exec: Some(b.exec.clone()),
+                timeout_sec: b.timeout_sec,
+                runner: b.runner.clone(),
+                ..Default::default()
+            };
+            let nonce = "00ff".to_string();
+            let ch = proto::approval_challenge(&proto::action_digest(&action), &b.hash, &nonce);
+            let got = key.get(&rp, &webauthn::request_options(&rp, &ch, &pins.keys));
+            proto::Approval {
+                credential: serde_json::from_value(got).unwrap(),
+                nonce,
+            }
+        };
+        assert!(
+            check_passkey(&b, Some(&pins))
+                .unwrap_err()
+                .contains("only takes jobs approved")
+        );
+        b.approval = Some(sign(&b, &mut key));
+        assert!(
+            check_passkey(&b, None)
+                .unwrap_err()
+                .contains("trust-passkeys")
+        );
+        let after = check_passkey(&b, Some(&pins)).unwrap();
+        assert_eq!(after.keys[0].sign_count, 1);
+        // The server changes the command after the approval: refused.
+        let mut changed = b.clone_for_test();
+        changed.exec.argv = vec!["/usr/bin/systemctl".into(), "stop".into(), "nginx".into()];
+        assert!(
+            check_passkey(&changed, Some(&after))
+                .unwrap_err()
+                .contains("rejected")
+        );
+        // A passkey nobody pinned: refused.
+        let mut other = testkit::Fake::new();
+        let mut b2 = b.clone_for_test();
+        b2.approval = Some(sign(&b2, &mut other));
+        assert!(check_passkey(&b2, Some(&after)).is_err());
     }
 
     #[test]

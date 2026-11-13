@@ -11,9 +11,9 @@ use std::time::{Duration, SystemTime};
 
 use serde::Serialize;
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 
 use super::{Core, Error, Inner, Result, audit, rfc3339_nano, state};
+use crate::runner::proto::{self, PinnedPasskeys, Signed};
 use crate::webauthn::{self, Credential, Passkey, Rp};
 
 const CHALLENGE_TTL: Duration = Duration::from_secs(120);
@@ -23,7 +23,8 @@ const MAX_PASSKEYS: usize = 20;
 #[derive(Default)]
 pub(super) struct Pending {
     register: Option<(Vec<u8>, SystemTime)>,
-    approve: HashMap<String, (Vec<u8>, SystemTime)>,
+    /// Request id: challenge, nonce, deadline.
+    approve: HashMap<String, (Vec<u8>, String, SystemTime)>,
     login: Option<Login>,
 }
 
@@ -39,6 +40,8 @@ pub(super) struct Login {
 pub struct PasskeyView {
     pub id: String,
     pub name: String,
+    /// Compare with what `ucr runner trust-passkeys` prints.
+    pub fingerprint: String,
     pub alg: String,
     pub created: String,
     #[serde(skip_serializing_if = "String::is_empty")]
@@ -64,17 +67,6 @@ fn clean_name(s: &str) -> String {
     if n.is_empty() { "Passkey".into() } else { n }
 }
 
-/// The challenge for approving request `id` binds the exact action shown:
-/// a hash of the request hash and a fresh nonce.
-fn approve_challenge(hash: &str) -> Vec<u8> {
-    let mut h = Sha256::new();
-    h.update(b"ucanrun approve v1\n");
-    h.update(hash.as_bytes());
-    h.update(b"\n");
-    h.update(rand::random::<[u8; 16]>());
-    h.finalize().to_vec()
-}
-
 impl Core {
     pub fn passkeys(&self) -> Result<Vec<PasskeyView>> {
         let g = self.inner();
@@ -85,6 +77,7 @@ impl Core {
             .map(|p| PasskeyView {
                 id: p.id.clone(),
                 name: p.name.clone(),
+                fingerprint: proto::fingerprint(&p.key),
                 alg: alg_name(p.alg).into(),
                 created: p.created.clone(),
                 last_used: p.last_used.clone(),
@@ -278,18 +271,21 @@ impl Core {
         if keys.is_empty() {
             return Err(Error::Msg("chưa có passkey nào".into()));
         }
-        let hash = g
+        // The challenge covers the action itself, so a runner can check the
+        // approval against the job it receives.
+        let (hash, digest) = g
             .reqs
             .get(id)
-            .map(|e| e.req.hash.clone())
+            .map(|e| (e.req.hash.clone(), proto::action_digest(&e.action)))
             .ok_or(Error::Decided)?;
-        let ch = approve_challenge(&hash);
+        let nonce = hex::encode(rand::random::<[u8; 16]>());
+        let ch = proto::approval_challenge(&digest, &hash, &nonce);
         let opts = webauthn::request_options(rp, &ch, &keys);
         let till = self.now() + CHALLENGE_TTL;
         g.pending
             .approve
-            .retain(|_, (_, t)| *t > SystemTime::now() - CHALLENGE_TTL);
-        g.pending.approve.insert(id.to_string(), (ch, till));
+            .retain(|_, (_, _, t)| *t > SystemTime::now() - CHALLENGE_TTL);
+        g.pending.approve.insert(id.to_string(), (ch, nonce, till));
         Ok(opts)
     }
 
@@ -304,7 +300,7 @@ impl Core {
     ) -> Result<String> {
         {
             let mut g = self.inner();
-            let Some((ch, till)) = g.pending.approve.remove(id) else {
+            let Some((ch, nonce, till)) = g.pending.approve.remove(id) else {
                 return Err(Error::Msg("bắt đầu lại việc duyệt bằng passkey".into()));
             };
             if self.now() > till {
@@ -312,7 +308,17 @@ impl Core {
             }
             let keys = g.st.as_ref().ok_or(Error::Locked)?.passkeys.clone();
             match webauthn::finish_assert(rp, &ch, cred, &keys) {
-                Ok((idx, count)) => self.use_passkey_locked(&mut g, idx, count),
+                Ok((idx, count)) => {
+                    self.use_passkey_locked(&mut g, idx, count);
+                    // Kept with the request: a runner that requires a
+                    // passkey checks this answer itself.
+                    if let Some(e) = g.reqs.get_mut(id) {
+                        e.proof = Some(proto::Approval {
+                            credential: cred.clone(),
+                            nonce,
+                        });
+                    }
+                }
                 Err(e) => {
                     self.log("decide_passkey_failed", "web", json!({"id": id}));
                     return Err(Error::Msg(e));
@@ -320,5 +326,28 @@ impl Core {
             }
         }
         self.decide_checked(id, hash, true, "web:passkey", "", secret, true)
+    }
+
+    /// The passkeys a runner should trust, signed with the server key. The
+    /// runner pins them at enrolment, or when its owner runs
+    /// `ucr runner trust-passkeys` on that machine.
+    pub fn runner_passkeys(&self, runner: &str, rp: &Rp) -> Result<Signed> {
+        let keys = self
+            .inner()
+            .st
+            .as_ref()
+            .ok_or(Error::Locked)?
+            .passkeys
+            .clone();
+        let key = self.signing_key_for_runners()?;
+        Ok(Signed::new(
+            &key,
+            &PinnedPasskeys {
+                runner: runner.to_string(),
+                rp_id: rp.id.clone(),
+                origin: rp.origin.clone(),
+                keys,
+            },
+        ))
     }
 }

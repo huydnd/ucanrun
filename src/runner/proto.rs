@@ -204,6 +204,68 @@ pub struct JobBody {
     /// References that are public fields, which are not redacted.
     pub public: Vec<String>,
     pub secrets: Values,
+    /// The passkey answer that approved this job, for runners that require
+    /// one. Its challenge covers `action_digest` of this very job.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approval: Option<Approval>,
+}
+
+#[cfg(test)]
+impl JobBody {
+    /// A copy, for tests; the secrets are not copied.
+    pub fn clone_for_test(&self) -> JobBody {
+        JobBody {
+            job: self.job.clone(),
+            runner: self.runner.clone(),
+            id: self.id.clone(),
+            hash: self.hash.clone(),
+            approved_by: self.approved_by.clone(),
+            totp: self.totp,
+            exec: self.exec.clone(),
+            timeout_sec: self.timeout_sec,
+            public: self.public.clone(),
+            secrets: Values::default(),
+            approval: self.approval.clone(),
+        }
+    }
+}
+
+/// A passkey answer and the nonce that went into its challenge.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Approval {
+    pub credential: crate::webauthn::Credential,
+    /// Hex.
+    pub nonce: String,
+}
+
+/// The passkeys a runner trusts for approvals, and the site they belong to.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PinnedPasskeys {
+    pub runner: String,
+    pub rp_id: String,
+    pub origin: String,
+    pub keys: Vec<crate::webauthn::Passkey>,
+}
+
+/// A digest of what will run, as both the server and a runner see it: the
+/// command with secret placeholders, the runner and the timeout.
+pub fn action_digest(a: &crate::policy::Action) -> String {
+    let b = serde_json::to_vec(a).unwrap_or_default();
+    hex::encode(Sha256::digest(b))
+}
+
+/// The WebAuthn challenge for approving one request with a passkey. It binds
+/// the action itself, so a runner can check the approval against the job it
+/// received, not only against what the server says was approved.
+pub fn approval_challenge(digest: &str, hash: &str, nonce: &str) -> Vec<u8> {
+    let mut h = Sha256::new();
+    for p in ["ucanrun approve v2", digest, hash, nonce] {
+        h.update(p.as_bytes());
+        h.update(b"\n");
+    }
+    h.finalize().to_vec()
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -243,6 +305,10 @@ pub struct Info {
     pub root: bool,
     pub sudo: bool,
     pub require_totp: bool,
+    /// Only runs jobs approved with one of its pinned passkeys.
+    pub require_passkey: bool,
+    /// How many passkeys the runner has pinned.
+    pub passkeys: usize,
     pub allow: Vec<String>,
     /// Set when the policy file could not be read; nothing runs then.
     #[serde(skip_serializing_if = "String::is_empty")]

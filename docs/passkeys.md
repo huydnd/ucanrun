@@ -45,3 +45,27 @@ host means registering the passkeys again.
   the passkeys without opening the vault; the second checks the passkey and
   only then opens it.
 - Public keys live in the signed state file; nothing secret is stored.
+
+## Runners that require a passkey
+
+With `require_passkey = true` in a runner's `runner.toml`, that runner only
+runs jobs approved with one of your passkeys, and checks the signature itself.
+Even a server taken over while the vault is open cannot order a job there.
+
+- The approval's challenge covers a digest of the job: the command with its
+  secret placeholders, the runner and the timeout, plus the request hash and
+  a nonce. The runner recomputes the digest from the job it received, so a
+  command changed after approval no longer matches the signature.
+- The runner checks the signature against passkeys pinned on that machine in
+  `passkeys.json`, not against what the server sends with the job. They are
+  pinned at enrolment; after adding or removing a passkey in the web UI, run
+  `ucr runner trust-passkeys` on the runner, compare the fingerprints with
+  Settings → Passkey, and confirm.
+- The runner keeps each passkey's signature counter, so an old approval
+  cannot be reused.
+- Requests for such a runner never run by themselves and cannot be approved
+  with TOTP or from a chat; the Requests tab shows only **Approve with
+  passkey**.
+- Approvals that pick a secret at approval time change the command after
+  signing, so a runner that requires a passkey refuses them.
+

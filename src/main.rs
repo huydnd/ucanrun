@@ -41,6 +41,7 @@ Runner, on a machine that runs approved commands (Linux, macOS, Windows):
   ucr runner enroll URL CODE [--name NAME]  pair with the server (code from the web UI)
   ucr runner serve          ask the server for work and run it (--dir DIR for the keys)
   ucr runner status         show keys, user and the rules in runner.toml
+  ucr runner trust-passkeys pin the passkeys that approve jobs here (require_passkey)
   ucr runner forget         remove this machine's runner keys
 
 Environment: UCANRUN_PUBLIC_URL, UCANRUN_GATE_TOKEN, UCANRUN_GATE=off,
@@ -249,9 +250,10 @@ fn runner(args: &[String]) -> Res {
         Some("enroll") => runtime().block_on(local::enroll(&args[1..])),
         Some("serve") => runtime().block_on(local::serve()),
         Some("status") => local::status(),
+        Some("trust-passkeys") => runtime().block_on(local::trust_passkeys(&args[1..])),
         Some("forget") => local::forget(),
         _ => {
-            Err("usage: ucr runner enroll URL CODE [--name NAME] | serve | status | forget".into())
+            Err("usage: ucr runner enroll URL CODE [--name NAME] | serve | status | trust-passkeys [--yes] | forget".into())
         }
     }
 }

@@ -106,6 +106,19 @@ impl Hub {
 }
 
 impl Core {
+    pub(super) fn signing_key_for_runners(&self) -> Result<SigningKey> {
+        self.signing_key()
+    }
+
+    /// Whether the runner said it only takes jobs approved with a passkey.
+    pub(super) fn runner_needs_passkey_locked(&self, g: &Inner, name: &str) -> bool {
+        !name.is_empty()
+            && g.runners
+                .live
+                .get(name)
+                .is_some_and(|l| l.info.require_passkey)
+    }
+
     fn signing_key(&self) -> Result<SigningKey> {
         let seed = self.vault.runner_seed()?;
         Ok(SigningKey::from_bytes(&seed))
@@ -412,7 +425,7 @@ impl Core {
         let Some(exec) = action.exec.clone() else {
             return failed("a runner only runs commands");
         };
-        let (rec, by, totp, hash) = {
+        let (rec, by, totp, hash, approval) = {
             let g = self.inner();
             let Some(rec) = g.st.as_ref().and_then(|s| s.runners.get(&name)).cloned() else {
                 return failed(format!("unknown runner {}", gourl::quote(&name)));
@@ -428,6 +441,7 @@ impl Core {
                 e.req.decided_by.clone(),
                 e.req.totp,
                 e.req.hash.clone(),
+                e.proof.clone(),
             )
         };
         let Ok(key) = proto::verifying_key(&rec.sign_key) else {
@@ -463,6 +477,7 @@ impl Core {
             timeout_sec: timeout,
             public: public.iter().cloned().collect(),
             secrets: Values::from_bytes(&values),
+            approval,
         };
         drop(values);
         let sealed = match proto::seal(&rec.age_key, &body) {

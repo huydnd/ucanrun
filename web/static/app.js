@@ -173,8 +173,9 @@ async function viewRequests(body) {
       h("div", {class: "muted"}, `Agent: ${r.caller}${r.app ? " (" + r.app + ")" : ""}${r.device ? " · " + tr("Thiết bị") + ": " + r.device : ""} · Mã: ${r.hash.slice(0, 8)} · ${new Date(r.created).toLocaleTimeString()}`),
       h("pre", null, r.display),
       r.reason ? h("div", {class: "muted"}, "Lý do (agent tự khai, chưa kiểm chứng): " + r.reason) : null,
-      r.state === "pending" ? h("div", null, pick ? h("label", null, h("span", null, "Secret dùng cho lần này"), pick) : null, r.totp ? code : null,
-        h("div", {class: "row"}, h("button", {class: "primary", onclick: act(true)}, "Duyệt"),
+      r.passkey && r.state === "pending" ? h("div", {class: "note"}, tr("Runner của yêu cầu này chỉ nhận việc duyệt bằng passkey, và tự kiểm chữ ký đó.")) : null,
+      r.state === "pending" ? h("div", null, pick ? h("label", null, h("span", null, "Secret dùng cho lần này"), pick) : null, r.totp && !r.passkey ? code : null,
+        h("div", {class: "row"}, r.passkey ? null : h("button", {class: "primary", onclick: act(true)}, "Duyệt"),
           r.totp && passkeyOK() && state.status && state.status.passkeys ? h("button", {class: "primary", onclick: async () => {
             err.textContent = ""; state.busy = true;
             try {
@@ -1273,7 +1274,7 @@ async function passkeysBox(s, onCount) {
     }}, "Thêm passkey");
     fill(box,
       passkeys.length ? h("ul", {class: "pk-list"}, passkeys.map(k => h("li", null,
-        h("span", {class: "grow"}, h("b", null, k.name), " ", h("span", {class: "muted"}, [k.alg, `${tr("thêm")} ${new Date(k.created).toLocaleDateString()}`,
+        h("span", {class: "grow"}, h("b", null, k.name), " ", h("span", {class: "muted"}, [k.fingerprint, k.alg, `${tr("thêm")} ${new Date(k.created).toLocaleDateString()}`,
           k.last_used ? `${tr("dùng lần cuối")} ${new Date(k.last_used).toLocaleString()}` : tr("chưa dùng")].join(" · "))),
         h("button", {class: "link danger", onclick: async () => {
           err.textContent = "";
@@ -1624,11 +1625,13 @@ function runnerCard(r, runs, redraw) {
       }}, "Gỡ")),
     i.policy_error ? h("div", {class: "warn-line"}, `${tr("Lỗi runner.toml")}: ${i.policy_error}`) : null,
     i.root ? h("div", {class: "warn-line"}, tr("Runner đang có quyền root hoặc admin. Nên chạy bằng user riêng, dùng sudo khi cần.")) : null,
+    i.require_passkey && !i.passkeys ? h("div", {class: "warn-line"}, tr("Runner bắt buộc passkey nhưng chưa ghim passkey nào: chạy ucr runner trust-passkeys trên máy đó.")) : null,
     h("dl", {class: "kv"},
       row("Máy", [i.host, [i.os, i.arch].filter(Boolean).join("/")].filter(Boolean).join(" · ") || "—"),
       row("Chạy bằng", i.user ? `${i.user}${i.uid >= 0 ? " (uid " + i.uid + ")" : ""}` : "—"),
       row("Root qua sudo", i.sudo ? tr("cho phép, mật khẩu đi kèm từng việc") : tr("không")),
       row("TOTP", i.require_totp ? tr("bắt buộc khi duyệt") : tr("không bắt buộc")),
+      row("Passkey", i.require_passkey ? `${tr("bắt buộc, runner tự kiểm chữ ký")} · ${i.passkeys} ${tr("passkey đã ghim")}` : tr("không bắt buộc")),
       row("Được chạy", h("span", {class: "chips"}, allow)),
       row("Phiên bản", i.version || "—"),
       row("Khoá runner", h("code", null, r.fingerprint))),
