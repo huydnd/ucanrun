@@ -18,6 +18,7 @@ mod devices;
 mod fields;
 mod health;
 mod lang;
+mod passkeys;
 mod runners;
 mod system;
 #[cfg(test)]
@@ -27,6 +28,7 @@ pub use crate::state::{TelegramCfg, Token};
 pub use chats::{ChatInput, ChatView};
 pub use fields::{FieldInfo, SecretInfo};
 pub use health::HealthItem;
+pub use passkeys::PasskeyView;
 pub use runners::{RunnerAuth, RunnerView, unsigned as runners_unsigned};
 pub use system::SystemInfo;
 
@@ -422,6 +424,8 @@ struct Inner {
     runners: runners::Hub,
     /// Approval channels besides Telegram, by kind, while unlocked.
     chats: BTreeMap<String, Arc<dyn crate::chat::Channel>>,
+    /// Passkey challenges waiting for an answer.
+    pending: passkeys::Pending,
 }
 
 /// Bounds of the idle auto lock, in minutes.
@@ -698,6 +702,7 @@ impl Core {
                 recent: HashMap::new(),
                 runners: runners::Hub::default(),
                 chats: BTreeMap::new(),
+                pending: passkeys::Pending::default(),
             }),
             login_mu: Mutex::new(()),
             rt,
@@ -1904,6 +1909,22 @@ impl Core {
         code: &str,
         secret: &str,
     ) -> Result<String> {
+        self.decide_checked(id, hash, approve, actor, code, secret, false)
+    }
+
+    /// `decide`, where `passkey` says a passkey was already checked for this
+    /// request, which stands in for the TOTP code.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn decide_checked(
+        &self,
+        id: &str,
+        hash: &str,
+        approve: bool,
+        actor: &str,
+        code: &str,
+        secret: &str,
+        passkey: bool,
+    ) -> Result<String> {
         let mut g = self.inner();
         g.last_active = self.now();
         let Some(e) = g.reqs.get(id) else {
@@ -1941,11 +1962,14 @@ impl Core {
                 Ok(_) => {}
             }
         }
-        if need_totp {
+        if need_totp && !passkey {
             if !g.st.as_ref().is_some_and(|s| s.totp_enabled) {
-                return Err(Error::Msg(
-                    "chưa bật TOTP nên chưa duyệt được yêu cầu rủi ro cao".into(),
-                ));
+                let pk = g.st.as_ref().is_some_and(|s| !s.passkeys.is_empty());
+                return Err(Error::Msg(if pk {
+                    "yêu cầu rủi ro cao: hãy duyệt bằng passkey trên web".into()
+                } else {
+                    "chưa bật TOTP nên chưa duyệt được yêu cầu rủi ro cao".into()
+                }));
             }
             if let Err(err) = self.check_totp_locked(&mut g, code) {
                 self.log("decide_totp_failed", actor, json!({"id": id}));

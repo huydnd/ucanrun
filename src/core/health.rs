@@ -259,6 +259,21 @@ impl Core {
             "bad",
         );
 
+        let n = self.passkeys().map(|l| l.len()).unwrap_or(0);
+        out.push(match n {
+            0 => item(
+                "passkey",
+                "warn",
+                "Chưa có passkey. Passkey chống trang giả mạo tốt hơn TOTP; nên thêm ít nhất hai cái.",
+            ),
+            1 => item(
+                "passkey",
+                "warn",
+                "Mới có một passkey. Thêm một cái dự phòng, phòng khi mất thiết bị.",
+            ),
+            _ => item("passkey", "ok", "Có từ hai passkey trở lên."),
+        });
+
         // Runners: what each machine lets an approved job do.
         let runners = self.runners().unwrap_or_default();
         if !runners.is_empty() {

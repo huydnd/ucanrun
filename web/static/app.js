@@ -17,6 +17,25 @@ function h(tag, attrs, ...kids) {
 
 function fill(el, ...kids) { el.replaceChildren(...kids.flat().filter(c => c != null)); }
 
+// WebAuthn: the server sends binary fields as base64url; the browser wants
+// ArrayBuffers, and its answer goes back as base64url again.
+const fromB64u = s => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((s.length + 3) % 4)), c => c.charCodeAt(0)).buffer;
+const toB64u = b => btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const passkeyOK = () => !!(window.PublicKeyCredential && navigator.credentials);
+async function passkeyCreate(o) {
+  const c = await navigator.credentials.create({publicKey: Object.assign({}, o, {
+    challenge: fromB64u(o.challenge), user: Object.assign({}, o.user, {id: fromB64u(o.user.id)}),
+    excludeCredentials: (o.excludeCredentials || []).map(x => Object.assign({}, x, {id: fromB64u(x.id)}))})});
+  return {id: c.id, clientDataJSON: toB64u(c.response.clientDataJSON), attestationObject: toB64u(c.response.attestationObject)};
+}
+async function passkeyGet(o) {
+  const c = await navigator.credentials.get({publicKey: Object.assign({}, o, {
+    challenge: fromB64u(o.challenge), allowCredentials: (o.allowCredentials || []).map(x => Object.assign({}, x, {id: fromB64u(x.id)}))})});
+  return {id: c.id, clientDataJSON: toB64u(c.response.clientDataJSON), authenticatorData: toB64u(c.response.authenticatorData), signature: toB64u(c.response.signature)};
+}
+// A cancelled or timed out prompt says so plainly.
+const passkeyErr = e => e && e.name === "NotAllowedError" ? tr("Đã huỷ hoặc hết thời gian chờ passkey.") : tr(e.message || String(e));
+
 async function api(method, path, body) {
   const r = await fetch(path, {method, headers: {"Content-Type": "application/json", "X-Ucanrun": "1"},
     body: body === undefined ? undefined : JSON.stringify(body), credentials: "same-origin"});
@@ -68,10 +87,27 @@ function renderSetup() {
 function renderLogin(locked) {
   const p = field("Mật khẩu chính", {type: "password", autocomplete: "current-password"});
   const t = field("Mã TOTP hoặc mã khôi phục (nếu đã bật)", {autocomplete: "one-time-code", maxlength: 12});
-  app.replaceChildren(h("div", {class: "narrow"}, form(locked ? "Mở khoá ucanrun" : "Đăng nhập", [p, t], "Tiếp tục", async () => {
+  const card = form(locked ? "Mở khoá ucanrun" : "Đăng nhập", [p, t], "Tiếp tục", async () => {
     await api("POST", "/api/login", {passphrase: p.input.value, totp: t.input.value});
     boot();
-  }, locked ? h("p", {class: "muted"}, "Kho đang khoá, agent chưa chạy được lệnh nào.") : null)));
+  }, locked ? h("p", {class: "muted"}, "Kho đang khoá, agent chưa chạy được lệnh nào.") : null);
+  // Password, then a passkey in place of the TOTP code.
+  if (passkeyOK()) {
+    const err = h("div", {class: "err", role: "alert"});
+    const pk = h("button", {type: "button", onclick: async () => {
+      err.textContent = ""; pk.disabled = true;
+      try {
+        if (!p.input.value) throw new Error(tr("Nhập mật khẩu chính trước."));
+        const o = await api("POST", "/api/login/passkey/start", {passphrase: p.input.value});
+        const c = await passkeyGet(o);
+        await api("POST", "/api/login/passkey", {credential: c});
+        boot();
+      } catch (e) { err.textContent = passkeyErr(e); } finally { pk.disabled = false; }
+    }}, "Dùng passkey thay mã TOTP");
+    card.querySelector(":scope > .row").append(pk);
+    card.append(err);
+  }
+  app.replaceChildren(h("div", {class: "narrow"}, card));
 }
 
 // Setup tabs come in the order they are needed, then the daily ones.
@@ -115,7 +151,7 @@ function renderShell() {
   const views = {start: viewStart, requests: viewRequests, secrets: viewSecrets, runners: viewRunners, profiles: viewProfiles, tokens: viewTokens, settings: viewSettings, audit: viewAudit};
   const draw = () => views[state.tab](body).catch(e => { if (e.status === 401) boot(); else fill(body, h("div", {class: "err"}, e.message)); });
   draw();
-  if (state.tab === "requests") state.timer = setInterval(() => { if (!body.querySelector("input:focus, select:focus")) draw(); }, 3000);
+  if (state.tab === "requests") state.timer = setInterval(() => { if (!state.busy && !body.querySelector("input:focus, select:focus")) draw(); }, 3000);
 }
 
 async function viewRequests(body) {
@@ -138,7 +174,17 @@ async function viewRequests(body) {
       h("pre", null, r.display),
       r.reason ? h("div", {class: "muted"}, "Lý do (agent tự khai, chưa kiểm chứng): " + r.reason) : null,
       r.state === "pending" ? h("div", null, pick ? h("label", null, h("span", null, "Secret dùng cho lần này"), pick) : null, r.totp ? code : null,
-        h("div", {class: "row"}, h("button", {class: "primary", onclick: act(true)}, "Duyệt"), h("button", {class: "danger", onclick: act(false)}, "Từ chối")), err) : null,
+        h("div", {class: "row"}, h("button", {class: "primary", onclick: act(true)}, "Duyệt"),
+          r.totp && passkeyOK() && state.status && state.status.passkeys ? h("button", {class: "primary", onclick: async () => {
+            err.textContent = ""; state.busy = true;
+            try {
+              const o = await api("POST", `/api/requests/${r.id}/passkey`);
+              const c = await passkeyGet(o);
+              await api("POST", `/api/requests/${r.id}/decide`, {approve: true, hash: r.hash, credential: c, secret: pick ? pick.value : ""});
+              viewRequests(body);
+            } catch (e) { err.textContent = passkeyErr(e); } finally { state.busy = false; }
+          }}, "Duyệt bằng passkey") : null,
+          h("button", {class: "danger", onclick: act(false)}, "Từ chối")), err) : null,
       r.state !== "pending" ? h("div", {class: "muted"}, `Kết quả: ${r.state}` + (r.decided_by ? ` · ${r.decided_by}` : "") + (r.secret ? ` · secret ${r.secret}` : "")) : null,
       r.result ? h("pre", null, r.result.output) : null);
   };
@@ -1204,6 +1250,47 @@ function channelsCard(s, chats, sys, after) {
     tiles, box);
 }
 
+// Passkeys: list, add, remove. Adding needs the TOTP code (or the master
+// password while TOTP is off); removing needs the TOTP code when it is on.
+async function passkeysBox(s, onCount) {
+  const box = h("div", {class: "pk-box"});
+  const draw = async () => {
+    const {passkeys, rp_id} = await api("GET", "/api/passkeys");
+    if (state.status) state.status.passkeys = passkeys.length;
+    if (onCount) onCount(passkeys.length);
+    const err = h("div", {class: "err", role: "alert"});
+    const name = h("input", {placeholder: tr("Tên, ví dụ: iPhone, YubiKey"), maxlength: 40});
+    const proof = s.totp ? field("Mã TOTP hiện tại", {inputmode: "numeric", maxlength: 6, autocomplete: "one-time-code"})
+      : field("Mật khẩu chính", {type: "password", autocomplete: "current-password"});
+    const add = h("button", {class: "primary", disabled: !rp_id || !passkeyOK(), onclick: async () => {
+      err.textContent = ""; add.disabled = true;
+      try {
+        const o = await api("POST", "/api/passkeys/start");
+        const c = await passkeyCreate(o);
+        await api("POST", "/api/passkeys", {name: name.value, credential: c, totp: s.totp ? proof.input.value : "", passphrase: s.totp ? "" : proof.input.value});
+        await draw();
+      } catch (e) { err.textContent = passkeyErr(e); } finally { add.disabled = false; }
+    }}, "Thêm passkey");
+    fill(box,
+      passkeys.length ? h("ul", {class: "pk-list"}, passkeys.map(k => h("li", null,
+        h("span", {class: "grow"}, h("b", null, k.name), " ", h("span", {class: "muted"}, [k.alg, `${tr("thêm")} ${new Date(k.created).toLocaleDateString()}`,
+          k.last_used ? `${tr("dùng lần cuối")} ${new Date(k.last_used).toLocaleString()}` : tr("chưa dùng")].join(" · "))),
+        h("button", {class: "link danger", onclick: async () => {
+          err.textContent = "";
+          if (!confirm(tr(`Gỡ passkey ${k.name}?`))) return;
+          try { await api("POST", `/api/passkeys/${encodeURIComponent(k.id)}/delete`, {totp: s.totp ? proof.input.value : ""}); await draw(); }
+          catch (e) { err.textContent = tr(e.message); }
+        }}, "Gỡ")))) : h("p", {class: "muted"}, "Chưa có passkey."),
+      !rp_id ? h("small", {class: "warn-line"}, tr("Passkey cần địa chỉ HTTPS có tên miền (UCANRUN_PUBLIC_URL), hoặc mở qua localhost.")) :
+        !passkeyOK() ? h("small", {class: "warn-line"}, tr("Trình duyệt này không hỗ trợ passkey.")) :
+        h("small", {class: "muted"}, `${tr("Passkey gắn với")} ${rp_id}. ${tr("Nên có ít nhất hai cái, ví dụ điện thoại và khoá bảo mật. TOTP vẫn dùng được làm dự phòng.")}`),
+      h("div", {class: "grid2"}, h("label", null, h("span", null, tr("Tên passkey mới")), name), proof.el),
+      h("div", {class: "row"}, add), err);
+  };
+  await draw();
+  return box;
+}
+
 // A settings line: what it is on the left, the control on the right.
 function setRow(title, desc, control) {
   return h("div", {class: "set-row"}, h("div", {class: "set-text"}, h("b", null, tr(title)), desc ? h("small", {class: "muted"}, desc) : null), control);
@@ -1238,6 +1325,9 @@ async function viewSettings(body) {
     await api("POST", "/api/passphrase", {old: o.input.value, new: n.input.value}); o.input.value = n.input.value = "";
   });
   pass.classList.remove("card"); const ph = pass.querySelector("h2"); if (ph) ph.remove();
+  const pkSum = h("small", {class: "muted"});
+  const pkBox = await passkeysBox(s, n => { pkSum.textContent = n ? `${n} passkey · ${tr("đăng nhập và duyệt việc rủi ro cao bằng vân tay, khuôn mặt hoặc khoá bảo mật")}`
+    : tr("Chưa có. Đăng nhập và duyệt bằng vân tay, khuôn mặt hoặc khoá bảo mật, chống trang giả mạo."); });
   const tpl = await myTemplatesCard();
   tpl.classList.remove("card"); const tph = tpl.querySelector("h2"); if (tph) tph.remove();
   fill(body,
@@ -1247,6 +1337,8 @@ async function viewSettings(body) {
       h("details", {class: "set-row-d", open: !s.totp},
         h("summary", null, h("div", {class: "set-text"}, h("b", null, "TOTP"),
           h("small", {class: "muted"}, s.totp ? `${tr("Đang bật")} · ${s.recovery_left} ${tr("mã khôi phục")}` : tr("Đang tắt: yêu cầu rủi ro cao chưa duyệt được.")))), totp),
+      h("details", {class: "set-row-d", open: !s.passkeys},
+        h("summary", null, h("div", {class: "set-text"}, h("b", null, "Passkey"), pkSum)), pkBox),
       setRow("Tự khoá kho", tr("Khi không có hoạt động nào. Kho khoá thì agent nhận lỗi 423 tới khi bạn đăng nhập."), h("div", {class: "inline"}, lockSel, lockMsg)),
       h("details", {class: "set-row-d"}, h("summary", null, h("div", {class: "set-text"}, h("b", null, tr("Mật khẩu chính")),
         h("small", {class: "muted"}, tr("Dùng để mở kho. Không có cách khôi phục nếu quên.")))), pass)),

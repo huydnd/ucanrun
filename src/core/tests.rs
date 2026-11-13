@@ -2686,3 +2686,77 @@ async fn whatsapp_setup_gives_a_verify_token() {
         .is_err()
     );
 }
+
+// --- passkeys ---
+
+#[tokio::test(flavor = "multi_thread")]
+async fn passkeys_register_sign_in_and_approve() {
+    use crate::webauthn::{Credential, testkit};
+    let cred = |v: Value| serde_json::from_value::<Credential>(v).unwrap();
+    let e = setup().await;
+    let rp = testkit::rp();
+    let mut key = testkit::Fake::new();
+    assert!(!e.c.has_passkeys());
+    // TOTP is off here, so adding a passkey needs the master password.
+    let opts = e.c.passkey_register_start(&rp).unwrap();
+    let made = key.create(&rp, &opts);
+    assert!(
+        e.c.passkey_register_finish(&rp, "laptop", &cred(made.clone()), "", b"wrong password")
+            .is_err()
+    );
+    let opts = e.c.passkey_register_start(&rp).unwrap();
+    let made = key.create(&rp, &opts);
+    e.c.passkey_register_finish(&rp, "laptop", &cred(made.clone()), "", PASS.as_bytes())
+        .unwrap();
+    assert_eq!(e.c.passkeys().unwrap()[0].name, "laptop");
+    // The same answer twice does not register twice.
+    assert!(
+        e.c.passkey_register_finish(&rp, "again", &cred(made), "", PASS.as_bytes())
+            .is_err()
+    );
+
+    // Sign in: password first, vault stays locked until the passkey answers.
+    e.c.lock("web");
+    assert!(e.c.login_passkey_start(&rp, b"wrong password").is_err());
+    let opts = e.c.login_passkey_start(&rp, PASS.as_bytes()).unwrap();
+    assert!(e.c.locked(), "opened before the passkey");
+    let mut stranger = testkit::Fake::new();
+    assert!(
+        e.c.login_passkey_finish(&rp, &cred(stranger.get(&rp, &opts)))
+            .is_err()
+    );
+    assert!(e.c.locked());
+    // A failed answer used up the challenge.
+    let opts = e.c.login_passkey_start(&rp, PASS.as_bytes()).unwrap();
+    e.c.login_passkey_finish(&rp, &cred(key.get(&rp, &opts)))
+        .unwrap();
+    assert!(!e.c.locked());
+    assert!(!e.c.passkeys().unwrap()[0].last_used.is_empty());
+
+    // A high risk request needs TOTP, which is off; a passkey approves it.
+    let (t, _) = e.token("c", &[]);
+    let r =
+        e.c.submit(&t, "danger", params(&[("repo", "pk")]), "")
+            .unwrap();
+    assert!(r.totp);
+    assert!(e.c.decide(&r.id, &r.hash, true, "web", "", "").is_err());
+    let opts = e.c.approve_passkey_start(&rp, &r.id).unwrap();
+    // An answer replayed from the sign-in does not approve.
+    let old = key.get(&rp, &e.c.login_passkey_start(&rp, PASS.as_bytes()).unwrap());
+    assert!(
+        e.c.approve_passkey_finish(&rp, &r.id, &r.hash, &cred(old), "")
+            .is_err()
+    );
+    let opts2 = e.c.approve_passkey_start(&rp, &r.id).unwrap();
+    assert_ne!(opts["challenge"], opts2["challenge"]);
+    let msg =
+        e.c.approve_passkey_finish(&rp, &r.id, &r.hash, &cred(key.get(&rp, &opts2)), "")
+            .unwrap();
+    assert_eq!(msg, "Đã duyệt");
+    let done = e.c.wait(&r.id, Some(Duration::from_secs(5))).await.unwrap();
+    assert_eq!(done.decided_by, "web:passkey");
+
+    let id = e.c.passkeys().unwrap()[0].id.clone();
+    e.c.passkey_delete(&id, "").unwrap();
+    assert!(!e.c.has_passkeys());
+}

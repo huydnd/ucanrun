@@ -484,6 +484,15 @@ impl Server {
             .route("/api/tokens/{id}", ui(delete(revoke_token)))
             .route("/api/requests", ui(get(requests)))
             .route("/api/requests/{id}/decide", ui(post(decide)))
+            .route(
+                "/api/requests/{id}/passkey",
+                ui(post(approve_passkey_start)),
+            )
+            .route("/api/passkeys", ui(get(passkeys_list).post(passkey_add)))
+            .route("/api/passkeys/start", ui(post(passkey_add_start)))
+            .route("/api/passkeys/{id}/delete", ui(post(passkey_delete)))
+            .route("/api/login/passkey/start", ui(post(login_passkey_start)))
+            .route("/api/login/passkey", ui(post(login_passkey_finish)))
             .route("/api/audit", ui(get(audit_log)))
             .route("/api/health", ui(get(health)))
             .route("/api/telegram", ui(put(set_telegram)))
@@ -724,6 +733,7 @@ async fn status(State(s): State<Arc<Server>>, h: HeaderMap) -> Response {
     if authed {
         out["telegram"] = json!(c.telegram_status());
         out["any_channel"] = json!(c.any_channel_paired());
+        out["passkeys"] = json!(c.passkeys().map(|l| l.len()).unwrap_or(0));
         out["totp"] = json!(c.totp_enabled());
         out["exec"] = json!(c.exec_enabled());
         out["auto_lock_min"] = json!(c.auto_lock_min());
@@ -1132,6 +1142,156 @@ struct DecideIn {
     hash: String,
     totp: String,
     secret: String,
+    /// A passkey answer from `/passkey`, in place of the TOTP code.
+    credential: Option<crate::webauthn::Credential>,
+}
+
+/// The site passkeys belong to: UCANRUN_PUBLIC_URL, or localhost for
+/// trying things out. WebAuthn needs HTTPS and a host name.
+fn relying_party(h: &HeaderMap) -> Result<crate::webauthn::Rp, Box<Response>> {
+    let url = match std::env::var("UCANRUN_PUBLIC_URL") {
+        Ok(u) if !u.is_empty() => u,
+        _ => format!("http://{}", header_str(h, "host")),
+    };
+    crate::webauthn::Rp::from_url(&url).ok_or_else(|| {
+        Box::new(err_json(
+            400,
+            "passkey cần địa chỉ HTTPS có tên miền: đặt UCANRUN_PUBLIC_URL, hoặc mở qua localhost",
+        ))
+    })
+}
+
+macro_rules! rp_or {
+    ($h:expr) => {
+        match relying_party(&$h) {
+            Ok(rp) => rp,
+            Err(r) => return *r,
+        }
+    };
+}
+
+async fn passkeys_list(State(s): State<Arc<Server>>, h: HeaderMap) -> Response {
+    need_auth!(s, h);
+    let list = tryf!(s.core.passkeys());
+    let rp = relying_party(&h).ok().map(|r| r.id);
+    write_json(200, &json!({"passkeys": list, "rp_id": rp}))
+}
+
+async fn passkey_add_start(State(s): State<Arc<Server>>, h: HeaderMap) -> Response {
+    need_auth!(s, h);
+    let rp = rp_or!(h);
+    write_json(200, &tryf!(s.core.passkey_register_start(&rp)))
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct PasskeyAddIn {
+    name: String,
+    credential: crate::webauthn::Credential,
+    totp: String,
+    passphrase: String,
+}
+
+async fn passkey_add(State(s): State<Arc<Server>>, h: HeaderMap, b: Body) -> Response {
+    need_auth!(s, h);
+    let rp = rp_or!(h);
+    let i: PasskeyAddIn = body!(b);
+    if i.passphrase.len() > 1024 {
+        return err_json(400, "sai mật khẩu chính");
+    }
+    let c = s.core.clone();
+    tryf!(
+        blocking(move || c.passkey_register_finish(
+            &rp,
+            &i.name,
+            &i.credential,
+            &i.totp,
+            i.passphrase.as_bytes()
+        ))
+        .await
+    );
+    ok_json()
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct TotpIn {
+    totp: String,
+}
+
+async fn passkey_delete(
+    State(s): State<Arc<Server>>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+    b: Body,
+) -> Response {
+    need_auth!(s, h);
+    let i: TotpIn = body!(b);
+    tryf!(s.core.passkey_delete(&id, &i.totp));
+    ok_json()
+}
+
+async fn approve_passkey_start(
+    State(s): State<Arc<Server>>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    need_auth!(s, h);
+    let rp = rp_or!(h);
+    write_json(200, &tryf!(s.core.approve_passkey_start(&rp, &id)))
+}
+
+/// Sign in, step one: the master password. Throttled like a login.
+async fn login_passkey_start(State(s): State<Arc<Server>>, h: HeaderMap, b: Body) -> Response {
+    let input: LoginIn = body!(b);
+    if s.throttled() {
+        return err_json(429, "thử lại sau ít giây");
+    }
+    if input.passphrase.len() > 1024 {
+        return err_json(401, "sai thông tin đăng nhập");
+    }
+    let rp = rp_or!(h);
+    let c = s.core.clone();
+    match blocking(move || c.login_passkey_start(&rp, input.passphrase.as_bytes())).await {
+        Ok(opts) => write_json(200, &opts),
+        Err(e @ core::Error::LoginBusy) => fail(e),
+        Err(core::Error::Msg(m)) => {
+            s.record_login(false);
+            err_json(401, &m)
+        }
+        Err(_) => {
+            s.record_login(false);
+            err_json(401, "sai thông tin đăng nhập")
+        }
+    }
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct PasskeyLoginIn {
+    credential: crate::webauthn::Credential,
+}
+
+/// Sign in, step two: the passkey. Opens the vault and starts a session.
+async fn login_passkey_finish(State(s): State<Arc<Server>>, h: HeaderMap, b: Body) -> Response {
+    let input: PasskeyLoginIn = body!(b);
+    if s.throttled() {
+        return err_json(429, "thử lại sau ít giây");
+    }
+    let rp = rp_or!(h);
+    let c = s.core.clone();
+    match blocking(move || c.login_passkey_finish(&rp, &input.credential)).await {
+        Ok(()) => {
+            s.record_login(true);
+            let mut r = ok_json();
+            set_cookie(&mut r, s.new_session());
+            r
+        }
+        Err(e) => {
+            s.record_login(false);
+            err_json(401, &e.to_string())
+        }
+    }
 }
 
 async fn decide(
@@ -1142,10 +1302,22 @@ async fn decide(
 ) -> Response {
     need_auth!(s, h);
     let i: DecideIn = body!(b);
-    let msg = tryf!(
-        s.core
-            .decide(&id, &i.hash, i.approve, "web", &i.totp, &i.secret)
-    );
+    let msg = match (&i.credential, i.approve) {
+        (Some(c), true) => {
+            let rp = match relying_party(&h) {
+                Ok(rp) => rp,
+                Err(r) => return *r,
+            };
+            tryf!(
+                s.core
+                    .approve_passkey_finish(&rp, &id, &i.hash, c, &i.secret)
+            )
+        }
+        _ => tryf!(
+            s.core
+                .decide(&id, &i.hash, i.approve, "web", &i.totp, &i.secret)
+        ),
+    };
     write_json(200, &json!({"message": msg}))
 }
 

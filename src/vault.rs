@@ -200,6 +200,12 @@ impl Vault {
     pub fn mac_key(&self) -> Result<Vec<u8>> {
         let g = self.identity.read().unwrap();
         let id = g.as_ref().ok_or(Error::Locked)?;
+        Self::mac_key_for(id)
+    }
+
+    /// The state key of an identity that is not adopted, to read the state
+    /// before the vault opens.
+    pub fn mac_key_for(id: &x25519::Identity) -> Result<Vec<u8>> {
         let s = id.to_string();
         let hk = Hkdf::<Sha256>::new(None, s.expose_secret().as_bytes());
         let mut out = vec![0u8; 32];
