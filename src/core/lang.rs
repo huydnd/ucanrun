@@ -54,6 +54,7 @@ struct Labels {
     pick: &'static str,
     code: &'static str,
     adhoc: &'static str,
+    totp_why: &'static str,
 }
 
 const EN: Labels = Labels {
@@ -70,6 +71,7 @@ const EN: Labels = Labels {
     pick: "Tap the secret to use this time.",
     code: "Code",
     adhoc: "\n✍️ The agent wrote this command itself. Read it carefully.",
+    totp_why: "TOTP because",
 };
 
 const VI: Labels = Labels {
@@ -86,6 +88,7 @@ const VI: Labels = Labels {
     pick: "Bấm tên secret muốn dùng cho lần này.",
     code: "Mã",
     adhoc: "\n✍️ Agent tự soạn lệnh này, hãy đọc kỹ.",
+    totp_why: "Cần TOTP vì",
 };
 
 pub(crate) fn approval_text(r: &super::Request, vi: bool) -> String {
@@ -119,11 +122,39 @@ pub(crate) fn approval_text(r: &super::Request, vi: bool) -> String {
     if !r.reason.is_empty() {
         b.push_str(&format!("\n{}: {}\n", l.why, r.reason));
     }
+    if !r.totp_why.is_empty() {
+        let list: Vec<String> = r.totp_why.iter().map(|w| totp_reason(w, vi)).collect();
+        b.push_str(&format!("\n{}: {}\n", l.totp_why, list.join("; ")));
+    }
     if !r.choices.is_empty() {
         b.push_str(&format!("\n{}\n", l.pick));
     }
     b.push_str(&format!("\n{}: {}", l.code, &r.hash[..8]));
     b
+}
+
+/// One reason a request needs TOTP, in words.
+pub(crate) fn totp_reason(w: &super::TotpWhy, vi: bool) -> String {
+    let n = &w.name;
+    match (w.kind.as_str(), vi) {
+        ("secret", true) => format!("secret {n} đặt luôn cần TOTP"),
+        ("secret", false) => format!("secret {n} is set to always need TOTP"),
+        ("risk", true) if n.is_empty() => "việc rủi ro cao".into(),
+        ("risk", false) if n.is_empty() => "high risk".into(),
+        ("risk", true) => format!("việc rủi ro cao và secret {n} không miễn TOTP"),
+        ("risk", false) => format!("high risk, and secret {n} does not waive TOTP"),
+        ("runner", true) => format!("runner {n} đặt luôn cần TOTP (tab Runner)"),
+        ("runner", false) => format!("runner {n} is set to always need TOTP (Runner tab)"),
+        ("runner_file", true) => {
+            format!("ucr bản cũ trên runner {n} còn bật require_totp trong runner.toml")
+        }
+        ("runner_file", false) => {
+            format!("an older ucr on runner {n} still has require_totp in runner.toml")
+        }
+        ("passkey", true) => format!("runner {n} chỉ nhận việc duyệt bằng passkey"),
+        ("passkey", false) => format!("runner {n} only takes passkey approvals"),
+        (k, _) => k.to_string(),
+    }
 }
 
 /// Text that replaces an approval message once the request is final.

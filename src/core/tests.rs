@@ -1584,6 +1584,10 @@ async fn telegram_speaks_english_by_default() {
         reason: "why".into(),
         risk: "high".into(),
         totp: true,
+        totp_why: vec![TotpWhy {
+            kind: "risk".into(),
+            name: String::new(),
+        }],
         passkey: false,
         hash: "ab".repeat(32),
         display: "GET https://x".into(),
@@ -1602,7 +1606,7 @@ async fn telegram_speaks_english_by_default() {
         lang::approval_text(&r, false),
         "⚠️ HIGH RISK, needs TOTP\n✍️ The agent wrote this command itself. Read it carefully.\n\n\
          Profile: agent-call\nAgent: claude\nExpires in: 120 seconds\n\nCommand to run:\nGET https://x\n\n\
-         Reason (stated by the agent, unverified): why\n\nTap the secret to use this time.\n\nCode: abababab"
+         Reason (stated by the agent, unverified): why\n\nTOTP because: high risk\n\nTap the secret to use this time.\n\nCode: abababab"
     );
 }
 
@@ -2235,6 +2239,17 @@ fn enroll_fake(c: &Core, name: &str, info: crate::runner::proto::Info) -> FakeRu
         c.enroll_runner(input(&code)).is_err(),
         "a code works only once"
     );
+    // New runners ask for TOTP on every job; these tests mostly want the
+    // secrets to decide, as before the setting existed.
+    assert!(
+        c.runners()
+            .unwrap()
+            .iter()
+            .any(|r| r.name == name && r.totp == "always")
+    );
+    if !c.totp_enabled() {
+        c.set_runner_totp(name, "secrets", "").unwrap();
+    }
     FakeRunner {
         name: name.into(),
         sign,
@@ -2498,6 +2513,25 @@ async fn runner_rules_for_sudo_totp_and_refusals() {
         r.totp && r.state == ReqState::Pending,
         "auto secret, but the runner wants TOTP"
     );
+    let kinds: Vec<&str> = r.totp_why.iter().map(|w| w.kind.as_str()).collect();
+    assert_eq!(
+        kinds,
+        ["runner_file"],
+        "an older ucr still reads runner.toml"
+    );
+    // The Runner tab setting asks for TOTP on every job, and says why.
+    e.c.set_runner_totp("box", "always", "").unwrap();
+    let r = e.c.submit_call(&t, &plain_call("box"), "").unwrap();
+    assert!(r.totp && r.state == ReqState::Pending);
+    assert_eq!(r.totp_why.len(), 1);
+    assert_eq!(
+        (r.totp_why[0].kind.as_str(), r.totp_why[0].name.as_str()),
+        ("runner", "box")
+    );
+    assert!(lang::approval_text(&r, true).contains("Cần TOTP vì: runner box đặt luôn cần TOTP"));
+    assert!(e.c.set_runner_totp("box", "never", "").is_err());
+    assert!(e.c.set_runner_totp("nope", "always", "").is_err());
+    e.c.set_runner_totp("box", "secrets", "").unwrap();
     // The checklist flags the loose settings this test used.
     let h = e.c.health().unwrap();
     let level = |k: &str| h.iter().find(|i| i.key == k).map(|i| i.level.clone());
@@ -2824,4 +2858,40 @@ async fn runner_requiring_a_passkey_checks_the_approval_itself() {
     let mut forged = body.clone_for_test();
     forged.exec.argv = vec!["/usr/bin/id".into(), "-a".into()];
     assert!(check_passkey(&forged, Some(&pins)).is_err());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn dropping_runner_totp_needs_a_code() {
+    let e = new_env("en", false).await;
+    e.c.setup(PASS.as_bytes()).unwrap();
+    e.c.put_secret("pw", b"sudo-pass-VALUE-1").unwrap();
+    e.c.set_secret_meta("pw", auto_never()).unwrap();
+    let (sec, _) = e.enable_totp();
+    let (t, _) = e.token("claude", &[]);
+    enroll_fake(&e.c, "box", Default::default());
+    // TOTP is on, so the helper left the safe default in place.
+    let r = e.c.submit_call(&t, &plain_call("box"), "").unwrap();
+    assert_eq!(r.state, ReqState::Pending, "an auto secret still waits");
+    assert_eq!(r.totp_why[0].kind, "runner");
+    assert!(
+        e.c.set_runner_totp("box", "secrets", "").is_err(),
+        "an open session alone cannot"
+    );
+    assert!(e.c.set_runner_totp("box", "secrets", "000000").is_err());
+    e.c.set_runner_totp("box", "secrets", &e.code_now(&sec))
+        .unwrap();
+    let r = e.c.submit_call(&t, &plain_call("box"), "").unwrap();
+    assert!(r.totp_why.is_empty());
+    assert_eq!(
+        r.state,
+        ReqState::Running,
+        "now the secret decides: auto, no TOTP"
+    );
+    // Asking for TOTP again needs no code.
+    e.c.set_runner_totp("box", "always", "").unwrap();
+    let h = e.c.health().unwrap();
+    assert_eq!(
+        h.iter().find(|i| i.key == "runner_totp").unwrap().level,
+        "ok"
+    );
 }

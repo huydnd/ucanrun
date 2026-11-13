@@ -6,7 +6,7 @@ Trạng thái: **giai đoạn 1 và 2 đã làm trong 0.8.0**, theo một bản 
 
 - Gộp giai đoạn 1 và 2: không có unix socket riêng. Mọi runner, kể cả trên chính máy chủ, đều gọi ra Agent API (`/v1/runner/poll`, long-poll 25 giây).
 - Không dùng Noise: gói việc đã được A ký (ed25519, khoá sinh từ identity của kho bằng HKDF), secret được seal bằng age cho khoá của B, và kết quả được B ký. Đường truyền chỉ chở byte.
-- Policy của B là `runner.toml` (`allow`, `sudo`, `require_totp`). B áp lại các luật của A (cấm trình thông dịch, secret trong argv, env nguy hiểm), nên A bị chiếm cũng không có shell.
+- Policy của B là `runner.toml` (`allow`, `sudo`, `require_passkey`); TOTP khi duyệt đặt cho từng runner trên A (tab Runner) từ 0.13.2. B áp lại các luật của A (cấm trình thông dịch, secret trong argv, env nguy hiểm), nên A bị chiếm cũng không có shell.
 - Root: B chạy bằng user riêng. Việc có `sudo: {{secret:X}}` được bọc thành `sudo -S -k --`, mật khẩu đi qua stdin. `sudo` dùng làm argv[0] vẫn bị cấm.
 - Windows: B chạy bằng quyền user (Scheduled Task, LogonType S4U, RunLevel Limited). Không có cách nâng quyền theo từng việc.
 - Chống gửi lại: B nhớ `job` (nonce) trong bộ nhớ tới khi hết `not_after`.

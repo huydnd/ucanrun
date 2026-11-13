@@ -219,6 +219,26 @@ function renderShell() {
   if (state.tab === "requests") state.timer = setInterval(() => { if (!state.busy && !body.querySelector("input:focus, select:focus")) draw(); }, 3000);
 }
 
+// Why a request needs TOTP, one phrase per reason from the server.
+function totpReason(w) {
+  const n = w.name || "", en = lang === "en";
+  switch (w.kind) {
+    case "secret": return en ? `secret ${n} is set to always need TOTP` : `secret ${n} đặt luôn cần TOTP`;
+    case "risk": return !n ? (en ? "high risk" : "việc rủi ro cao") : en ? `high risk, and secret ${n} does not waive TOTP` : `việc rủi ro cao và secret ${n} không miễn TOTP`;
+    case "runner": return en ? `runner ${n} is set to always need TOTP` : `runner ${n} đặt luôn cần TOTP`;
+    case "runner_file": return en ? `an older ucr on runner ${n} still has require_totp in runner.toml` : `ucr bản cũ trên runner ${n} còn bật require_totp trong runner.toml`;
+    case "passkey": return en ? `runner ${n} only takes passkey approvals` : `runner ${n} chỉ nhận việc duyệt bằng passkey`;
+    default: return w.kind;
+  }
+}
+function totpWhy(r) {
+  const why = r.totp_why || [];
+  if (!why.length) return null;
+  const runner = why.some(w => w.kind === "runner" || w.kind === "runner_file");
+  return h("div", {class: "totp-why"}, h("span", null, h("b", null, tr("Cần TOTP vì") + ":"), " " + why.map(totpReason).join("; ") + "."),
+    runner ? h("button", {class: "link", onclick: () => go("runners")}, "Đổi ở tab Runner") : null);
+}
+
 async function viewRequests(body) {
   const list = await api("GET", "/api/requests");
   const pending = list.filter(r => r.state === "pending");
@@ -238,6 +258,7 @@ async function viewRequests(body) {
       h("div", {class: "muted"}, `Agent: ${r.caller}${r.app ? " (" + r.app + ")" : ""}${r.device ? " · " + tr("Thiết bị") + ": " + r.device : ""} · Mã: ${r.hash.slice(0, 8)} · ${new Date(r.created).toLocaleTimeString()}`),
       h("pre", null, r.display),
       r.reason ? h("div", {class: "muted"}, "Lý do (agent tự khai, chưa kiểm chứng): " + r.reason) : null,
+      r.state === "pending" ? totpWhy(r) : null,
       r.passkey && r.state === "pending" ? h("div", {class: "note"}, tr("Runner của yêu cầu này chỉ nhận việc duyệt bằng passkey, và tự kiểm chữ ký đó.")) : null,
       r.state === "pending" ? h("div", null, pick ? h("label", null, h("span", null, "Secret dùng cho lần này"), pick) : null, r.totp && !r.passkey ? code : null,
         h("div", {class: "row"}, r.passkey ? null : h("button", {class: "primary", onclick: act(true)}, "Duyệt"),
@@ -1738,6 +1759,29 @@ function enrollBox(rinfo, done) {
   return {el: box, open};
 }
 
+// The runner's TOTP setting. Dropping it needs a current code when TOTP is on.
+function runnerTotp(r, redraw) {
+  const i = r.info || {};
+  const msg = h("div", {class: "err", role: "alert"});
+  const code = h("input", {inputmode: "numeric", maxlength: 6, autocomplete: "one-time-code", placeholder: "Mã TOTP", "aria-label": "Mã TOTP", class: "code-in", hidden: true});
+  const ok = h("button", {class: "small", hidden: true}, "Xác nhận");
+  const save = async mode => {
+    msg.textContent = "";
+    try { await api("PUT", `/api/runners/${encodeURIComponent(r.name)}/totp`, {totp: mode, code: code.value}); redraw(); }
+    catch (e) { msg.textContent = tr(e.message); }
+  };
+  const sel = select(r.totp, [["always", tr("Luôn cần TOTP")], ["secrets", tr("Theo cài đặt của secret")]], v => {
+    // Weakening asks for a code first; going back to always saves at once.
+    if (v === "secrets" && state.status && state.status.totp) { code.hidden = ok.hidden = false; code.focus(); return; }
+    save(v);
+  }, "TOTP khi duyệt");
+  ok.addEventListener("click", () => save("secrets"));
+  code.addEventListener("keydown", e => { if (e.key === "Enter") save("secrets"); });
+  return h("div", {class: "runner-totp"}, h("div", {class: "row tight"}, sel, code, ok),
+    h("small", {class: "muted"}, r.totp === "always" ? tr("Mọi việc trên runner này đều cần mã TOTP, kể cả khi secret đặt không cần.") : tr("Secret quyết định: secret đặt không cần TOTP và tự chạy thì việc chạy ngay.")),
+    i.require_totp ? h("div", {class: "warn-line"}, tr("ucr trên máy này là bản cũ, còn đọc require_totp = true trong runner.toml nên vẫn đòi TOTP. Cập nhật ucr hoặc xoá dòng đó.")) : null, msg);
+}
+
 // One runner: state, what it reports about itself, its last jobs.
 function runnerCard(r, runs, redraw) {
   const i = r.info || {};
@@ -1761,7 +1805,7 @@ function runnerCard(r, runs, redraw) {
       row("Máy", [i.host, [i.os, i.arch].filter(Boolean).join("/")].filter(Boolean).join(" · ") || "—"),
       row("Chạy bằng", i.user ? `${i.user}${i.uid >= 0 ? " (uid " + i.uid + ")" : ""}` : "—"),
       row("Root qua sudo", i.sudo ? tr("cho phép, mật khẩu đi kèm từng việc") : tr("không")),
-      row("TOTP", i.require_totp ? tr("bắt buộc khi duyệt") : tr("không bắt buộc")),
+      row("TOTP khi duyệt", runnerTotp(r, redraw)),
       row("Passkey", i.require_passkey ? `${tr("bắt buộc, runner tự kiểm chữ ký")} · ${i.passkeys} ${tr("passkey đã ghim")}` : tr("không bắt buộc")),
       row("Được chạy", h("span", {class: "chips"}, allow)),
       row("Phiên bản", i.version || "—"),

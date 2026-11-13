@@ -126,7 +126,21 @@ pub struct RunnerRec {
     pub age_key: String,
     pub token_hash: String,
     pub created: String,
+    /// TOTP when approving jobs for this runner: empty or `always` asks
+    /// every time; `secrets` follows the rules of the secrets used.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub totp: String,
 }
+
+impl RunnerRec {
+    /// Whether every job for this runner needs a TOTP code.
+    pub fn totp_always(&self) -> bool {
+        self.totp != RUNNER_TOTP_SECRETS
+    }
+}
+
+/// `RunnerRec::totp` value that leaves TOTP to the secrets.
+pub const RUNNER_TOTP_SECRETS: &str = "secrets";
 
 fn is_zero(n: &i64) -> bool {
     *n == 0

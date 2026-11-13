@@ -16,13 +16,13 @@ use serde_json::{Value, json};
 use tokio::sync::{Notify, oneshot};
 use zeroize::Zeroizing;
 
-use super::{Core, Error, Inner, Result, fields, pick, rand_hex, rfc3339_nano, unix};
+use super::{Core, Error, Inner, Result, TotpWhy, fields, pick, rand_hex, rfc3339_nano, unix};
 use crate::policy::{self, Action, RunResult, gourl};
 use crate::runner::proto::{
     self, EnrollIn, EnrollOut, Info, JOB_GRACE_SECS, Job, JobBody, JobResult, ONLINE_SECS,
     POLL_WAIT_SECS, REQUEST_SKEW_SECS, ResultBody, Signed, VERSION, Values,
 };
-use crate::state::RunnerRec;
+use crate::state::{RUNNER_TOTP_SECRETS, RunnerRec};
 
 const CODE_TTL: Duration = Duration::from_secs(10 * 60);
 const CODE_LETTERS: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
@@ -72,6 +72,8 @@ pub struct RunnerView {
     pub name: String,
     pub created: String,
     pub fingerprint: String,
+    /// `always` or `secrets`, as set on the Runner tab.
+    pub totp: String,
     pub online: bool,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub last_seen: String,
@@ -207,6 +209,7 @@ impl Core {
             age_key: input.age_key.clone(),
             token_hash: String::new(),
             created: rfc3339_nano(now),
+            totp: String::new(),
         };
         g.st.as_mut().unwrap().runners.insert(name.clone(), rec);
         g.runners.code.clear();
@@ -344,6 +347,11 @@ impl Core {
                     name: r.name.clone(),
                     created: r.created.clone(),
                     fingerprint: proto::fingerprint(&r.sign_key),
+                    totp: if r.totp_always() {
+                        "always".into()
+                    } else {
+                        RUNNER_TOTP_SECRETS.into()
+                    },
                     online: g.runners.online(&r.name, now),
                     last_seen: l.map(|l| rfc3339_nano(l.seen)).unwrap_or_default(),
                     info: l.map(|l| l.info.clone()),
@@ -361,7 +369,7 @@ impl Core {
             .map(|r| {
                 let i = r.info.unwrap_or_default();
                 json!({"name": r.name, "online": r.online, "os": i.os, "user": i.user,
-                       "sudo": i.sudo, "require_totp": i.require_totp, "allow": i.allow})
+                       "sudo": i.sudo, "require_totp": r.totp == "always" || i.require_totp, "allow": i.allow})
             })
             .collect())
     }
@@ -405,13 +413,57 @@ impl Core {
         Ok(())
     }
 
-    /// Whether the runner said it only takes jobs approved with TOTP.
-    pub(super) fn runner_needs_totp_locked(&self, g: &Inner, name: &str) -> bool {
-        !name.is_empty()
-            && g.runners
-                .live
-                .get(name)
-                .is_some_and(|l| l.info.require_totp)
+    /// Why jobs for this runner need TOTP: its setting on the Runner tab,
+    /// an older ucr that still reads require_totp from runner.toml, or a
+    /// passkey requirement (a passkey approval stands in for the code).
+    pub(super) fn runner_totp_reasons_locked(&self, g: &Inner, name: &str) -> Vec<TotpWhy> {
+        if name.is_empty() {
+            return vec![];
+        }
+        let why = |k: &str| TotpWhy {
+            kind: k.into(),
+            name: name.into(),
+        };
+        let mut out = vec![];
+        if g.st
+            .as_ref()
+            .and_then(|s| s.runners.get(name))
+            .is_some_and(|r| r.totp_always())
+        {
+            out.push(why("runner"));
+        }
+        let live = g.runners.live.get(name);
+        if live.is_some_and(|l| l.info.require_totp) {
+            out.push(why("runner_file"));
+        }
+        if live.is_some_and(|l| l.info.require_passkey) {
+            out.push(why("passkey"));
+        }
+        out
+    }
+
+    /// Sets whether every job for a runner needs TOTP. Dropping that needs a
+    /// current code, so an open session alone cannot weaken approvals.
+    pub fn set_runner_totp(&self, name: &str, mode: &str, code: &str) -> Result<()> {
+        if !matches!(mode, "always" | RUNNER_TOTP_SECRETS) {
+            return Err(Error::Msg("totp must be always or secrets".into()));
+        }
+        let mut g = self.inner();
+        let st = g.st.as_ref().ok_or(Error::Locked)?;
+        let r = st.runners.get(name).ok_or(Error::NotFound)?;
+        if mode == RUNNER_TOTP_SECRETS && r.totp_always() && st.totp_enabled {
+            self.check_totp_locked(&mut g, code)?;
+        }
+        let st = g.st.as_mut().ok_or(Error::Locked)?;
+        let r = st.runners.get_mut(name).ok_or(Error::NotFound)?;
+        r.totp = if mode == "always" {
+            String::new()
+        } else {
+            mode.into()
+        };
+        self.save_locked(&mut g)?;
+        self.log("runner_totp", "web", json!({"name": name, "totp": mode}));
+        Ok(())
     }
 
     /// Sends an approved command to its runner and waits for the result.

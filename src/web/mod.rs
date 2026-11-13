@@ -513,6 +513,7 @@ impl Server {
             )
             .route("/api/runners/code", ui(post(runner_code)))
             .route("/api/runners/{name}", ui(delete(runner_delete)))
+            .route("/api/runners/{name}/totp", ui(put(runner_totp)))
             .route("/api/settings", ui(put(put_settings)))
             .route("/api/templates", ui(get(templates).put(put_template)))
             .route("/api/templates/{id}", ui(delete(delete_template)))
@@ -1837,6 +1838,25 @@ async fn runner_delete(
 ) -> Response {
     need_auth!(s, h);
     tryf!(s.core.delete_runner(&name));
+    ok_json()
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+struct RunnerTotpIn {
+    totp: String,
+    code: String,
+}
+
+async fn runner_totp(
+    State(s): State<Arc<Server>>,
+    h: HeaderMap,
+    Path(name): Path<String>,
+    b: Body,
+) -> Response {
+    need_auth!(s, h);
+    let i: RunnerTotpIn = body!(b);
+    tryf!(s.core.set_runner_totp(&name, &i.totp, &i.code));
     ok_json()
 }
 
