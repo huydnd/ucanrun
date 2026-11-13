@@ -334,3 +334,5 @@ ol.steps-list > li { display: grid; gap: 6px; min-width: 0; }
 .copyblock .icon { position: absolute; top: 4px; right: 4px; }
 .copyblock .muted { display: block; font-size: 12px; margin-top: 2px; }
 .copyline { min-width: 0; } ol.steps-list > li > * { min-width: 0; max-width: 100%; }
+/* Messages read as sentences; the text itself stays as sent, for translation. */
+.err::first-letter, .warn-line::first-letter { text-transform: uppercase; }

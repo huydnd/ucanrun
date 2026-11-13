@@ -444,6 +444,10 @@ const errorText = [
   [/secret_choices is required/, "Hãy tích ít nhất một secret được phép chọn."],
   [/secret choice needs a human/, "Chọn secret khi duyệt thì phải có người duyệt. Đổi hành động đó sang \"Luôn hỏi tôi\" trước."],
 ];
+// Messages start with a capital letter. Only for display: the text itself
+// stays as the server sent it, since translations match it word for word.
+const sentence = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+
 function viErr(msg) {
   for (const [re, t] of errorText) { const m = msg.match(re); if (m) return tr(typeof t === "function" ? t(m) : t); }
   return tr(msg);
@@ -692,7 +696,7 @@ async function viewProfiles(body, keptImport) {
         h("div", {class: "muted"}, c.base_url + " · " + c.auth.type + (c.auth.secret ? " · " + c.auth.secret : c.auth.choices && c.auth.choices.length ? " · " + c.auth.choices.join(" / ") : ""))),
         h("span", {class: "acts"}, h("button", {onclick: () => openBuilder(newDraft({kind: "conn", connection: c.name, url: "/"}))}, "Hành động mới"),
           h("button", {onclick: () => openConn(c)}, "Sửa"),
-          h("button", {class: "danger", onclick: async () => { if (confirm(tr(`Xoá dịch vụ ${c.name}?`))) { try { await api("DELETE", "/api/connections/" + encodeURIComponent(c.name)); viewProfiles(body); } catch (e) { alert(viErr(e.message)); } } }}, "Xoá")))) : h("p", {class: "muted"}, "Chưa có dịch vụ API nào.")),
+          h("button", {class: "danger", onclick: async () => { if (confirm(tr(`Xoá dịch vụ ${c.name}?`))) { try { await api("DELETE", "/api/connections/" + encodeURIComponent(c.name)); viewProfiles(body); } catch (e) { alert(sentence(viErr(e.message))); } } }}, "Xoá")))) : h("p", {class: "muted"}, "Chưa có dịch vụ API nào.")),
     h("details", {class: "card"}, h("summary", null, tr("Sao lưu và chép sang máy khác")),
       h("p", {class: "muted"}, "Xuất hoặc nhập hành động và dịch vụ API dưới dạng JSON. File chỉ có tên secret, không có giá trị."),
       h("div", {class: "row"}, exportBtn, importOpenBtn, fileInput), ioErr),
@@ -983,7 +987,7 @@ function mcpSetup(a, os) {
   const sys = win ? "win" : os === "darwin" ? "mac" : "unix";
   const file = a.file ? (a.file[sys] || a.file.unix) : "";
   const ucr = win ? "$env:USERPROFILE\\.local\\bin\\ucr.exe" : "~/.local/bin/ucr";
-  const shown = win ? "C:\\Users\\<you>\\.local\\bin\\ucr.exe" : "/home/<you>/.local/bin/ucr";
+  const shown = win ? "C:\\Users\\<username>\\.local\\bin\\ucr.exe" : "/home/<username>/.local/bin/ucr";
   if (a.kind === "cli") return {cmd: win ? `claude mcp add ucanrun -s user -- "${ucr}" mcp` : `claude mcp add ucanrun -s user -- ${ucr} mcp`};
   if (a.kind === "stdio") return {cmd: win ? `& "${ucr}" mcp` : `${ucr} mcp`, note: "Lệnh MCP qua stdio, không cần biến môi trường."};
   if (a.kind === "toml") {
