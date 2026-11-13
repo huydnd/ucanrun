@@ -23,6 +23,10 @@ pub trait Handler: Send + Sync {
     fn needs_totp(&self, id: &str) -> bool;
     fn secret_at(&self, id: &str, index: usize) -> Option<String>;
     fn pair(&self, code: &str, user_id: i64, chat_id: i64) -> bool;
+    /// Pairs the account `user` on another approval channel.
+    fn pair_chat(&self, _kind: &str, _code: &str, _user: &str, _chat: &str) -> bool {
+        false
+    }
 }
 
 pub type Translate = Arc<dyn Fn(&str) -> String + Send + Sync>;

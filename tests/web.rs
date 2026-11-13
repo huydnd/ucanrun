@@ -2958,3 +2958,30 @@ async fn mcp_starts_without_a_token_and_says_what_to_ask() {
         out.stdout
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn chat_webhooks_pass_the_gate_but_need_a_signature() {
+    let e = setup(minute()).await;
+    let mut s = Server::new(e.c.clone(), "setup-tok", e.dir.join("audit.jsonl"), false);
+    s.gate_token = "open sesame gate code".into();
+    let (url, _) = start(s).await;
+    let anon = Http::new(&url);
+    // No channel is set up: the hook answers 404, not the gate page, and no
+    // CSRF header is needed since platforms cannot send one.
+    let r = anon
+        .send("POST", "/hooks/line", Some(b"{}".to_vec()), &[])
+        .await;
+    assert_eq!(r.code, 404, "{}", r.text());
+    assert!(!r.text().contains("ucanrun"));
+    let r = anon
+        .send("GET", "/hooks/whatsapp?hub.mode=subscribe", None, &[])
+        .await;
+    assert_eq!(r.code, 404);
+    // Only /hooks/ skips the gate.
+    let r = anon
+        .send("POST", "/hookss/line", Some(b"{}".to_vec()), &[])
+        .await;
+    assert_eq!(r.code, 401);
+    let r = anon.send("GET", "/api/chats", None, &[]).await;
+    assert_eq!(r.code, 401);
+}

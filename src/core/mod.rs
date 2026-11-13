@@ -13,6 +13,7 @@
 //! `setup`, `login`, `unlock_at_start` and `totp_reset` run scrypt and block
 //! for about a second; call them from `spawn_blocking` in async code.
 
+mod chats;
 mod devices;
 mod fields;
 mod health;
@@ -23,6 +24,7 @@ mod system;
 mod tests;
 
 pub use crate::state::{TelegramCfg, Token};
+pub use chats::{ChatInput, ChatView};
 pub use fields::{FieldInfo, SecretInfo};
 pub use health::HealthItem;
 pub use runners::{RunnerAuth, RunnerView, unsigned as runners_unsigned};
@@ -391,6 +393,8 @@ pub struct Options {
     /// Permits profiles that run programs. Off by default: the default image
     /// only calls APIs.
     pub allow_exec: bool,
+    /// Base URLs of the other chat APIs, by kind. Overrides for tests.
+    pub chat_api: BTreeMap<String, String>,
     /// "vi" or "en" for Telegram messages. Empty means English.
     pub lang: String,
     pub now: Option<Clock>,
@@ -416,6 +420,8 @@ struct Inner {
     /// Last web, Telegram or agent activity, for the idle auto lock.
     last_active: SystemTime,
     runners: runners::Hub,
+    /// Approval channels besides Telegram, by kind, while unlocked.
+    chats: BTreeMap<String, Arc<dyn crate::chat::Channel>>,
 }
 
 /// Bounds of the idle auto lock, in minutes.
@@ -436,7 +442,7 @@ pub struct Core {
 }
 
 /// Lets the bot reach the core without keeping it alive.
-struct Relay(Weak<Core>);
+pub(crate) struct Relay(Weak<Core>);
 
 impl Handler for Relay {
     fn decide(
@@ -463,6 +469,11 @@ impl Handler for Relay {
         self.0
             .upgrade()
             .is_some_and(|c| c.pair(code, user_id, chat_id))
+    }
+    fn pair_chat(&self, kind: &str, code: &str, user: &str, chat: &str) -> bool {
+        self.0
+            .upgrade()
+            .is_some_and(|c| c.pair_chat(kind, code, user, chat))
     }
 }
 
@@ -686,6 +697,7 @@ impl Core {
                 last_active: UNIX_EPOCH,
                 recent: HashMap::new(),
                 runners: runners::Hub::default(),
+                chats: BTreeMap::new(),
             }),
             login_mu: Mutex::new(()),
             rt,
@@ -855,7 +867,7 @@ impl Core {
                 g.audit_cut = true;
                 self.log("audit_truncated", "web", json!({"count": count}));
             }
-            self.start_bot_locked(&mut g);
+            self.start_channels_locked(&mut g);
         }
         self.log("login", "web", Value::Null);
         Ok(())
@@ -967,7 +979,7 @@ impl Core {
         }
         self.vault.adopt(id);
         self.load_locked(&mut g)?;
-        self.start_bot_locked(&mut g);
+        self.start_channels_locked(&mut g);
         self.log("auto_unlock", "file", Value::Null);
         Ok(())
     }
@@ -988,6 +1000,7 @@ impl Core {
             self.finish_locked(&mut g, &id, ReqState::Denied, "lock");
         }
         self.stop_bot_locked(&mut g);
+        g.chats.clear();
         self.log("lock", actor, Value::Null);
         if let Err(e) = self.save_locked(&mut g) {
             eprintln!("ERROR state save: {e}");
@@ -1028,6 +1041,12 @@ impl Core {
         self.rt.spawn(bot.clone().run(rx));
         g.bot = Some(bot);
         g.bot_stop = Some(tx);
+    }
+
+    /// Starts Telegram and every other configured approval channel.
+    fn start_channels_locked(&self, g: &mut Inner) {
+        self.start_bot_locked(g);
+        self.start_chats_locked(g);
     }
 
     // --- Telegram configuration ---
@@ -1075,7 +1094,7 @@ impl Core {
 
     pub fn new_pair_code(&self) -> Result<String> {
         let mut g = self.inner();
-        if g.bot.is_none() {
+        if g.bot.is_none() && g.chats.is_empty() {
             return Err(Error::Msg("chưa cấu hình bot".into()));
         }
         g.pair_code = new_pair_code();
@@ -1781,6 +1800,32 @@ impl Core {
             self.start_locked(g, &id, "auto");
             return Ok(g.reqs[&id].req.clone());
         }
+        let chats = if notify {
+            self.paired_chats_locked(g)
+        } else {
+            vec![]
+        };
+        if !chats.is_empty() {
+            let text = lang::approval_text(&req, self.vi());
+            let (short, choices) = (req.hash[..16].to_string(), req.choices.clone());
+            for ch in chats {
+                let (me, id, short, text, choices) = (
+                    self.me.clone(),
+                    id.clone(),
+                    short.clone(),
+                    text.clone(),
+                    choices.clone(),
+                );
+                self.rt.spawn(async move {
+                    if let Err(e) = ch.notify(&id, &short, &text, &choices).await {
+                        eprintln!("WARN {} notify: {e}", ch.kind());
+                        if let Some(c) = me.upgrade() {
+                            c.log("notify_failed", ch.kind(), json!({"id": id}));
+                        }
+                    }
+                });
+            }
+        }
         let paired = g.st.as_ref().is_some_and(|s| s.telegram.user_id != 0);
         if let (true, true, Some(bot)) = (notify, paired, g.bot.clone()) {
             let text = lang::approval_text(&req, self.vi());
@@ -1821,10 +1866,18 @@ impl Core {
             by,
             json!({"id": req.id, "hash": req.hash}),
         );
-        if let Some(bot) = g.bot.clone() {
+        let chats = self.paired_chats_locked(g);
+        if g.bot.is_some() || !chats.is_empty() {
             let text = lang::finish_text(&req, self.vi());
-            self.rt
-                .spawn(async move { bot.finish(&req.id, &text).await });
+            if let Some(bot) = g.bot.clone() {
+                let (req, text) = (req.clone(), text.clone());
+                self.rt
+                    .spawn(async move { bot.finish(&req.id, &text).await });
+            }
+            for ch in chats {
+                let (id, text) = (req.id.clone(), text.clone());
+                self.rt.spawn(async move { ch.finish(&id, &text).await });
+            }
         }
     }
 

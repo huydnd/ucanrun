@@ -496,6 +496,12 @@ impl Server {
             .route("/api/devices", ui(get(devices)))
             .route("/api/runners", ui(get(runners_list)))
             .route("/api/system", ui(get(system_info)))
+            .route("/api/chats", ui(get(chats_list)))
+            .route("/api/chats/{kind}", ui(put(chat_set).delete(chat_delete)))
+            .route(
+                "/hooks/{kind}",
+                get(chat_hook).post(chat_hook).fallback(unrouted),
+            )
             .route("/api/runners/code", ui(post(runner_code)))
             .route("/api/runners/{name}", ui(delete(runner_delete)))
             .route("/api/settings", ui(put(put_settings)))
@@ -616,8 +622,14 @@ async fn agent_headers(req: Request, next: Next) -> Response {
 
 /// Blocks cross-site writes: a custom header cannot be sent cross-origin
 /// without a CORS preflight, and this server never answers one.
+/// Webhooks from chat platforms: the platform signs each call, and the
+/// channel checks that signature before reading anything.
+fn is_hook(path: &str) -> bool {
+    path.starts_with("/hooks/")
+}
+
 async fn csrf(req: Request, next: Next) -> Response {
-    if req.method() != Method::GET && req.method() != Method::HEAD {
+    if req.method() != Method::GET && req.method() != Method::HEAD && !is_hook(req.uri().path()) {
         let h = req.headers();
         let site = header_str(h, "sec-fetch-site");
         if header_str(h, "x-ucanrun") != "1" || (!site.is_empty() && site != "same-origin") {
@@ -647,7 +659,11 @@ fn gate_deny(code: StatusCode) -> Response {
 /// except the health check, so strangers can neither reach the login form nor
 /// learn anything about the vault.
 async fn gate(State(s): State<Arc<Server>>, req: Request, next: Next) -> Response {
-    if s.gate_token.is_empty() || req.uri().path() == "/healthz" || s.gate_open(req.headers()) {
+    if s.gate_token.is_empty()
+        || req.uri().path() == "/healthz"
+        || is_hook(req.uri().path())
+        || s.gate_open(req.headers())
+    {
         return next.run(req).await;
     }
     if req.method() != Method::POST || req.uri().path() != "/gate" {
@@ -707,6 +723,7 @@ async fn status(State(s): State<Arc<Server>>, h: HeaderMap) -> Response {
     let mut out = json!({"initialized": c.initialized(), "locked": c.locked(), "authed": authed});
     if authed {
         out["telegram"] = json!(c.telegram_status());
+        out["any_channel"] = json!(c.any_channel_paired());
         out["totp"] = json!(c.totp_enabled());
         out["exec"] = json!(c.exec_enabled());
         out["auto_lock_min"] = json!(c.auto_lock_min());
@@ -1521,6 +1538,74 @@ fn download_url() -> String {
         Ok(v) if !v.is_empty() => v.trim_end_matches('/').to_string(),
         _ => "https://github.com/huydnd/ucanrun/releases/latest/download".into(),
     }
+}
+
+async fn chats_list(State(s): State<Arc<Server>>, h: HeaderMap) -> Response {
+    need_auth!(s, h);
+    write_json(200, &tryf!(s.core.chats()))
+}
+
+async fn chat_set(
+    State(s): State<Arc<Server>>,
+    h: HeaderMap,
+    Path(kind): Path<String>,
+    b: Body,
+) -> Response {
+    need_auth!(s, h);
+    let input: core::ChatInput = body!(b);
+    write_json(200, &tryf!(s.core.set_chat(&kind, input).await))
+}
+
+async fn chat_delete(
+    State(s): State<Arc<Server>>,
+    h: HeaderMap,
+    Path(kind): Path<String>,
+) -> Response {
+    need_auth!(s, h);
+    tryf!(s.core.delete_chat(&kind));
+    ok_json()
+}
+
+/// One call from a chat platform. Its signature is the only credential.
+async fn chat_hook(
+    State(s): State<Arc<Server>>,
+    Path(kind): Path<String>,
+    method: Method,
+    uri: axum::http::Uri,
+    h: HeaderMap,
+    b: Body,
+) -> Response {
+    let Ok(Ok(body)) = tokio::time::timeout(READ_TIMEOUT, axum::body::to_bytes(b, MAX_BODY)).await
+    else {
+        return err_json(400, "bad body");
+    };
+    let headers: Vec<(String, String)> = h
+        .iter()
+        .filter_map(|(k, v)| {
+            v.to_str()
+                .ok()
+                .map(|v| (k.as_str().to_ascii_lowercase(), v.to_string()))
+        })
+        .collect();
+    let r = s
+        .core
+        .chat_hook(
+            &kind,
+            method.as_str(),
+            uri.query().unwrap_or(""),
+            &headers,
+            &body,
+        )
+        .await;
+    (
+        StatusCode::from_u16(r.status).unwrap_or(StatusCode::BAD_REQUEST),
+        [
+            (header::CONTENT_TYPE, r.content_type),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        r.body,
+    )
+        .into_response()
 }
 
 async fn system_info(State(s): State<Arc<Server>>, h: HeaderMap) -> Response {

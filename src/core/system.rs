@@ -43,6 +43,8 @@ pub struct SystemInfo {
     pub disk_total_mb: Option<u64>,
     pub audit_entries: usize,
     pub telegram: TelegramLink,
+    /// Discord, LINE, WhatsApp.
+    pub chats: Vec<super::ChatView>,
     pub runners: usize,
     pub runners_online: usize,
     pub tokens: usize,
@@ -139,6 +141,7 @@ impl Core {
             disk_total_mb: disk.map(|d| d.1),
             audit_entries,
             telegram,
+            chats: self.chats().unwrap_or_default(),
             runners_online: runners.iter().filter(|r| r.online).count(),
             runners: runners.len(),
             tokens,
