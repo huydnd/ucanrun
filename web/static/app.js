@@ -1407,7 +1407,17 @@ function systemCard(x, go) {
 }
 
 // Shell commands to put ucr on a machine, for the agent and runner guides.
-const systems = [["linux-amd64", "Linux x86_64"], ["linux-arm64", "Linux ARM64"], ["darwin", "macOS"], ["windows", "Windows"]];
+const systems = [["linux-amd64", "Linux x86_64"], ["linux-arm64", "Linux ARM64"], ["wsl", "WSL"], ["darwin", "macOS"], ["windows", "Windows"]];
+// WSL runs the Linux x86_64 build.
+const buildOf = os => os === "wsl" ? "linux-amd64" : os;
+// Keeps a WSL distribution running after its last window closes, so a
+// runner inside it stays online. Runs at Windows sign-in, without a window.
+const WSL_KEEPALIVE = 'wsl -l -q; $d = Read-Host "Distribution (e.g. Ubuntu-24.04)"; '
+  + '$a = New-ScheduledTaskAction -Execute "conhost.exe" -Argument "--headless wsl.exe -d $d --exec /bin/sleep infinity"; '
+  + '$t = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME; '
+  + '$s = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries; '
+  + 'Register-ScheduledTask -TaskName "WSL keep alive (ucanrun runner)" -Action $a -Trigger $t -Settings $s -Force | Out-Null; '
+  + 'Start-ScheduledTask -TaskName "WSL keep alive (ucanrun runner)"';
 const guessOs = () => /Windows/.test(navigator.userAgent) ? "windows" : /Mac/.test(navigator.userAgent) ? "darwin" : "linux-amd64";
 const WIN_UCR = '"$env:USERPROFILE\\.local\\bin\\ucr.exe"';
 // Each command checks the download against the release's SHA256SUMS
@@ -1418,6 +1428,7 @@ function fetchCmd(dl, os, file, dest) {
   return `d=$(mktemp -d) && curl -fsSL -o "$d/${file}" ${dl}/${file} && curl -fsSL -o "$d/SHA256SUMS" ${dl}/SHA256SUMS && (cd "$d" && grep " ${file}\$" SHA256SUMS | ${sum}) && mkdir -p "$(dirname ${dest})" && install -m 755 "$d/${file}" ${dest}`;
 }
 function installCmd(dl, os) {
+  os = buildOf(os);
   if (os === "windows") return fetchCmd(dl, os, "ucr-windows-amd64.exe", WIN_UCR);
   // The shell picks the Mac build, since browsers report every Mac as Intel.
   const file = os === "darwin" ? "ucr-darwin-$(uname -m | sed s/x86_64/amd64/)" : `ucr-${os}`;
@@ -1454,13 +1465,28 @@ function enrollBox(rinfo, done) {
       step(2, "Ghép nối", enroll("~/.local/bin/ucr")),
       step(3, "Liệt kê chương trình được chạy", "open -e ~/.config/ucanrun/runner.toml"),
       step(4, "Chạy", "~/.local/bin/ucr runner serve")];
-    return [
-      step(1, "Tải ucr và script cài đặt", fetchCmd(dl, os, `ucr-${os}`, "/tmp/ucr"), fetchCmd(dl, os, "runner-setup-linux.sh", "/tmp/runner-setup-linux.sh")),
-      step(2, "Tạo user ucr-runner và service (cần sudo)", 'sudo SUDO_CMDS="/usr/bin/systemctl /usr/bin/journalctl" sh /tmp/runner-setup-linux.sh /tmp/ucr',
+    // WSL: the Linux steps inside the distribution, after systemd is on,
+    // and a Windows task that keeps the distribution running.
+    const wsl = os === "wsl";
+    const n0 = wsl ? 1 : 0;
+    const b = buildOf(os);
+    const linux = [
+      step(n0 + 1, "Tải ucr và script cài đặt", fetchCmd(dl, b, `ucr-${b}`, "/tmp/ucr"), fetchCmd(dl, b, "runner-setup-linux.sh", "/tmp/runner-setup-linux.sh")),
+      step(n0 + 2, "Tạo user ucr-runner và service (cần sudo)", 'sudo SUDO_CMDS="/usr/bin/systemctl /usr/bin/journalctl" sh /tmp/runner-setup-linux.sh /tmp/ucr',
         h("small", {class: "muted"}, tr("SUDO_CMDS là chương trình được chạy bằng root. Script in ra mật khẩu sudo của ucr-runner một lần: lưu nó thành secret, bật dùng trong lệnh và luôn cần TOTP. Bỏ SUDO_CMDS nếu không cần root."))),
-      step(3, "Ghép nối", `sudo -u ucr-runner UCANRUN_RUNNER_DIR=/var/lib/ucr-runner ${enroll("/usr/local/bin/ucr")}`),
-      step(4, "Liệt kê chương trình được chạy", "sudoedit /var/lib/ucr-runner/runner.toml"),
-      step(5, "Chạy nền", "sudo systemctl enable --now ucr-runner")];
+      step(n0 + 3, "Ghép nối", `sudo -u ucr-runner UCANRUN_RUNNER_DIR=/var/lib/ucr-runner ${enroll("/usr/local/bin/ucr")}`),
+      step(n0 + 4, "Liệt kê chương trình được chạy", "sudoedit /var/lib/ucr-runner/runner.toml",
+        wsl ? h("small", {class: "muted"}, tr("Chương trình Windows gọi được qua /mnt/c, ví dụ /mnt/c/Windows/System32/ipconfig.exe; chúng chạy với quyền user Windows của bạn, không phải ucr-runner.")) : null),
+      step(n0 + 5, "Chạy nền", "sudo systemctl enable --now ucr-runner")];
+    if (!wsl) return linux;
+    return [
+      step(1, "Mở terminal của bản Linux trong WSL và bật systemd nếu chưa có",
+        h("small", {class: "muted"}, tr("Lệnh dưới in ra systemd là đã bật. Nếu không, chạy lệnh thứ hai, rồi trong PowerShell chạy wsl --shutdown và mở lại terminal.")),
+        "ps -p 1 -o comm=", "printf '[boot]\\nsystemd=true\\n' | sudo tee -a /etc/wsl.conf"),
+      ...linux,
+      step(7, "Giữ WSL chạy nền khi đóng cửa sổ (PowerShell Admin trên Windows)",
+        h("small", {class: "muted"}, tr("WSL tự tắt khi không còn cửa sổ nào, runner tắt theo. Lệnh này tạo tác vụ chạy khi đăng nhập Windows để giữ WSL sống, không hiện cửa sổ. Gỡ: Unregister-ScheduledTask -TaskName \"WSL keep alive (ucanrun runner)\".")),
+        WSL_KEEPALIVE)];
   };
   const open = async () => {
     const c = await api("POST", "/api/runners/code");

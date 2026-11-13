@@ -60,6 +60,12 @@ in `C:\ProgramData\ssh\administrators_authorized_keys`, saved in ucanrun with
 **Always ask for TOTP**, through a fixed action. Do not let agents write those
 commands themselves: SSH hands the command to a shell on Windows.
 
+## WSL
+
+A runner can also live in WSL, as a Linux runner with root through sudo. See
+[runners.md](runners.md#wsl-linux-inside-windows): turn on systemd, run the
+Linux steps inside WSL, and add the task that keeps WSL running.
+
 ## Limits
 
 - The server itself does not run on Windows.

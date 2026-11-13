@@ -121,6 +121,48 @@ sudoedit /var/lib/ucr-runner/runner.toml
 sudo systemctl enable --now ucr-runner
 ```
 
+### WSL (Linux inside Windows)
+
+WSL is Linux, so a runner there is set up like any Linux runner, with two
+additions. Pick **WSL** in the **Add runner** box for the exact commands.
+
+1. **systemd must be on.** In the WSL terminal, `ps -p 1 -o comm=` prints
+   `systemd` when it is. If not:
+
+   ```sh
+   printf '[boot]\nsystemd=true\n' | sudo tee -a /etc/wsl.conf
+   ```
+
+   then run `wsl --shutdown` in PowerShell and open the terminal again.
+2. Run the Linux steps above inside WSL, with the `ucr-linux-amd64` build.
+3. **Keep WSL running.** WSL stops when its last window closes, and the
+   runner with it. In an elevated PowerShell on Windows, create a task that
+   keeps the distribution running from sign-in, without a window:
+
+   ```powershell
+   $d = "Ubuntu-24.04"   # wsl -l -q lists the names
+   $a = New-ScheduledTaskAction -Execute "conhost.exe" -Argument "--headless wsl.exe -d $d --exec /bin/sleep infinity"
+   $t = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+   $s = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+   Register-ScheduledTask -TaskName "WSL keep alive (ucanrun runner)" -Action $a -Trigger $t -Settings $s
+   Start-ScheduledTask -TaskName "WSL keep alive (ucanrun runner)"
+   ```
+
+   When the distribution starts, systemd starts `ucr-runner`. Remove the task
+   with `Unregister-ScheduledTask -TaskName "WSL keep alive (ucanrun runner)"`.
+
+Notes:
+
+- The WSL runner and a Windows runner on the same PC are two runners, each
+  with its own pairing code.
+- WSL must reach the agent API. Over Tailscale on Windows it usually does;
+  check with `curl http://<server>:8781/healthz` inside WSL.
+- A WSL runner can start Windows programs through `/mnt/c/...` if they are in
+  `allow`. They run with your Windows user's rights, not `ucr-runner`'s, so
+  list only what is needed.
+- While Windows sleeps, or before you sign in, the runner is offline; agents
+  get `runner_offline`.
+
 ### Windows
 
 Windows has no `sudo -S`, so a Windows runner runs commands with the rights of
