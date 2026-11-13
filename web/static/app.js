@@ -68,16 +68,20 @@ async function boot() {
   const {steps} = await loadSteps();
   state.incomplete = steps.some(x => !x.done);
   state.overview = steps.every(x => x.done || skipped().includes(x.key));
-  if (!state.opened) state.tab = "start";
+  if (!state.opened) state.tab = tabOfHash() || "start";
   state.opened = true;
   renderShell();
 }
+
+// Sign-in screens: the mark, then the card.
+const authPage = card => h("div", {class: "narrow"}, h("div", {class: "auth-brand"}, h("img", {src: "logo.svg", alt: "", width: 44, height: 44}),
+  h("b", null, "ucanrun"), h("span", null, "Agent xin, bạn duyệt, ucanrun chạy. Agent không bao giờ thấy secret.")), card);
 
 function renderSetup() {
   const tok = field("Setup token (trong log của container)", {type: "password", autocomplete: "off"});
   const p1 = field("Mật khẩu chính, ít nhất 12 ký tự", {type: "password", autocomplete: "new-password"});
   const p2 = field("Nhập lại mật khẩu chính", {type: "password", autocomplete: "new-password"});
-  app.replaceChildren(h("div", {class: "narrow"}, form("Khởi tạo ucanrun", [tok, p1, p2], "Khởi tạo", async () => {
+  app.replaceChildren(authPage(form("Khởi tạo ucanrun", [tok, p1, p2], "Khởi tạo", async () => {
     if (p1.input.value !== p2.input.value) throw new Error("Hai mật khẩu không khớp");
     await api("POST", "/api/setup", {setup_token: tok.input.value, passphrase: p1.input.value});
     boot();
@@ -107,7 +111,7 @@ function renderLogin(locked) {
     card.querySelector(":scope > .row").append(pk);
     card.append(err);
   }
-  app.replaceChildren(h("div", {class: "narrow"}, card));
+  app.replaceChildren(authPage(card));
 }
 
 // Setup tabs come in the order they are needed, then the daily ones.
@@ -119,21 +123,58 @@ const flow = [
   {tab: "profiles", optional: true, text: "Để siết chặt hơn: định sẵn từng việc agent được làm, và dịch vụ API nó được gọi tới. Thường không cần: agent tự soạn yêu cầu, bạn xem và duyệt."},
 ];
 
+// Line icons, drawn in the style of Lucide (24px grid, 2px stroke). The
+// markup is constant, never data.
+const ICONS = {
+  start: '<rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/>',
+  secrets: '<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/>',
+  runners: '<rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><path d="M6 7h.01M6 17h.01"/>',
+  tokens: '<path d="M12 8V4H8"/><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M2 14h2M20 14h2M15 13v2M9 13v2"/>',
+  profiles: '<path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/>',
+  requests: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+  audit: '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>',
+  settings: '<path d="M21 4h-7M10 4H3M21 12h-9M8 12H3M21 20h-5M12 20H3M14 2v4M8 10v4M16 18v4"/>',
+  lock: '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+  more: '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
+};
+function icon(name) {
+  const s = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  for (const [k, v] of Object.entries({viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true", class: "ico"})) s.setAttribute(k, v);
+  s.innerHTML = ICONS[name] || "";
+  return s;
+}
+
+// What each page is for, under its title.
+const blurbs = {
+  start: "Tình trạng kho, kết nối và việc nên làm tiếp.",
+  requests: "Agent xin chạy việc ở đây; bạn xem đúng lệnh sẽ chạy rồi duyệt hoặc từ chối.",
+  audit: "Mọi lần chạy và thay đổi, nối thành chuỗi băm nên không sửa lén được.",
+  settings: "Kênh duyệt, đăng nhập, khoá kho và ngôn ngữ.",
+};
+
 function flowIntro(tab) {
   const i = flow.findIndex(f => f.tab === tab);
-  if (i < 0) return null;
   const f = flow[i];
-  return h("div", {class: "intro"}, h("span", {class: "stepno"}, `${tr("Bước")} ${i + 1}/${flow.length}${f.optional ? " · " + tr("tuỳ chọn") : ""}`), h("p", null, tr(f.text)));
+  const title = tab === "start" && !state.overview ? "Bắt đầu" : tab === "start" ? "Tổng quan" : tabs[tab];
+  return h("div", {class: "page-head"},
+    f ? h("span", {class: "stepno"}, `${tr("Bước")} ${i + 1}/${flow.length}${f.optional ? " · " + tr("tuỳ chọn") : ""}`) : null,
+    h("h1", null, title), h("p", null, tr(f ? f.text : blurbs[tab] || "")));
 }
 
 function flowNext(tab) {
   const i = flow.findIndex(f => f.tab === tab);
   if (i < 0) return null;
-  const go = t => () => { state.tab = t; renderShell(); window.scrollTo(0, 0); };
   const nx = flow[i + 1];
-  return h("div", {class: "row flow-next"}, i > 0 ? h("button", {onclick: go(flow[i - 1].tab)}, `← ${tr(tabs[flow[i - 1].tab])}`) : null,
-    nx ? h("button", {class: "primary", onclick: go(nx.tab)}, `${tr("Tiếp")}: ${tr(tabs[nx.tab])} →`) : h("button", {class: "primary", onclick: go("start")}, tr("Xong, về Tổng quan")));
+  return h("div", {class: "row flow-next"}, i > 0 ? h("button", {onclick: () => go(flow[i - 1].tab)}, `← ${tr(tabs[flow[i - 1].tab])}`) : null,
+    nx ? h("button", {class: "primary", onclick: () => go(nx.tab)}, `${tr("Tiếp")}: ${tr(tabs[nx.tab])} →`) : h("button", {class: "primary", onclick: () => go("start")}, tr("Xong, về Tổng quan")));
 }
+
+// Each tab has its own address (#secrets…), so links and Back work.
+function go(tab) { state.tab = tab; renderShell(); window.scrollTo(0, 0); }
+const tabOfHash = () => { const t = location.hash.slice(1); return Object.hasOwn(tabs, t) ? t : null; };
+// Escape folds the phone's "Thêm" sheet.
+document.addEventListener("keydown", e => { const n = document.querySelector("header nav.open"); if (e.key === "Escape" && n) n.querySelector(".more").click(); });
+window.addEventListener("popstate", () => { const t = tabOfHash(); if (t && t !== state.tab && document.querySelector("header nav")) go(t); });
 
 function renderShell() {
   // Views fill `body`; the step intro and the next button stay around it.
@@ -141,12 +182,23 @@ function renderShell() {
   const main = h("main", null, flowIntro(state.tab), body, flowNext(state.tab));
   // Once setup is done, the first tab becomes an overview.
   const label = (k, v) => k === "start" && state.overview ? "Tổng quan" : v;
-  const nav = h("nav", null, Object.entries(tabs).flatMap(([k, v]) => [k === "requests" ? h("span", {class: "sep", "aria-hidden": "true"}) : null,
-    h("button", {class: state.tab === k ? "on" : "", "data-req": k === "requests" ? "1" : null, onclick: () => { state.tab = k; renderShell(); }}, label(k, v))]));
+  // One nav: a sidebar on wide screens, a bottom bar on phones, where the
+  // tabs marked `sec` wait behind "Thêm".
+  const sec = ["tokens", "profiles", "audit", "settings"];
+  const group = {secrets: "Thiết lập", requests: "Hằng ngày"};
+  const nav = h("nav", {"aria-label": "Mục chính"}, Object.entries(tabs).flatMap(([k, v]) => [
+    group[k] ? h("span", {class: "group-label", "aria-hidden": "true"}, group[k]) : null,
+    h("button", {class: [state.tab === k ? "on" : "", sec.includes(k) ? "sec" : ""].join(" ").trim(), "aria-current": state.tab === k ? "page" : null,
+      "data-req": k === "requests" ? "1" : null, onclick: () => go(k)}, icon(k), h("span", {class: "lbl"}, label(k, v)))]),
+  h("button", {class: "more" + (sec.includes(state.tab) ? " on" : ""), "aria-expanded": "false", onclick: e => {
+    const open = nav.classList.toggle("open"); e.currentTarget.setAttribute("aria-expanded", String(open));
+    e.currentTarget.querySelector(".lbl").textContent = tr(open ? "Thu gọn" : "Thêm");
+  }}, icon("more"), h("span", {class: "lbl"}, "Thêm")));
   const waiting = h("span", {class: "count"});
-  api("GET", "/api/requests").then(l => { const n = l.filter(r => r.state === "pending").length; if (n) { waiting.textContent = n; nav.querySelector("[data-req]").append(" ", waiting); } }).catch(() => {});
-  app.replaceChildren(h("header", null, h("img", {class: "brand", src: "logo.svg", alt: "", width: 28, height: 28}), h("b", null, "ucanrun"), nav,
-    h("button", {onclick: async () => { await api("POST", "/api/lock"); boot(); }}, "Khoá kho")), main);
+  api("GET", "/api/requests").then(l => { const n = l.filter(r => r.state === "pending").length; if (n) { waiting.textContent = n; waiting.setAttribute("aria-label", `${n} ${tr("đang chờ duyệt")}`); nav.querySelector("[data-req]").append(waiting); } }).catch(() => {});
+  app.replaceChildren(h("header", null, h("div", {class: "brandline"}, h("img", {class: "brand", src: "logo.svg", alt: "", width: 28, height: 28}), h("b", null, "ucanrun")), nav,
+    h("button", {class: "lock", onclick: async () => { await api("POST", "/api/lock"); boot(); }}, icon("lock"), h("span", {class: "lbl"}, "Khoá kho"))), main);
+  if (location.hash.slice(1) !== state.tab) history[location.hash ? "pushState" : "replaceState"](null, "", "#" + state.tab);
   clearInterval(state.timer);
   const views = {start: viewStart, requests: viewRequests, secrets: viewSecrets, runners: viewRunners, profiles: viewProfiles, tokens: viewTokens, settings: viewSettings, audit: viewAudit};
   const draw = () => views[state.tab](body).catch(e => { if (e.status === 401) boot(); else fill(body, h("div", {class: "err"}, e.message)); });
@@ -1441,8 +1493,10 @@ async function viewStart(body) {
   const overview = !cur;
   if (overview !== !!state.overview) {
     state.overview = overview;
-    const b = document.querySelector('nav button');
-    if (b) b.textContent = tr(overview ? "Tổng quan" : tabs.start);
+    const name = tr(overview ? "Tổng quan" : tabs.start);
+    const b = document.querySelector("nav button .lbl"), t = document.querySelector(".page-head h1");
+    if (b) b.textContent = name;
+    if (t) t.textContent = name;
   }
   if (overview) return viewOverview(body, s, steps, list);
   const skipBtn = h("div", {class: "row skip-row"}, h("button", {onclick: () => { skip(cur.key); state.startStep = null; redraw(); }}, "Bỏ qua, làm sau"));
