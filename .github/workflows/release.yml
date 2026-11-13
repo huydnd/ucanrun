@@ -95,3 +95,35 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
+  # npm: ucanrun (the launcher) and one @ucanrun/<os>-<cpu> package per build,
+  # with provenance. Runs when the repo has an NPM_TOKEN secret, or the
+  # variable NPM_TRUSTED_PUBLISHING=true once npm trusts this workflow.
+  npm:
+    needs: binaries
+    runs-on: ubuntu-latest
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      TRUSTED: ${{ vars.NPM_TRUSTED_PUBLISHING }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - if: env.NODE_AUTH_TOKEN != '' || env.TRUSTED == 'true'
+        run: |
+          npm install -g npm@11
+          v="${GITHUB_REF_NAME#v}"
+          node npm/build.mjs "$v" dist npm-out
+          # Platform packages first: ucanrun depends on them. A version that
+          # is already there (a re-run) is skipped.
+          for d in npm-out/*/; do
+            name=$(node -p "require('./$d/package.json').name")
+            [ "$name" = ucanrun ] && continue
+            npm view "$name@$v" version >/dev/null 2>&1 || npm publish "$d" --access public --provenance
+          done
+          npm view "ucanrun@$v" version >/dev/null 2>&1 || npm publish npm-out/ucanrun --access public --provenance

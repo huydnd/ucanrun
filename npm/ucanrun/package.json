@@ -1,0 +1,14 @@
+{
+  "name": "ucanrun",
+  "version": "0.0.0",
+  "description": "ucr, the agent side of ucanrun: AI agents ask, you approve, ucanrun runs. Agents never see a secret.",
+  "keywords": ["mcp", "ai-agent", "secrets", "credentials", "approval", "claude-code"],
+  "homepage": "https://github.com/huydnd/ucanrun",
+  "bugs": "https://github.com/huydnd/ucanrun/issues",
+  "repository": {"type": "git", "url": "git+https://github.com/huydnd/ucanrun.git"},
+  "license": "MIT",
+  "bin": {"ucr": "bin/ucr.js"},
+  "files": ["bin/ucr.js", "README.md", "LICENSE"],
+  "engines": {"node": ">=18"},
+  "optionalDependencies": {}
+}
