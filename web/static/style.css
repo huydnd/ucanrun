@@ -417,3 +417,11 @@ details.oks[open]>summary{margin-bottom:6px}
 .runner-totp{display:grid;gap:4px;min-width:0}
 .runner-totp select{width:auto;max-width:100%}
 .runner-totp .code-in{width:8em}
+/* ucr: one program, two roles. */
+.role-note{display:grid;gap:4px;padding:8px 12px;border-left:3px solid var(--accent-line);background:var(--accent-soft);border-radius:0 var(--radius-sm) var(--radius-sm) 0;font-size:13px}
+.role-note p{margin:0}
+details.outdated{border:1px solid var(--warn);background:var(--warn-bg);border-radius:var(--radius-sm);padding:8px 10px}
+details.outdated>summary{font-weight:400;color:var(--warn);flex-wrap:wrap}
+details.outdated>summary::before{background:transparent;color:var(--warn)}
+details.outdated[open]>summary{margin-bottom:8px}
+details.outdated .steps-list{display:grid;gap:6px}
