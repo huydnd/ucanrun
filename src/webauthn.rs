@@ -113,7 +113,7 @@ pub fn request_options(rp: &Rp, challenge: &[u8], keys: &[Passkey]) -> Value {
 }
 
 /// The credential the browser returned, as the web page sends it.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Credential {
     pub id: String,

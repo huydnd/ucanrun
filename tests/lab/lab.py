@@ -211,7 +211,7 @@ def main():
         f.write(f"{digest}  ucr-linux-arm64\n")
     cmd = sh("node", "-e", NODE_CMD, os.path.join(HERE, "app.js")).stdout.strip()
     r = dx("runner2", f"su r -s /bin/sh -c '{cmd} && ~/.local/bin/ucr --version'", check_rc=False)
-    check("the install command checks the download and installs", r.returncode == 0 and "ucr 0.9" in r.stdout, (r.stdout + r.stderr).strip()[-80:])
+    check("the install command checks the download and installs", r.returncode == 0 and re.search(r"ucr \d+\.\d+", r.stdout), (r.stdout + r.stderr).strip()[-80:])
     with open(os.path.join(dl, "ucr-linux-arm64"), "ab") as f:
         f.write(b"tampered")
     dx("runner2", "rm -f /home/r/.local/bin/ucr")
@@ -232,9 +232,8 @@ def main():
 # Prints the Linux install command the web UI shows, from app.js itself.
 NODE_CMD = r"""
 const src = require("fs").readFileSync(process.argv[1], "utf8");
-const m = src.slice(src.indexOf("function fetchCmd"), src.indexOf("function copyLine"));
-const WIN_UCR = "";
-eval(m);
+const m = src.slice(src.indexOf("const systems"), src.indexOf("function copyLine"));
+eval(m.replace(/^const /gm, "var "));
 console.log(installCmd("http://mitm:9000/dl", "linux-arm64"));
 """
 

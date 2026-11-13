@@ -542,6 +542,10 @@ impl Server {
                 "/v1/runner/result",
                 post(runner_result).fallback(not_allowed_h),
             )
+            .route(
+                "/v1/runner/passkeys",
+                post(runner_passkeys).fallback(not_allowed_h),
+            )
             .fallback(not_found_h)
             .layer(middleware::from_fn(agent_headers))
             .layer(middleware::from_fn(write_timeout))
@@ -1690,6 +1694,28 @@ async fn runner_result(State(s): State<Arc<Server>>, h: HeaderMap, b: Body) -> R
         Ok(()) => ok_json(),
         Err(e) => fail(e),
     }
+}
+
+/// The passkeys a runner may pin, signed with the server key.
+async fn runner_passkeys(State(s): State<Arc<Server>>, h: HeaderMap, b: Body) -> Response {
+    let raw = match runner_body(b).await {
+        Ok(r) => r,
+        Err(r) => return *r,
+    };
+    let name = match runner_check(&s, &h, "/v1/runner/passkeys", &raw) {
+        Ok(n) => n,
+        Err(r) => return *r,
+    };
+    let Some(rp) = std::env::var("UCANRUN_PUBLIC_URL")
+        .ok()
+        .and_then(|u| crate::webauthn::Rp::from_url(&u))
+    else {
+        return err_json(
+            400,
+            "the server has no UCANRUN_PUBLIC_URL, so passkeys are not available",
+        );
+    };
+    write_json(200, &tryf!(s.core.runner_passkeys(&name, &rp)))
 }
 
 async fn runners_list(State(s): State<Arc<Server>>, h: HeaderMap) -> Response {

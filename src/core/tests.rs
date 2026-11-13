@@ -1584,6 +1584,7 @@ async fn telegram_speaks_english_by_default() {
         reason: "why".into(),
         risk: "high".into(),
         totp: true,
+        passkey: false,
         hash: "ab".repeat(32),
         display: "GET https://x".into(),
         state: ReqState::Pending,
@@ -2759,4 +2760,68 @@ async fn passkeys_register_sign_in_and_approve() {
     let id = e.c.passkeys().unwrap()[0].id.clone();
     e.c.passkey_delete(&id, "").unwrap();
     assert!(!e.c.has_passkeys());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn runner_requiring_a_passkey_checks_the_approval_itself() {
+    use crate::runner::local::check_passkey;
+    use crate::runner::proto::{Job, JobBody, PinnedPasskeys, unseal};
+    use crate::webauthn::{Credential, testkit};
+    let cred = |v: Value| serde_json::from_value::<Credential>(v).unwrap();
+    let e = new_env("en", false).await;
+    e.c.setup(PASS.as_bytes()).unwrap();
+    e.c.put_secret("pw", b"sudo-pass-VALUE-9").unwrap();
+    e.c.set_secret_meta("pw", auto_never()).unwrap();
+    let rp = testkit::rp();
+    let mut key = testkit::Fake::new();
+    let opts = e.c.passkey_register_start(&rp).unwrap();
+    e.c.passkey_register_finish(
+        &rp,
+        "phone",
+        &cred(key.create(&rp, &opts)),
+        "",
+        PASS.as_bytes(),
+    )
+    .unwrap();
+    let fr = enroll_fake(
+        &e.c,
+        "box",
+        crate::runner::proto::Info {
+            require_passkey: true,
+            ..Default::default()
+        },
+    );
+    // What the runner pins: the server's list, signed with the server key.
+    let pins: PinnedPasskeys =
+        e.c.runner_passkeys("box", &rp)
+            .unwrap()
+            .open(&fr.server)
+            .unwrap();
+    assert_eq!((pins.keys.len(), pins.runner.as_str()), (1, "box"));
+
+    let (t, _) = e.token("claude", &[]);
+    let r = e.c.submit_call(&t, &plain_call("box"), "").unwrap();
+    assert!(
+        r.passkey && r.totp && r.state == ReqState::Pending,
+        "auto secret, but the runner wants a passkey"
+    );
+    let err =
+        e.c.decide(&r.id, &r.hash, true, "web", "123456", "")
+            .unwrap_err()
+            .to_string();
+    assert!(err.contains("passkey"), "{err}");
+    let opts = e.c.approve_passkey_start(&rp, &r.id).unwrap();
+    e.c.approve_passkey_finish(&rp, &r.id, &r.hash, &cred(key.get(&rp, &opts)), "")
+        .unwrap();
+
+    let jobs = e.c.runner_poll("box", Default::default()).await.unwrap();
+    let job: Job = jobs[0].open(&fr.server).unwrap();
+    let body: JobBody = unseal(&fr.id, &job.sealed).unwrap();
+    assert!(body.approval.is_some());
+    let after = check_passkey(&body, Some(&pins)).unwrap();
+    assert_eq!(after.keys[0].sign_count, 1);
+    // A server that swaps the command after approval gets a refusal.
+    let mut forged = body.clone_for_test();
+    forged.exec.argv = vec!["/usr/bin/id".into(), "-a".into()];
+    assert!(check_passkey(&forged, Some(&pins)).is_err());
 }

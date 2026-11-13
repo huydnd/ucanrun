@@ -80,7 +80,12 @@ allow = ["/usr/bin/systemctl", "/usr/bin/journalctl"]
 sudo = true
 # Refuse jobs that were approved without a TOTP code.
 require_totp = true
+# Run only jobs approved with one of your passkeys, checked on this machine.
+require_passkey = false
 ```
+
+`require_passkey` is the strongest setting: see [passkeys.md](passkeys.md#runners-that-require-a-passkey).
+Pin or refresh the passkeys with `ucr runner trust-passkeys`.
 
 The file is read before every job, so changes apply at once. A mistake in it
 stops every job until it is fixed; the Devices card shows the error.
