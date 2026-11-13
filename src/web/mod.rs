@@ -1726,6 +1726,7 @@ async fn runners_list(State(s): State<Arc<Server>>, h: HeaderMap) -> Response {
     write_json(
         200,
         &json!({"runners": list, "server_key": crate::runner::proto::fingerprint(&key),
+            "version": env!("CARGO_PKG_VERSION"),
             "agent_url": std::env::var("UCANRUN_AGENT_URL").unwrap_or_default(),
             "download_url": download_url()}),
     )

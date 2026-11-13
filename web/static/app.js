@@ -1126,6 +1126,7 @@ function agentGuide(id, token, done) {
       h("p", {class: "note"}, "Token chỉ hiện lần này. Sau bước 2 nó nằm trong kho khoá của máy đó (Windows Credential Manager, hoặc ~/.config/ucanrun với quyền 0600), không nằm trong file cấu hình agent. Đừng dán token vào chat với AI."),
       h("label", null, h("span", null, "Địa chỉ Agent API"), u),
       h("h3", {class: "gap"}, "Máy chạy agent"), osSwitch(os, k => { os = k; draw(); }),
+      roleNote("agent", os),
       h("ol", {class: "steps-list"},
         step(1, "Cài ucr", installCmd(dl, os)),
         step(2, "Lưu token trên máy đó", `${win ? "& " : ""}${bin} login ${url}`, h("small", {class: "muted"}, tr("Dán token này khi được hỏi:")), token),
@@ -1690,23 +1691,61 @@ function osSwitch(os, on) {
     h("button", {type: "button", role: "radio", "aria-checked": String(k === os), class: k === os ? "on" : "", onclick: () => on(k)}, t)));
 }
 
+// ucr is one program with two roles; both guides say so, and where each
+// role keeps its copy on the chosen system.
+const isLinux = os => os !== "darwin" && os !== "windows";
+function roleNote(role, os) {
+  const both = "ucr là một chương trình, có hai vai: agent dùng nó để xin chạy việc (tab Token agent), runner dùng nó để nhận và chạy việc đã duyệt (tab Runner). Một máy có thể đóng cả hai vai.";
+  const where = isLinux(os)
+    ? (role === "runner"
+      ? "Trên Linux và WSL, runner có bản riêng ở /usr/local/bin/ucr, thuộc root, chạy bằng user ucr-runner. Agent chạy bằng user của bạn nên không sửa được chương trình runner chạy. Khi cập nhật, cập nhật cả bản ~/.local/bin/ucr của agent nếu máy có."
+      : "Bản này ở ~/.local/bin/ucr là của agent. Nếu máy này cũng là runner, runner dùng bản riêng ở /usr/local/bin/ucr; khi cập nhật, cập nhật cả hai.")
+    : os === "windows" ? "Trên Windows, agent và runner dùng chung một file: %USERPROFILE%\\.local\\bin\\ucr.exe."
+    : "Trên macOS, agent và runner dùng chung một file: ~/.local/bin/ucr.";
+  return h("div", {class: "role-note guide"}, h("p", null, tr(both)), h("p", null, tr(where)));
+}
+
+// "0.13.2" < "0.13.10": compares numerically, part by part.
+function olderThan(a, b) {
+  const pa = String(a || "").split(/[.-]/).map(Number), pb = String(b || "").split(/[.-]/).map(Number);
+  for (let i = 0; i < 3; i++) { const x = pa[i] || 0, y = pb[i] || 0; if (x !== y) return x < y; }
+  return false;
+}
+
+// Commands that bring a runner's ucr up to the server's version, for the
+// system the runner reported.
+function runnerUpdate(i, dl, version) {
+  // The server's own version, not "latest": a release that lags behind
+  // would quietly reinstall the old build.
+  if (version) dl = dl.replace(/\/releases\/latest\/download$/, `/releases/download/v${version}`);
+  const task = '"ucanrun runner"';
+  if (i.os === "windows") return [`Stop-ScheduledTask -TaskName ${task}; ${installCmd(dl, "windows")}; Start-ScheduledTask -TaskName ${task}`];
+  if (i.os === "macos") return [installCmd(dl, "darwin"), h("small", {class: "muted"}, tr("Rồi khởi động lại ucr runner serve."))];
+  const b = i.arch === "aarch64" ? "linux-arm64" : "linux-amd64";
+  return [fetchCmd(dl, b, `ucr-${b}`, "/tmp/ucr") + " && sudo install -m 755 /tmp/ucr /usr/local/bin/ucr && sudo systemctl restart ucr-runner",
+    h("small", {class: "muted"}, tr("Agent trên cùng máy dùng ~/.local/bin/ucr thì cập nhật luôn bản đó:")), installCmd(dl, b)];
+}
+
 // Pairing a new runner: a code, then the commands for the chosen system.
 function enrollBox(rinfo, done) {
   const box = h("div", {class: "enroll", hidden: true});
   const url = (rinfo && rinfo.agent_url) || "http://<agent-api>:8781";
   const dl = (rinfo && rinfo.download_url) || "";
+  const ver = (rinfo && rinfo.version) || "";
   const step = (n, title, ...cmds) => h("li", null, h("b", null, `${n}. ${tr(title)}`), ...cmds.map(c => typeof c === "string" ? copyLine(c) : c));
   const guide = (code, os, name) => {
     const enroll = bin => `${bin} runner enroll ${url} ${code} --name ${name}`;
+    const have = bin => [h("small", {class: "muted"}, `${tr("Đã cài ucr cho agent trên máy này thì không cần tải lại; chỉ kiểm phiên bản, cần")} ${ver || "?"} ${tr("trở lên")}:`), bin + " --version",
+      h("small", {class: "muted"}, tr("Chưa có, hoặc bản cũ hơn:"))];
     if (os === "windows") return [
-      step(1, "Tải ucr.exe (PowerShell)", installCmd(dl, os)),
+      step(1, "Cài ucr.exe (PowerShell)", ...have(`& ${WIN_UCR}`), installCmd(dl, os)),
       step(2, "Ghép nối", `& ${WIN_UCR} ${enroll("").trim()}`),
       step(3, "Liệt kê chương trình được chạy", 'notepad "$env:APPDATA\\ucanrun\\runner.toml"',
         h("small", {class: "muted"}, tr("Ví dụ: allow = ['C:\\Windows\\System32\\ipconfig.exe']. Mặc định không chạy gì."))),
       step(4, "Chạy nền khi khởi động, quyền user thường (PowerShell admin)",
         fetchCmd(dl, "windows", "runner-windows.ps1", '"$env:TEMP\\runner-windows.ps1"'), 'powershell -ExecutionPolicy Bypass -File "$env:TEMP\\runner-windows.ps1"')];
     if (os === "darwin") return [
-      step(1, "Tải ucr", installCmd(dl, os)),
+      step(1, "Cài ucr", ...have("~/.local/bin/ucr"), installCmd(dl, os)),
       step(2, "Ghép nối", enroll("~/.local/bin/ucr")),
       step(3, "Liệt kê chương trình được chạy", "open -e ~/.config/ucanrun/runner.toml"),
       step(4, "Chạy", "~/.local/bin/ucr runner serve")];
@@ -1738,10 +1777,11 @@ function enrollBox(rinfo, done) {
     let os = guessOs();
     const name = h("input", {value: "ten-may", "aria-label": tr("Tên runner"), autocomplete: "off", spellcheck: "false", maxlength: 64});
     const steps = h("ol", {class: "steps-list"});
-    const sw = h("div");
+    const sw = h("div"), note = h("div");
     const draw = () => {
       const n = name.value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-") || "ten-may";
       fill(sw, osSwitch(os, k => { os = k; draw(); }));
+      fill(note, roleNote("runner", os));
       fill(steps, guide(c.code, os, n));
     };
     name.addEventListener("input", draw);
@@ -1750,6 +1790,7 @@ function enrollBox(rinfo, done) {
       h("h3", null, "Thêm runner"),
       h("p", null, tr("Mã ghép nối, dùng một lần, hết hạn lúc"), " ", new Date(c.expires).toLocaleTimeString(), ": ", h("b", {class: "code"}, c.code)),
       h("div", {class: "row tight"}, sw, h("label", {class: "inline-field"}, h("span", null, tr("Tên runner")), name)),
+      note,
       steps,
       h("p", {class: "muted"}, `${tr("Khi ghép xong, máy kia in ra khoá server; khoá đúng là")}: ${rinfo ? rinfo.server_key : "?"}.`),
       h("div", {class: "row"}, h("button", {class: "primary", onclick: done}, "Đã chạy xong, tải lại"), h("button", {onclick: () => { box.hidden = true; }}, "Huỷ")));
@@ -1783,8 +1824,10 @@ function runnerTotp(r, redraw) {
 }
 
 // One runner: state, what it reports about itself, its last jobs.
-function runnerCard(r, runs, redraw) {
+function runnerCard(r, runs, redraw, rinfo) {
   const i = r.info || {};
+  const server = rinfo && rinfo.version;
+  const old = i.version && server && olderThan(i.version, server);
   const rights = i.root ? h("span", {class: "badge root"}, "root") : i.sudo ? h("span", {class: "badge high"}, "sudo") : h("span", {class: "badge"}, tr("quyền user"));
   const allow = !i.allow || !i.allow.length ? [h("span", {class: "muted"}, tr("chưa cho chạy chương trình nào, sửa runner.toml trên máy đó"))]
     : i.allow.includes("*") ? [h("span", {class: "chip warn"}, tr("mọi chương trình"))] : i.allow.map(a => h("span", {class: "chip"}, a));
@@ -1799,6 +1842,9 @@ function runnerCard(r, runs, redraw) {
         await api("DELETE", "/api/runners/" + encodeURIComponent(r.name)); redraw();
       }}, "Gỡ")),
     i.policy_error ? h("div", {class: "warn-line"}, `${tr("Lỗi runner.toml")}: ${i.policy_error}`) : null,
+    old ? h("details", {class: "outdated"}, h("summary", null, h("span", {class: "badge high"}, tr("ucr cũ")), " ",
+        `${tr("Runner chạy ucr")} ${i.version}, ${tr("server là")} ${server}. ${tr("Cập nhật để có các thay đổi mới của runner.")}`),
+      h("div", {class: "steps-list"}, runnerUpdate(i, (rinfo && rinfo.download_url) || "", server).map(c => typeof c === "string" ? copyLine(c) : c))) : null,
     i.root ? h("div", {class: "warn-line"}, tr("Runner đang có quyền root hoặc admin. Nên chạy bằng user riêng, dùng sudo khi cần.")) : null,
     i.require_passkey && !i.passkeys ? h("div", {class: "warn-line"}, tr("Runner bắt buộc passkey nhưng chưa ghim passkey nào: chạy ucr runner trust-passkeys trên máy đó.")) : null,
     h("dl", {class: "kv"},
@@ -1823,7 +1869,7 @@ async function viewRunners(body) {
   fill(body,
     h("div", {class: "card"},
       h("div", {class: "spread"}, h("h2", null, `Runner (${online}/${list.length} ${tr("đang kết nối")})`), h("button", {class: "primary", onclick: add.open}, "+ Thêm runner")),
-      list.length ? list.map(r => runnerCard(r, runs.runs, redraw)) : h("p", {class: "muted"}, "Chưa có runner. Bấm Thêm runner để lấy mã ghép nối và lệnh cài cho từng hệ điều hành."),
+      list.length ? list.map(r => runnerCard(r, runs.runs, redraw, rinfo)) : h("p", {class: "muted"}, "Chưa có runner. Bấm Thêm runner để lấy mã ghép nối và lệnh cài cho từng hệ điều hành."),
       add.el),
     h("details", {class: "card"}, h("summary", null, tr("Runner hoạt động thế nào")),
       h("ul", {class: "plain"},
