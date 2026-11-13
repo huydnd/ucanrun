@@ -9,6 +9,8 @@
 pub mod audit;
 #[cfg(unix)]
 pub mod backup;
+#[cfg(unix)]
+pub mod chat;
 pub mod client;
 #[cfg(unix)]
 pub mod core;

@@ -101,6 +101,9 @@ pub struct State {
     /// this file is signed, not encrypted.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub templates: Vec<SecretTemplate>,
+    /// Paired accounts on approval channels besides Telegram, by kind.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub chats: BTreeMap<String, crate::chat::Owner>,
     /// Machines enrolled to run approved commands.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub runners: BTreeMap<String, RunnerRec>,

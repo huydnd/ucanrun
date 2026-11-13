@@ -178,7 +178,13 @@ async function viewSecrets(body, editing, tpl) {
   const n = field("Tên", {autocomplete: "off", spellcheck: "false", placeholder: "github_token"});
   const known = workspacesOf(list).filter(Boolean);
   const ws = field("Workspace", {autocomplete: "off", spellcheck: "false", placeholder: tr("Chung"), list: "ws-names", maxlength: 32});
-  ws.input.value = cur ? (cur.workspace || "") : state.secretWs && state.secretWs !== "*" ? state.secretWs : "";
+  ws.input.value = cur ? (cur.workspace || "") : state.secretWs != null && state.secretWs !== "*" ? state.secretWs : "";
+  // Existing workspaces as buttons, Shared first; typing a new name makes one.
+  const wsPicks = h("div", {class: "ws-picks", role: "group", "aria-label": tr("Workspace có sẵn")});
+  const drawPicks = () => fill(wsPicks, [""].concat(known).map(w => h("button", {type: "button", class: "chip-btn small" + (ws.input.value.trim() === w ? " on" : ""),
+    "aria-pressed": String(ws.input.value.trim() === w), onclick: () => { ws.input.value = w; drawPicks(); }}, wsLabel(w))));
+  ws.input.addEventListener("input", drawPicks);
+  drawPicks();
   const v = field(cur ? "Giá trị mới (để trống nếu giữ nguyên)" : "Giá trị", {type: "password", autocomplete: "off"});
   const desc = h("textarea", {class: "short desc", rows: 2, "aria-label": "Dùng để làm gì", placeholder: "Ví dụ: Token GitHub cá nhân, đọc repo và tạo issue"});
   const hosts = field("Máy chủ được phép gửi tới", {autocomplete: "off", spellcheck: "false", placeholder: "api.github.com, *.example.com"});
@@ -257,7 +263,7 @@ async function viewSecrets(body, editing, tpl) {
     await api("PUT", "/api/secrets/" + encodeURIComponent(n.input.value.trim()), req);
     viewSecrets(body);
   }, h("div", {class: "secret-form"},
-    h("div", {class: "grid2"}, n.el, h("div", null, ws.el, h("datalist", {id: "ws-names"}, known.map(w => h("option", {value: w}))))),
+    h("div", {class: "grid2"}, n.el, h("div", null, ws.el, h("datalist", {id: "ws-names"}, known.map(w => h("option", {value: w}))), wsPicks)),
     h("div", {class: "row tight"}, seg, lines),
     v_wrap, fieldBox,
     h("label", null, h("span", null, "Dùng để làm gì"), desc),
@@ -314,8 +320,9 @@ async function viewSecrets(body, editing, tpl) {
         if (confirm(tr(`Xoá secret ${s.name}?`))) { await api("DELETE", "/api/secrets/" + encodeURIComponent(s.name)); viewSecrets(body); }
       }}, "Xoá")));
   const groups = workspacesOf(list);
-  if (state.secretWs && state.secretWs !== "*" && !groups.includes(state.secretWs)) state.secretWs = "*";
-  const pick = state.secretWs || "*";
+  if (state.secretWs != null && state.secretWs !== "*" && !groups.includes(state.secretWs)) state.secretWs = "*";
+  // "" is the shared workspace, so it must not fall back to all.
+  const pick = state.secretWs ?? "*";
   const q = h("input", {type: "search", placeholder: "Tìm theo tên hoặc mô tả", "aria-label": "Tìm secret"});
   q.value = state.secretQ || "";
   const listBox = h("div");
@@ -1106,16 +1113,147 @@ function healthCard(items) {
       (i.names || []).flatMap(n => [" ", h("code", null, n)]))))));
 }
 
+// Approval channels: what each needs, and how to finish setup on its side.
+const CHANNELS = [
+  {kind: "telegram", name: "Telegram", fields: [["token", "Token bot từ @BotFather", "password"]],
+    guide: ["Mở @BotFather trên Telegram, gửi /newbot và làm theo hướng dẫn.", "Dán token bot vào đây rồi bấm Lưu.", "Mở chat riêng với bot và gửi /pair kèm mã ghép nối."],
+    pair: c => `/pair ${c}`},
+  {kind: "discord", name: "Discord", fields: [["token", "Bot token", "password"]],
+    guide: ["Vào discord.com/developers/applications, tạo ứng dụng mới, mục Bot bấm Reset Token và dán token vào đây.",
+      "Sau khi lưu, dán Webhook URL bên dưới vào General Information → Interactions Endpoint URL.",
+      "Mục Installation bật User Install (hoặc mời bot vào một server bạn đang ở) để nhắn riêng được với bot.",
+      "Nhắn riêng với bot lệnh /pair và nhập mã ghép nối."],
+    pair: c => `/pair code:${c}`},
+  {kind: "line", name: "LINE", fields: [["token", "Channel access token", "password"], ["secret", "Channel secret", "password"]],
+    guide: ["Vào developers.line.biz, tạo kênh Messaging API.", "Dán Channel access token (long-lived) và Channel secret vào đây.",
+      "Sau khi lưu, dán Webhook URL bên dưới vào Messaging API → Webhook settings, bật Use webhook, tắt Auto-reply.",
+      "Kết bạn với bot và gửi /pair kèm mã ghép nối."],
+    pair: c => `/pair ${c}`},
+  {kind: "whatsapp", name: "WhatsApp", fields: [["token", "Access token (System User, không hết hạn)", "password"], ["phone_id", "Phone number ID", "text"], ["secret", "App secret", "password"]],
+    guide: ["Vào developers.facebook.com, tạo app có sản phẩm WhatsApp.", "Dán Access token, Phone number ID và App secret (App settings → Basic) vào đây.",
+      "Sau khi lưu, dán Webhook URL và Verify token bên dưới vào WhatsApp → Configuration, đăng ký trường messages.",
+      "Từ số điện thoại của bạn, gửi /pair kèm mã ghép nối tới số WhatsApp Business."],
+    note: "WhatsApp chỉ gửi được tin trong 24 giờ kể từ tin nhắn cuối bạn gửi cho bot. Ngoài khoảng đó yêu cầu vẫn chờ trên web.",
+    pair: c => `/pair ${c}`},
+];
+
+// One tile per channel; the chosen one opens its setup below.
+function channelsCard(s, chats, sys, after) {
+  const box = h("div", {class: "chan-panel"});
+  const pub = (sys && sys.public_url) || "";
+  const stateOf = c => c.kind === "telegram" ? {configured: !!(s.telegram && s.telegram.configured), paired: !!(s.telegram && s.telegram.paired)}
+    : (chats.find(x => x.kind === c.kind) || {});
+  const pill = st => st.paired ? h("span", {class: "pill ok"}, tr("Đã ghép nối")) : st.configured ? h("span", {class: "pill warn"}, tr("Chưa ghép nối")) : h("span", {class: "pill"}, tr("Chưa cài"));
+  const tiles = h("div", {class: "chan-tiles"});
+  let open = state.chan || null;
+  const reload = async () => { const [n, c] = await Promise.all([api("GET", "/api/status"), api("GET", "/api/chats").catch(() => [])]); s = n; chats = c; draw(); after && after(); };
+  const showCode = (c, code, extra) => h("div", {class: "note pair"},
+    h("div", null, tr("Mã ghép nối, dùng một lần trong 3 phút:")), copyLine(c.pair(code)), extra || null,
+    h("small", {class: "muted"}, tr("Sai 3 lần thì mã bị huỷ, khi đó tạo mã mới.")));
+  const panel = c => {
+    const st = stateOf(c);
+    const err = h("div", {class: "err", role: "alert"});
+    const out = h("div");
+    const inputs = c.fields.map(([k, label, type]) => [k, field(label, {type, autocomplete: "off", spellcheck: "false"})]);
+    const editing = !st.configured || state.chanEdit === c.kind;
+    const save = h("button", {class: "primary", onclick: async () => {
+      err.textContent = ""; save.disabled = true;
+      try {
+        const body = Object.fromEntries(inputs.map(([k, f]) => [k, f.input.value.trim()]));
+        const r = c.kind === "telegram" ? await api("PUT", "/api/telegram", body) : await api("PUT", "/api/chats/" + c.kind, body);
+        state.chanEdit = null;
+        await reload();
+        fill(out, showCode(c, r.code));
+        box.append(out);
+      } catch (e) { err.textContent = tr(e.message); } finally { save.disabled = false; }
+    }}, "Lưu");
+    const hook = st.webhook ? (pub ? pub.replace(/\/$/, "") : "https://<địa-chỉ-public>") + st.webhook : "";
+    return h("div", {class: "chan-detail"},
+      h("div", {class: "spread"}, h("h3", null, c.name, " ", pill(st)),
+        st.configured ? h("span", {class: "acts"},
+          h("button", {class: "small", onclick: async () => { const r = await api("POST", "/api/telegram/pair"); fill(out, showCode(c, r.code)); }}, "Mã ghép nối mới"),
+          h("button", {class: "small", onclick: () => { state.chanEdit = state.chanEdit === c.kind ? null : c.kind; draw(); }}, editing ? "Đóng" : "Đổi cấu hình"),
+          c.kind !== "telegram" ? h("button", {class: "small danger", onclick: async () => {
+            if (!confirm(tr(`Gỡ ${c.name}? Yêu cầu sẽ không gửi tới đó nữa.`))) return;
+            await api("DELETE", "/api/chats/" + c.kind); await reload(); }}, "Gỡ") : null) : null),
+      st.error ? h("div", {class: "warn-line"}, `${tr("Lỗi gần nhất")}: ${st.error}`) : null,
+      hook ? h("div", {class: "kv-line"}, h("span", {class: "muted"}, "Webhook URL"), copyLine(hook)) : null,
+      st.verify ? h("div", {class: "kv-line"}, h("span", {class: "muted"}, "Verify token"), copyLine(st.verify)) : null,
+      hook && !pub ? h("small", {class: "warn-line"}, tr("Server chưa đặt UCANRUN_PUBLIC_URL. Nền tảng phải gọi được tới địa chỉ HTTPS public của ucanrun.")) : null,
+      st.last_hook ? h("small", {class: "muted"}, `${tr("Nền tảng gọi tới lần cuối")}: ${new Date(st.last_hook).toLocaleString()}`) : null,
+      editing ? h("div", {class: "chan-setup"},
+        h("ol", {class: "plain"}, c.guide.map(g => h("li", null, tr(g)))),
+        c.note ? h("small", {class: "warn-line"}, tr(c.note)) : null,
+        h("div", {class: "grid2"}, inputs.map(([, f]) => f.el)),
+        h("div", {class: "row"}, save), err) : null,
+      out);
+  };
+  const draw = () => {
+    fill(tiles, CHANNELS.map(c => {
+      const st = stateOf(c);
+      return h("button", {type: "button", class: "chan-tile" + (open === c.kind ? " on" : ""), "aria-expanded": String(open === c.kind),
+        onclick: () => { open = state.chan = open === c.kind ? null : c.kind; draw(); }},
+        h("span", {class: "chan-logo " + c.kind, "aria-hidden": "true"}, c.name[0]), h("b", null, c.name), pill(st));
+    }));
+    const c = CHANNELS.find(x => x.kind === open);
+    fill(box, c ? panel(c) : null);
+  };
+  draw();
+  return h("div", {class: "card channels"}, h("h2", null, "Kênh duyệt"),
+    h("p", {class: "muted"}, "Nơi bạn nhận và bấm duyệt yêu cầu. Nối một hoặc nhiều kênh; mỗi yêu cầu được gửi tới mọi kênh đã ghép nối, duyệt ở đâu cũng được."),
+    tiles, box);
+}
+
+// A settings line: what it is on the left, the control on the right.
+function setRow(title, desc, control) {
+  return h("div", {class: "set-row"}, h("div", {class: "set-text"}, h("b", null, tr(title)), desc ? h("small", {class: "muted"}, desc) : null), control);
+}
+
 async function viewSettings(body) {
-  const [s, health] = await Promise.all([api("GET", "/api/status"), api("GET", "/api/health")]);
+  const [s, health, chats, sys] = await Promise.all([api("GET", "/api/status"), api("GET", "/api/health"),
+    api("GET", "/api/chats").catch(() => []), api("GET", "/api/system").catch(() => null)]);
   const o = field("Mật khẩu hiện tại", {type: "password", autocomplete: "current-password"});
   const n = field("Mật khẩu mới", {type: "password", autocomplete: "new-password"});
   const langSel = select(lang, [["vi", "Tiếng Việt"], ["en", "English"]], v => { try { localStorage.setItem("ucr_lang", v); } catch (_) {} location.reload(); }, "Ngôn ngữ");
-  const tplCard = await myTemplatesCard();
-  // Same order as setup: how you approve, how you sign in, then the rest.
-  fill(body, healthCard(health), telegramCard(s), totpCard(s), autoLockCard(s), form("Đổi mật khẩu chính", [o, n], "Đổi", async () => {
+  const bad = health.filter(i => i.level === "bad").length, warn = health.filter(i => i.level === "warn").length;
+  const healthBox = h("details", {class: "card health-card", open: bad > 0},
+    h("summary", null, h("span", {class: "dot " + (bad ? "bad" : warn ? "warn" : "ok"), "aria-hidden": "true"}), " ",
+      h("b", null, tr("Sức khoẻ bảo mật")), " ", h("span", {class: "muted"}, bad || warn ? `${bad} ${tr("lỗi")}, ${warn} ${tr("cảnh báo")}` : tr("ổn"))),
+    h("ul", {class: "health"}, health.filter(i => i.level !== "ok").concat(health.filter(i => i.level === "ok")).map(i =>
+      h("li", null, h("span", {class: "dot " + i.level, "aria-hidden": "true"}), h("span", null, i.message, (i.names || []).flatMap(x => [" ", h("code", null, x)]))))));
+  // TOTP keeps its own flow (QR, recovery codes); here it opens in place.
+  const totp = totpCard(s);
+  totp.classList.remove("card");
+  const th = totp.querySelector("h2"); if (th) th.remove();
+  const lockOpts = [[0, "Không tự khoá"], [5, "5 phút"], [10, "10 phút"], [15, "15 phút"], [30, "30 phút"], [45, "45 phút"], [60, "1 giờ"], [120, "2 giờ"],
+    [240, "4 giờ"], [480, "8 giờ"], [720, "12 giờ"], [1440, "24 giờ"], [4320, "3 ngày"], [10080, "7 ngày"]];
+  const cur = s.auto_lock_min || 0;
+  if (!lockOpts.some(x => x[0] === cur)) lockOpts.push([cur, `${cur} phút`]);
+  const lockMsg = h("small", {class: "muted"});
+  const lockSel = select(String(cur), lockOpts.map(([v, t]) => [String(v), tr(t)]), async v => {
+    lockMsg.textContent = "";
+    try { await api("PUT", "/api/settings", {auto_lock_min: Number(v)}); lockMsg.textContent = tr("Đã lưu"); } catch (e) { lockMsg.textContent = tr(e.message); }
+  }, "Tự khoá sau");
+  const pass = form("", [o, n], "Đổi mật khẩu", async () => {
     await api("POST", "/api/passphrase", {old: o.input.value, new: n.input.value}); o.input.value = n.input.value = "";
-  }), tplCard, h("div", {class: "card"}, h("h2", null, "Ngôn ngữ"), langSel));
+  });
+  pass.classList.remove("card"); const ph = pass.querySelector("h2"); if (ph) ph.remove();
+  const tpl = await myTemplatesCard();
+  tpl.classList.remove("card"); const tph = tpl.querySelector("h2"); if (tph) tph.remove();
+  fill(body,
+    healthBox,
+    channelsCard(s, chats, sys),
+    h("div", {class: "card set-list"}, h("h2", null, "Đăng nhập và khoá kho"),
+      h("details", {class: "set-row-d", open: !s.totp},
+        h("summary", null, h("div", {class: "set-text"}, h("b", null, "TOTP"),
+          h("small", {class: "muted"}, s.totp ? `${tr("Đang bật")} · ${s.recovery_left} ${tr("mã khôi phục")}` : tr("Đang tắt: yêu cầu rủi ro cao chưa duyệt được.")))), totp),
+      setRow("Tự khoá kho", tr("Khi không có hoạt động nào. Kho khoá thì agent nhận lỗi 423 tới khi bạn đăng nhập."), h("div", {class: "inline"}, lockSel, lockMsg)),
+      h("details", {class: "set-row-d"}, h("summary", null, h("div", {class: "set-text"}, h("b", null, tr("Mật khẩu chính")),
+        h("small", {class: "muted"}, tr("Dùng để mở kho. Không có cách khôi phục nếu quên.")))), pass)),
+    h("div", {class: "card set-list"}, h("h2", null, "Khác"),
+      setRow("Ngôn ngữ", "", langSel),
+      h("details", {class: "set-row-d"}, h("summary", null, h("div", {class: "set-text"}, h("b", null, tr("Mẫu secret của bạn")),
+        h("small", {class: "muted"}, tr("Lưu từ form ở tab Secret bằng Lưu thành mẫu.")))), tpl)));
 }
 
 function skipped() { try { return JSON.parse(localStorage.getItem("ucr_skip") || "[]"); } catch (_) { return []; } }
@@ -1128,7 +1266,7 @@ async function loadSteps() {
   // In the order they are needed. Optional steps are listed but never hold
   // back the overview.
   const steps = [
-    {key: "telegram", title: "Nối Telegram", why: "Để nhận yêu cầu duyệt trên điện thoại.", done: !!(s.telegram && s.telegram.paired)},
+    {key: "telegram", title: "Nối kênh duyệt", why: "Telegram, Discord, LINE hoặc WhatsApp, để nhận yêu cầu duyệt trên điện thoại.", done: !!s.any_channel},
     {key: "totp", title: "Bật TOTP và lưu mã khôi phục", why: "Lớp bảo vệ thứ hai khi đăng nhập và duyệt việc rủi ro cao.", done: !!s.totp && s.recovery_left > 0},
     {key: "service", title: "Lưu secret đầu tiên", why: "Kèm một dòng mô tả và máy chủ được phép gửi tới.", done: secrets.some(x => (x.hosts || []).length) || profiles.length > 0},
     {key: "runner", tab: "runners", optional: true, title: "Thêm runner", why: "Khi agent cần chạy lệnh trên một máy.", done: (rinfo.runners || []).length > 0},
@@ -1161,12 +1299,13 @@ async function viewStart(body) {
   const skipBtn = h("div", {class: "row skip-row"}, h("button", {onclick: () => { skip(cur.key); state.startStep = null; redraw(); }}, "Bỏ qua, làm sau"));
   const watchPairing = () => { clearInterval(state.timer); state.timer = setInterval(async () => {
     const n = await api("GET", "/api/status").catch(() => null);
-    if (n && n.telegram && n.telegram.paired) { clearInterval(state.timer); state.startStep = null; redraw(); }
+    if (n && n.any_channel) { clearInterval(state.timer); state.startStep = null; redraw(); }
   }, 3000); };
   let panel;
   if (cur.key === "telegram") {
-    panel = telegramCard(s, watchPairing);
-    if (s.telegram && s.telegram.configured) watchPairing();
+    const [chats, sys] = await Promise.all([api("GET", "/api/chats").catch(() => []), api("GET", "/api/system").catch(() => null)]);
+    panel = channelsCard(s, chats, sys, watchPairing);
+    if ((s.telegram && s.telegram.configured) || chats.some(c => c.configured)) watchPairing();
   } else if (cur.key === "totp") {
     panel = totpCard(s, () => { state.startStep = null; redraw(); });
   } else if (cur.key === "service") {
@@ -1217,7 +1356,7 @@ async function viewOverview(body, s, steps, stepList) {
       stat(pending.length, tr("Đang chờ duyệt"), "", "requests", pending.length ? "attn" : "")),
     h("div", {class: "card"}, h("h2", null, "Trạng thái"),
       h("ul", {class: "health"},
-        line(!!(s.telegram && s.telegram.paired), s.telegram && s.telegram.paired ? tr("Telegram đã nối.") : tr("Chưa nối Telegram."), "settings"),
+        line(!!s.any_channel, s.any_channel ? tr("Đã nối kênh duyệt.") : tr("Chưa nối kênh duyệt nào."), "settings"),
         line(!!s.totp, s.totp ? tr(`TOTP đang bật, còn ${s.recovery_left} mã khôi phục.`) : tr("TOTP đang tắt."), "settings"),
         line(s.auto_lock_min ? true : null, `${tr("Tự khoá kho")}: ${lockLabel(s.auto_lock_min)}.`, "settings"),
         line(bad ? false : warn ? null : true, bad || warn ? `${tr("Sức khoẻ bảo mật")}: ${bad} ${tr("lỗi")}, ${warn} ${tr("cảnh báo")}.` : tr("Sức khoẻ bảo mật ổn."), "settings"),
@@ -1260,7 +1399,10 @@ function systemCard(x, go) {
     h("ul", {class: "health"},
       line(x.gate ? true : null, "Web", [x.public_url || x.web_addr, x.gate ? tr("có mã truy cập") : tr("không có mã truy cập"), x.secure_cookie ? "cookie Secure" : ""].filter(Boolean).join(" · ")),
       line(true, "Agent API", [x.agent_url || x.agent_addr, `${x.tokens} token`, `${x.agents_24h} ${tr("agent gọi trong 24 giờ")}`].join(" · "), "tokens"),
-      line(tg[0], "Telegram", tg[1], "settings"),
+      t.configured ? line(tg[0], "Telegram", tg[1], "settings") : null,
+      (x.chats || []).filter(c => c.configured).map(c => line(c.paired ? (c.error ? false : true) : null, (CHANNELS.find(k => k.kind === c.kind) || {name: c.kind}).name,
+        [c.paired ? tr("đã ghép nối") : tr("chưa ghép nối"), c.last_hook ? `${tr("gọi tới lần cuối")} ${new Date(c.last_hook).toLocaleString()}` : tr("nền tảng chưa gọi tới"), c.error].filter(Boolean).join(" · "), "settings")),
+      !t.configured && !(x.chats || []).some(c => c.configured) ? line(null, "Kênh duyệt", tr("chưa nối kênh nào"), "settings") : null,
       line(x.runners ? x.runners_online === x.runners : null, "Runner", x.runners ? `${x.runners_online}/${x.runners} ${tr("đang kết nối")}` : tr("chưa có runner"), "runners")));
 }
 

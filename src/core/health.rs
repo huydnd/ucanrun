@@ -53,7 +53,7 @@ impl Core {
             (
                 st.totp_enabled,
                 st.recovery_hashes.len(),
-                st.telegram.user_id != 0,
+                st.telegram.user_id != 0 || st.chats.values().any(|o| !o.user.is_empty()),
                 g.audit_cut,
                 profiles,
                 unscoped,
@@ -147,12 +147,12 @@ impl Core {
             out.push(i);
         }
         out.push(if paired {
-            item("telegram", "ok", "Telegram đã nối.")
+            item("telegram", "ok", "Đã nối kênh duyệt.")
         } else {
             item(
                 "telegram",
                 "warn",
-                "Chưa nối Telegram, bạn chỉ duyệt được khi mở web.",
+                "Chưa nối kênh duyệt nào (Telegram, Discord, LINE, WhatsApp), bạn chỉ duyệt được khi mở web.",
             )
         });
         out.push(if self.opt.allow_exec {

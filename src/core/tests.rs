@@ -19,6 +19,45 @@ const BOT_TOK: &str = "123:BOTTOKEN";
 const OWNER: i64 = 0x6875_7964_6e64;
 const STRANGER: i64 = 666;
 
+// --- fake chat platforms (LINE, WhatsApp, Discord) ---
+
+#[derive(Default)]
+struct FakeChat {
+    seen: StdMutex<Vec<(String, String, Value)>>,
+}
+
+async fn chat_handler(
+    AxState(f): AxState<Arc<FakeChat>>,
+    method: axum::http::Method,
+    uri: Uri,
+    body: Bytes,
+) -> axum::Json<Value> {
+    let v: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+    f.seen
+        .lock()
+        .unwrap()
+        .push((method.to_string(), uri.path().to_string(), v));
+    axum::Json(match uri.path() {
+        "/v2/bot/info" => json!({"displayName": "ucanrun-line"}),
+        p if p.starts_with("/123") && method == axum::http::Method::GET => {
+            json!({"display_phone_number": "+84 900"})
+        }
+        _ => json!({}),
+    })
+}
+
+impl FakeChat {
+    fn posts(&self, path: &str) -> Vec<Value> {
+        self.seen
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(m, p, _)| m == "POST" && p == path)
+            .map(|x| x.2.clone())
+            .collect()
+    }
+}
+
 // --- fake Telegram ---
 
 #[derive(Default)]
@@ -196,6 +235,7 @@ struct Env {
     dir: PathBuf,
     c: Arc<Core>,
     tg: Arc<FakeTg>,
+    chat: Arc<FakeChat>,
     target: Arc<Target>,
     url: String,
     offset: Arc<AtomicI64>,
@@ -239,11 +279,22 @@ async fn new_env(lang: &str, allow_exec: bool) -> Env {
             .with_state(target.clone()),
     )
     .await;
+    let chat = Arc::new(FakeChat::default());
+    let chat_url = serve(
+        Router::new()
+            .fallback(chat_handler)
+            .with_state(chat.clone()),
+    )
+    .await;
     let offset = Arc::new(AtomicI64::new(0));
     let c = Core::new(Options {
         data_dir: dir.clone(),
         approval_ttl: Duration::from_secs(60),
         telegram_api: tg_url,
+        chat_api: ["discord", "line", "whatsapp"]
+            .iter()
+            .map(|k| (k.to_string(), chat_url.clone()))
+            .collect(),
         work_factor: 10,
         allow_exec,
         lang: lang.into(),
@@ -255,6 +306,7 @@ async fn new_env(lang: &str, allow_exec: bool) -> Env {
         dir,
         c,
         tg,
+        chat,
         target,
         url,
         offset,
@@ -2470,4 +2522,167 @@ async fn system_reports_version_links_and_agents() {
     assert_eq!((s.tokens, s.agents_24h), (1, 1));
     e.c.lock("web");
     assert!(e.c.system().locked);
+}
+
+// --- other approval channels ---
+
+fn line_hook(secret: &str, v: &Value) -> (Vec<(String, String)>, Vec<u8>) {
+    use base64::Engine as _;
+    use hmac::{Hmac, Mac};
+    let raw = v.to_string().into_bytes();
+    let mut m = <Hmac<Sha256> as Mac>::new_from_slice(secret.as_bytes()).unwrap();
+    m.update(&raw);
+    let sig = base64::engine::general_purpose::STANDARD.encode(m.finalize().into_bytes());
+    (vec![("x-line-signature".into(), sig)], raw)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn line_pairs_notifies_and_approves() {
+    let e = setup().await;
+    assert!(
+        e.c.set_chat(
+            "line",
+            ChatInput {
+                token: "tok".into(),
+                secret: "".into(),
+                ..Default::default()
+            }
+        )
+        .await
+        .is_err(),
+        "secret required"
+    );
+    let out =
+        e.c.set_chat(
+            "line",
+            ChatInput {
+                token: "tok".into(),
+                secret: "line-secret".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let code = out["code"].as_str().unwrap().to_string();
+    assert_eq!(out["webhook"], "/hooks/line");
+    let v = e.c.chats().unwrap();
+    let line = v.iter().find(|c| c.kind == "line").unwrap();
+    assert!(line.configured && !line.paired);
+    assert!(!e.c.any_channel_paired());
+
+    let msg = |user: &str, text: &str| json!({"events": [{"type": "message", "replyToken": "r1", "source": {"type": "user", "userId": user}, "message": {"type": "text", "text": text}}]});
+    // A forged call does nothing.
+    let (h, b) = line_hook("not-the-secret", &msg("U1", &format!("/pair {code}")));
+    assert_eq!(e.c.chat_hook("line", "POST", "", &h, &b).await.status, 401);
+    assert_eq!(
+        e.c.chat_hook("discord", "POST", "", &h, &b).await.status,
+        404,
+        "not configured"
+    );
+    let (h, b) = line_hook("line-secret", &msg("U1", &format!("/pair {code}")));
+    assert_eq!(e.c.chat_hook("line", "POST", "", &h, &b).await.status, 200);
+    assert!(e.c.any_channel_paired());
+    assert!(
+        e.c.health()
+            .unwrap()
+            .iter()
+            .any(|i| i.key == "telegram" && i.level == "ok")
+    );
+
+    let (t, _) = e.token("c", &[]);
+    let r =
+        e.c.submit(&t, "create", params(&[("repo", "line-ok")]), "")
+            .unwrap();
+    wait_for("LINE push", || {
+        !e.chat.posts("/v2/bot/message/push").is_empty()
+    })
+    .await;
+    let push = e.chat.posts("/v2/bot/message/push")[0].clone();
+    assert_eq!(push["to"], "U1");
+    let approve = push["messages"][1]["template"]["actions"][0]["data"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(approve.starts_with(&format!("a:{}:", r.id)), "{approve}");
+    let pb = |user: &str| json!({"events": [{"type": "postback", "replyToken": "r2", "source": {"type": "user", "userId": user}, "postback": {"data": approve}}]});
+    let (h, b) = line_hook("line-secret", &pb("U-stranger"));
+    e.c.chat_hook("line", "POST", "", &h, &b).await;
+    assert_eq!(
+        e.c.get(&r.id).unwrap().state,
+        ReqState::Pending,
+        "a stranger cannot approve"
+    );
+    let (h, b) = line_hook("line-secret", &pb("U1"));
+    e.c.chat_hook("line", "POST", "", &h, &b).await;
+    let done = e.c.wait(&r.id, Some(Duration::from_secs(5))).await.unwrap();
+    assert_eq!(done.state, ReqState::Done);
+    assert_eq!(done.decided_by, "line:U1");
+
+    // Locking stops the channel; unlocking brings it back, still paired.
+    e.c.lock("web");
+    assert_eq!(e.c.chat_hook("line", "POST", "", &h, &b).await.status, 404);
+    e.c.login(PASS.as_bytes(), "").unwrap();
+    assert!(
+        e.c.chats()
+            .unwrap()
+            .iter()
+            .any(|c| c.kind == "line" && c.configured && c.paired)
+    );
+    e.c.delete_chat("line").unwrap();
+    assert!(!e.c.any_channel_paired());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn whatsapp_setup_gives_a_verify_token() {
+    let e = setup().await;
+    assert!(
+        e.c.set_chat(
+            "whatsapp",
+            ChatInput {
+                token: "t".into(),
+                secret: "s".into(),
+                phone_id: "12a".into()
+            }
+        )
+        .await
+        .is_err()
+    );
+    let out =
+        e.c.set_chat(
+            "whatsapp",
+            ChatInput {
+                token: "t".into(),
+                secret: "app-secret".into(),
+                phone_id: "123".into(),
+            },
+        )
+        .await
+        .unwrap();
+    let verify = out["verify"].as_str().unwrap().to_string();
+    assert_eq!(verify.len(), 32);
+    let q = format!("hub.mode=subscribe&hub.verify_token={verify}&hub.challenge=42");
+    assert_eq!(
+        e.c.chat_hook("whatsapp", "GET", &q, &[], b"").await.body,
+        b"42"
+    );
+    assert_eq!(
+        e.c.chats()
+            .unwrap()
+            .iter()
+            .find(|c| c.kind == "whatsapp")
+            .unwrap()
+            .verify,
+        verify
+    );
+    assert!(
+        e.c.set_chat(
+            "nope",
+            ChatInput {
+                token: "t".into(),
+                ..Default::default()
+            }
+        )
+        .await
+        .is_err()
+    );
 }
