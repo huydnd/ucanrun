@@ -996,8 +996,11 @@ function mcpSetup(a, os) {
   const cmd = win
     ? `$p = "${file}"; $d = if (Test-Path $p) { Copy-Item $p "$p.bak"; Get-Content $p -Raw | ConvertFrom-Json } else { [pscustomobject]@{} }; if (-not ($d.PSObject.Properties.Name -contains "${a.key}")) { $d | Add-Member -NotePropertyName "${a.key}" -NotePropertyValue ([pscustomobject]@{}) }; $e = [pscustomobject]@{${a.extra ? Object.entries(a.extra).map(([k, v]) => `${k} = "${v}"; `).join("") : ""}command = "${ucr}"; args = @("mcp")}; $d."${a.key}" | Add-Member -Force -NotePropertyName ucanrun -NotePropertyValue $e; New-Item -ItemType Directory -Force (Split-Path $p) | Out-Null; [IO.File]::WriteAllText($p, ($d | ConvertTo-Json -Depth 32)); "ucanrun added to $p"`
     : `python3 -c 'import json,os,shutil,sys;p=os.path.expanduser(sys.argv[1]);d=json.load(open(p)) if os.path.exists(p) else {};os.path.exists(p) and shutil.copy(p,p+".bak");d.setdefault(sys.argv[2],{})["ucanrun"]=dict(json.loads(sys.argv[3]),command=os.path.expanduser("~/.local/bin/ucr"));os.makedirs(os.path.dirname(p),exist_ok=True);json.dump(d,open(p,"w"),indent=2);print("ucanrun added to",p)' "${file}" ${a.key} '${JSON.stringify(entry)}'`;
-  const snippet = `"ucanrun": ${JSON.stringify(Object.assign({}, a.extra || {}, {command: shown, args: ["mcp"]}), null, 2)}`;
-  return {cmd, file, snippet, where: `Hoặc dán vào trong mục "${a.key}" của file (thêm dấu phẩy nếu đã có server khác)`};
+  // Valid JSON with its root key, so it can be pasted as is into a new file
+  // or merged by hand: when the file already has "${a.key}", only the
+  // "ucanrun" entry goes inside it.
+  const snippet = JSON.stringify({[a.key]: {ucanrun: Object.assign({}, a.extra || {}, {command: shown, args: ["mcp"]})}}, null, 2);
+  return {cmd, file, snippet, where: `Hoặc thêm tay. File chưa có thì dán nguyên khối; đã có mục "${a.key}" thì chỉ thêm mục "ucanrun" vào trong đó`};
 }
 
 // Copyable text that keeps its line breaks.
