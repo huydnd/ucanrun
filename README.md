@@ -4,19 +4,18 @@
 
 A credential broker for AI agents, with a human in the loop. The command is `ucr`.
 
+Your AI agent needs a GitHub token, a database password, an SSH key. Instead of handing it over, keep it in ucanrun: the agent asks, you approve on your phone, and ucanrun uses the secret for that one call. The agent never sees it.
+
+<p align="center"><img src="docs/assets/why.svg" alt="Without ucanrun, the AI agent holds your token: it lands in chats and logs, a tricked agent can send it anywhere, and nobody checks what it runs. With ucanrun, the agent only knows the name of the secret. It asks ucanrun, which keeps the token locked away and asks you on your phone; after you tap Approve it uses the token once. The agent never sees it, you approve each use, and every use is logged." width="100%"></p>
+
+## How it works
+
 1. **You save a secret** with one line saying what it is for and which hosts may receive it.
 2. **The agent lists secrets** over MCP: names and descriptions, never values.
 3. **The agent sends a request** with `{{secret:name}}` where the secret goes.
-4. **You approve** the exact request on Telegram, and **ucanrun runs it** and returns a redacted result.
+4. **You approve** the exact request on Telegram, Discord, LINE, WhatsApp or the web, and **ucanrun runs it** and returns a redacted result.
 
 <p align="center"><img src="docs/assets/architecture.svg" alt="How ucanrun works. One request, start to finish: 1, the agent asks to call api.github.com and names the secret github_token instead of holding it; 2, you see the real request on your phone and approve it; 3, ucanrun takes the token from its encrypted vault and sends it only to api.github.com, or hands a signed job to a runner; 4, the agent gets the answer with any copy of the token shown as REDACTED. Who holds what: the agent machine, not trusted, holds only an agent token; the ucanrun server holds the encrypted secrets, rules and audit log; you hold TOTP and passkeys and approve; runners hold their keys and an allow list and connect out." width="100%"></p>
-
-A request names a secret instead of holding it:
-
-```
-call GET https://api.github.com/user
-     Authorization: Bearer {{secret:github_token}}
-```
 
 Commands run on **runners**: `ucr runner` on another machine, which fetches approved jobs and runs only the programs its own allow list names. See [runners](docs/runners.md).
 

@@ -1,0 +1,118 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 470" width="1080" height="470" role="img" aria-labelledby="t d">
+  <title id="t">Without ucanrun and with ucanrun</title>
+  <desc id="d">Without ucanrun, the AI agent holds your token and sends it to the API itself, so the token ends up in chats and logs and a prompt injection can send it anywhere. With ucanrun, the agent holds only the name of the secret. It asks ucanrun, which keeps the token locked away, asks you on your phone, and after you approve uses the token for that one call. The agent never sees the token, you approve each use, and every use is logged.</desc>
+  <defs>
+    <style>
+      .bg{fill:#f6f8fb}
+      .half{fill:#fff;stroke:#d5dde8;stroke-width:1.5}
+      .ink{fill:#0f1d33}.mut{fill:#56657c}
+      .bad{fill:#bb3426}.good{fill:#13774a}
+      .h{font:700 22px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+      .l{font:600 14px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+      .s{font:14px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+      .mono{font:600 13px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+      .robot{fill:#e8edf4;stroke:#0f1d33;stroke-width:2.5}
+      .eye{fill:#0f1d33}
+      .key{fill:#e6a817;stroke:#8a5a00;stroke-width:2}
+      .api{fill:#e8edf4;stroke:#0f1d33;stroke-width:2.5}
+      .safe{fill:#0f2140;stroke:#0f2140;stroke-width:2.5}
+      .dial{fill:none;stroke:#3ff0c4;stroke-width:3}
+      .phone{fill:#0f2140}.screen{fill:#e1f4e9}
+      .note{fill:#fff8e1;stroke:#c9a227;stroke-width:1.5}
+      .arr{stroke:#0f1d33;stroke-width:2.5;fill:none}.ah{fill:#0f1d33}
+      .arrbad{stroke:#bb3426;stroke-width:2.5;fill:none;stroke-dasharray:7 5}.ahbad{fill:#bb3426}
+      .arrok{stroke:#13774a;stroke-width:2.5;fill:none}.ahok{fill:#13774a}
+      .leak{fill:#fcebe9;stroke:#bb3426;stroke-width:1.5}
+      .w{fill:#fff}
+      @media (prefers-color-scheme:dark){
+        .bg{fill:#0d1117}.half{fill:#131c2b;stroke:#2b4469}
+        .ink{fill:#dce5f1}.mut{fill:#93a4bc}.bad{fill:#f47b7b}.good{fill:#5fe0a1}
+        .robot{fill:#1d2b42;stroke:#dce5f1}.eye{fill:#dce5f1}
+        .api{fill:#1d2b42;stroke:#dce5f1}
+        .safe{fill:#13284a;stroke:#41d3e6}
+        .phone{fill:#2b4469}.screen{fill:#0f3024}
+        .note{fill:#2d2616;stroke:#c9a227}
+        .arr{stroke:#dce5f1}.ah{fill:#dce5f1}
+        .arrbad{stroke:#f47b7b}.ahbad{fill:#f47b7b}.arrok{stroke:#5fe0a1}.ahok{fill:#5fe0a1}
+        .leak{fill:#3a1a22;stroke:#f47b7b}
+      }
+    </style>
+    <marker id="m" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path class="ah" d="M0 0L10 5L0 10z"/></marker>
+    <marker id="mb" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path class="ahbad" d="M0 0L10 5L0 10z"/></marker>
+    <marker id="mo" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path class="ahok" d="M0 0L10 5L0 10z"/></marker>
+    <!-- A small robot: the AI agent. -->
+    <g id="robot">
+      <path class="arr" d="M40 0v-14" marker-end="none"/><circle class="eye" cx="40" cy="-17" r="4"/>
+      <rect class="robot" x="8" y="0" width="64" height="50" rx="12"/>
+      <circle class="eye" cx="28" cy="24" r="5"/><circle class="eye" cx="52" cy="24" r="5"/>
+      <path class="arr" d="M30 38h20"/>
+      <rect class="robot" x="14" y="56" width="52" height="44" rx="10"/>
+    </g>
+    <!-- A key: your token. -->
+    <g id="key"><circle class="key" cx="12" cy="12" r="11"/><circle class="bg" cx="9" cy="12" r="3.5"/><rect class="key" x="21" y="9" width="34" height="7" rx="2"/><rect class="key" x="44" y="15" width="5" height="8"/><rect class="key" x="36" y="15" width="5" height="6"/></g>
+    <!-- The API being called. -->
+    <g id="api"><rect class="api" x="0" y="0" width="104" height="84" rx="12"/><path class="arr" d="M30 32l-12 10 12 10M74 32l12 10-12 10M58 26l-12 34"/></g>
+  </defs>
+
+  <rect class="bg" width="1080" height="470" rx="16"/>
+
+  <!-- Without -->
+  <rect class="half" x="20" y="20" width="420" height="430" rx="16"/>
+  <text class="h bad" x="44" y="60">Without ucanrun</text>
+  <use href="#robot" x="62" y="128"/>
+  <use href="#key" x="122" y="186"/>
+  <text class="l ink" x="66" y="262" >AI agent</text>
+  <text class="s mut" x="66" y="280">has your token</text>
+  <path class="arrbad" d="M196 175H300" marker-end="url(#mb)"/>
+  <use href="#api" x="308" y="136"/>
+  <text class="l ink" x="324" y="244">GitHub, DB…</text>
+  <!-- leaks -->
+  <rect class="leak" x="44" y="306" width="372" height="40" rx="10"/>
+  <text class="s ink" x="62" y="331"><tspan class="bad l">✗</tspan>  The token lands in chats and logs</text>
+  <rect class="leak" x="44" y="354" width="372" height="40" rx="10"/>
+  <text class="s ink" x="62" y="379"><tspan class="bad l">✗</tspan>  A tricked agent can send it anywhere</text>
+  <rect class="leak" x="44" y="402" width="372" height="40" rx="10"/>
+  <text class="s ink" x="62" y="427"><tspan class="bad l">✗</tspan>  Nobody checks what it runs</text>
+
+  <!-- With -->
+  <rect class="half" x="460" y="20" width="600" height="430" rx="16"/>
+  <text class="h good" x="484" y="60">With ucanrun</text>
+
+  <use href="#robot" x="482" y="128"/>
+  <rect class="note" x="470" y="232" width="150" height="30" rx="6"/>
+  <text class="mono ink" x="545" y="252" text-anchor="middle">{{secret:github}}</text>
+  <text class="l ink" x="486" y="282">AI agent</text>
+  <text class="s mut" x="486" y="300">only knows the name</text>
+
+  <path class="arr" d="M574 165H660" marker-end="url(#m)"/>
+  <text class="l ink" x="582" y="155">asks</text>
+
+  <!-- the safe: ucanrun -->
+  <rect class="safe" x="668" y="110" width="124" height="112" rx="14"/>
+  <circle class="dial" cx="712" cy="166" r="20"/><path class="dial" d="M712 146v8M712 178v8M692 166h8M724 166h8"/>
+  <rect class="w" x="752" y="150" width="8" height="32" rx="3"/>
+  <use href="#key" x="702" y="194" transform="scale(1)"/>
+  <text class="l ink" x="690" y="246">ucanrun</text>
+  <text class="s mut" x="676" y="264">keeps the token</text>
+  <text class="s mut" x="676" y="282">locked away</text>
+
+  <!-- phone: you -->
+  <rect class="phone" x="700" y="320" width="60" height="100" rx="12"/>
+  <rect class="screen" x="707" y="332" width="46" height="76" rx="6"/>
+  <circle class="good" cx="730" cy="362" r="15"/><path d="M722 362l6 6 10-12" stroke="#fff" stroke-width="3.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <text class="l ink" x="772" y="352">You</text>
+  <text class="s mut" x="772" y="370">see the exact call,</text>
+  <text class="s mut" x="772" y="388">tap Approve</text>
+  <path class="arr" d="M716 290v24" marker-end="url(#m)"/>
+  <path class="arrok" d="M746 314v-24" marker-end="url(#mo)"/>
+
+  <!-- API -->
+  <path class="arrok" d="M796 165H900" marker-end="url(#mo)"/>
+  <text class="l good" x="806" y="155">uses it once</text>
+  <use href="#api" x="908" y="124"/>
+  <text class="l ink" x="924" y="232">GitHub, DB…</text>
+
+  <text class="s good" x="836" y="270"><tspan class="l">✓</tspan>  Agent never sees it</text>
+  <text class="s good" x="836" y="292"><tspan class="l">✓</tspan>  You approve each use</text>
+  <text class="s good" x="836" y="314"><tspan class="l">✓</tspan>  Every use is logged</text>
+</svg>
