@@ -9,7 +9,7 @@ A credential broker for AI agents, with a human in the loop. The command is `ucr
 3. **The agent sends a request** with `{{secret:name}}` where the secret goes.
 4. **You approve** the exact request on Telegram, and **ucanrun runs it** and returns a redacted result.
 
-<p align="center"><img src="docs/assets/architecture.svg" alt="How ucanrun works: the agent sends a request naming a secret; ucanrun shows you the exact command; once you approve, it adds the secret and calls the HTTP API, or hands a signed job to a runner; the agent gets the result with secrets redacted." width="900"></p>
+<p align="center"><img src="docs/assets/architecture.svg" alt="How ucanrun works. One request, start to finish: 1, the agent asks to call api.github.com and names the secret github_token instead of holding it; 2, you see the real request on your phone and approve it; 3, ucanrun takes the token from its encrypted vault and sends it only to api.github.com, or hands a signed job to a runner; 4, the agent gets the answer with any copy of the token shown as REDACTED. Who holds what: the agent machine, not trusted, holds only an agent token; the ucanrun server holds the encrypted secrets, rules and audit log; you hold TOTP and passkeys and approve; runners hold their keys and an allow list and connect out." width="100%"></p>
 
 A request names a secret instead of holding it:
 

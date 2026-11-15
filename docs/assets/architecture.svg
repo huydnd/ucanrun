@@ -1,113 +1,150 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 560" width="960" height="560" role="img" aria-labelledby="t d">
-  <title id="t">ucanrun architecture</title>
-  <desc id="d">An AI agent on its own machine asks ucanrun, through ucr mcp, to run a call or command that names a secret. ucanrun shows you the exact command on Telegram, Discord, LINE, WhatsApp or the web. Once you approve, ucanrun adds the secret and sends the HTTP call to a host the secret allows, or hands a signed, encrypted job to a runner that polls for work. The agent gets the result with secrets redacted, and never sees a secret value.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 720" width="1080" height="720" role="img" aria-labelledby="t d">
+  <title id="t">How ucanrun works</title>
+  <desc id="d">One request, start to finish. 1: the agent asks to call GET https://api.github.com/user with a Bearer header that names the secret github_token instead of holding it. 2: you see the exact request on your phone and approve it; risky jobs need TOTP or a passkey. 3: ucanrun takes the token from its encrypted vault and sends it only to api.github.com, or hands a signed job to a runner. 4: the agent gets the answer, with any copy of the secret replaced by REDACTED. Below, who holds what: the agent's machine holds only an agent token; the ucanrun server holds the encrypted secrets and the audit log; your phone or browser holds TOTP and passkeys and approves; runners hold their own keys and allow list, and connect out for work.</desc>
   <defs>
     <style>
-      .bg{fill:#f6f8fb}.box{fill:#fff;stroke:#cbd4e1;stroke-width:1.5}
-      .srv{fill:#0f2140}.srvrow{fill:#162c52;stroke:#2b4469}
-      .you{fill:#e2f2f7;stroke:#0a6a8a;stroke-width:1.5}
-      .h{font:600 15px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;fill:#0f1d33}
-      .t{font:13px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;fill:#56657c}
-      .m{font:12.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#0f1d33}
-      .hs{font:600 15px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;fill:#fff}
-      .ts{font:13px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;fill:#c9d5e8}
-      .lbl{font:600 12.5px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;fill:#0a6a8a}
-      .ln{stroke:#0a6a8a;stroke-width:2;fill:none}
-      .back{stroke:#13774a;stroke-width:2;fill:none;stroke-dasharray:6 4}
-      .lblb{font:600 12.5px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;fill:#13774a}
-      .num{fill:#0a6a8a}.numt{font:700 12px system-ui,sans-serif;fill:#fff}
-      .foot{font:13px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;fill:#56657c}
-      .ah{fill:#0a6a8a}.ahb{fill:#13774a}
+      .bg{fill:#f6f8fb}
+      .panel{fill:#fff;stroke:#d5dde8;stroke-width:1.5}
+      .card{fill:#f1f4f8;stroke:#d5dde8}
+      .ink{fill:#0f1d33}.mut{fill:#56657c}.acc{fill:#0a6a8a}.okf{fill:#13774a}
+      .h1{font:700 20px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+      .h2{font:650 16px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+      .tx{font:13px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+      .sm{font:12px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+      .mono{font:12px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+      .b{font-weight:650}
+      .icon{fill:none;stroke:#0a6a8a;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+      .badge{fill:#0a6a8a}.badget{font:700 13px system-ui,sans-serif;fill:#fff}
+      .arrow{stroke:#0a6a8a;stroke-width:2.5;fill:none}.ah{fill:#0a6a8a}
+      .phone{fill:#0f2140}.screen{fill:#f6f8fb}
+      .bubble{fill:#fff;stroke:#d5dde8}
+      .btnok{fill:#13774a}.btnno{fill:#fff;stroke:#bb3426}.btnt{font:600 12px system-ui,sans-serif;fill:#fff}.btnnt{font:600 12px system-ui,sans-serif;fill:#bb3426}
+      .red{fill:#bb3426}
+      .zone-agent{fill:#fcebe9;stroke:#e8b4ad}.zone-srv{fill:#0f2140}.zone-you{fill:#e2f2f7;stroke:#9ccfdf}.zone-run{fill:#fff;stroke:#d5dde8}
+      .w{fill:#fff}.ws{fill:#c9d5e8}
+      .link{stroke:#93a4bc;stroke-width:1.5;fill:none;stroke-dasharray:5 4}
       @media (prefers-color-scheme:dark){
-        .bg{fill:#0d1117}.box{fill:#161f2e;stroke:#2b4469}
-        .you{fill:#0f3044;stroke:#41d3e6}
-        .h,.m{fill:#dce5f1}.t,.foot{fill:#93a4bc}
-        .lbl{fill:#41d3e6}.ln{stroke:#41d3e6}.ah{fill:#41d3e6}.num{fill:#41d3e6}.numt{fill:#04121f}
-        .back{stroke:#5fe0a1}.lblb{fill:#5fe0a1}.ahb{fill:#5fe0a1}
+        .bg{fill:#0d1117}.panel{fill:#131c2b;stroke:#2b4469}.card{fill:#0d1626;stroke:#2b4469}
+        .ink{fill:#dce5f1}.mut{fill:#93a4bc}.acc{fill:#41d3e6}.okf{fill:#5fe0a1}
+        .icon{stroke:#41d3e6}.badge{fill:#41d3e6}.badget{fill:#04121f}
+        .arrow{stroke:#41d3e6}.ah{fill:#41d3e6}
+        .phone{fill:#2b4469}.screen{fill:#0d1626}.bubble{fill:#131c2b;stroke:#2b4469}
+        .btnok{fill:#1f9d63}.btnno{fill:#131c2b;stroke:#f47b7b}.btnnt{fill:#f47b7b}.red{fill:#f47b7b}
+        .zone-agent{fill:#3a1a22;stroke:#6b2b36}.zone-srv{fill:#13284a}.zone-you{fill:#0f3044;stroke:#1f6b82}.zone-run{fill:#131c2b;stroke:#2b4469}
       }
     </style>
-    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0 0L10 5L0 10z"/></marker>
-    <marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ahb" d="M0 0L10 5L0 10z"/></marker>
+    <marker id="ar" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path class="ah" d="M0 0L10 5L0 10z"/></marker>
   </defs>
 
-  <rect class="bg" width="960" height="560" rx="16"/>
+  <rect class="bg" width="1080" height="720" rx="16"/>
+  <text class="h1 ink" x="24" y="42">One request, start to finish</text>
 
-  <!-- Agent machine -->
-  <rect class="box" x="24" y="150" width="230" height="200" rx="12"/>
-  <text class="h" x="44" y="180">Agent's machine</text>
-  <text class="t" x="44" y="204">Claude Code, Cursor, Codex…</text>
-  <rect class="box" x="44" y="222" width="190" height="52" rx="8"/>
-  <text class="m" x="58" y="244">ucr mcp</text>
-  <text class="t" x="58" y="263">agent token, no secrets</text>
-  <text class="t" x="44" y="302">Sees secret names and</text>
-  <text class="t" x="44" y="320">notes, never the values.</text>
+  <!-- 1. The agent asks -->
+  <rect class="panel" x="20" y="62" width="236" height="352" rx="14"/>
+  <circle class="badge" cx="44" cy="90" r="13"/><text class="badget" x="44" y="95" text-anchor="middle">1</text>
+  <text class="h2 ink" x="66" y="96">The agent asks</text>
+  <g class="icon" transform="translate(98 116)"><rect x="6" y="2" width="68" height="44" rx="4"/><path d="M0 54h80M30 46v8M50 46v8"/><path d="M24 20l8 6-8 6M38 32h16"/></g>
+  <rect class="card" x="34" y="186" width="208" height="112" rx="8"/>
+  <text class="mono ink" x="46" y="208">call GET</text>
+  <text class="mono ink" x="46" y="226">https://api.github.com/user</text>
+  <text class="mono ink" x="46" y="250">Authorization: Bearer</text>
+  <text class="mono acc b" x="46" y="268">{{secret:github_token}}</text>
+  <text class="mono mut" x="46" y="288">reason: check my login</text>
+  <text class="tx mut" x="34" y="328">It names the secret.</text>
+  <text class="tx mut" x="34" y="346">It never has the token: it sees</text>
+  <text class="tx mut" x="34" y="364">only names and your notes.</text>
 
-  <!-- ucanrun server -->
-  <rect class="srv" x="340" y="110" width="280" height="330" rx="14"/>
-  <text class="hs" x="360" y="142">ucanrun server</text>
-  <rect class="srvrow" x="356" y="158" width="248" height="44" rx="8"/>
-  <text class="ts" x="370" y="185">Agent API · checks the request</text>
-  <rect class="srvrow" x="356" y="212" width="248" height="56" rx="8"/>
-  <text class="ts" x="370" y="236">Rules per secret: hosts, commands,</text>
-  <text class="ts" x="370" y="255">TOTP, run without asking</text>
-  <rect class="srvrow" x="356" y="278" width="248" height="44" rx="8"/>
-  <text class="ts" x="370" y="305">Vault, encrypted with age</text>
-  <rect class="srvrow" x="356" y="332" width="248" height="44" rx="8"/>
-  <text class="ts" x="370" y="359">Audit log, hash-chained</text>
-  <rect class="srvrow" x="356" y="386" width="248" height="40" rx="8"/>
-  <text class="ts" x="370" y="411">Web UI: secrets, tokens, runners</text>
+  <!-- 2. You approve -->
+  <rect class="panel" x="288" y="62" width="236" height="352" rx="14"/>
+  <circle class="badge" cx="312" cy="90" r="13"/><text class="badget" x="312" y="95" text-anchor="middle">2</text>
+  <text class="h2 ink" x="334" y="96">You approve</text>
+  <rect class="phone" x="336" y="112" width="140" height="210" rx="18"/>
+  <rect class="screen" x="344" y="126" width="124" height="182" rx="10"/>
+  <rect class="bubble" x="350" y="136" width="112" height="128" rx="8"/>
+  <text class="sm ink b" x="358" y="154">claude asks:</text>
+  <text class="mono ink" x="358" y="174" font-size="10.5">GET /user</text>
+  <text class="mono ink" x="358" y="189" font-size="10.5">api.github.com</text>
+  <text class="mono acc" x="358" y="207" font-size="10.5">‹github_token›</text>
+  <text class="sm mut" x="358" y="226" font-size="10.5">reason: check</text>
+  <text class="sm mut" x="358" y="240" font-size="10.5">my login</text>
+  <rect class="btnok" x="350" y="272" width="54" height="24" rx="6"/><text class="btnt" x="377" y="288" text-anchor="middle">Approve</text>
+  <rect class="btnno" x="408" y="272" width="54" height="24" rx="6"/><text class="btnnt" x="435" y="288" text-anchor="middle">Deny</text>
+  <text class="tx mut" x="302" y="346">You see the real request, not</text>
+  <text class="tx mut" x="302" y="364">the agent's summary. Risky jobs</text>
+  <text class="tx mut" x="302" y="382">also need TOTP or a passkey.</text>
 
-  <!-- You -->
-  <rect class="you" x="700" y="24" width="236" height="118" rx="12"/>
-  <text class="h" x="718" y="54">You</text>
-  <text class="t" x="718" y="78">Telegram, Discord, LINE,</text>
-  <text class="t" x="718" y="96">WhatsApp or the web</text>
-  <text class="t" x="718" y="122">Approve with TOTP or passkey</text>
+  <!-- 3. ucanrun runs it -->
+  <rect class="panel" x="556" y="62" width="236" height="352" rx="14"/>
+  <circle class="badge" cx="580" cy="90" r="13"/><text class="badget" x="580" y="95" text-anchor="middle">3</text>
+  <text class="h2 ink" x="602" y="96">ucanrun runs it</text>
+  <g class="icon" transform="translate(634 112)"><rect x="0" y="4" width="60" height="22" rx="4"/><rect x="0" y="32" width="60" height="22" rx="4"/><path d="M10 15h.01M10 43h.01"/><rect x="50" y="40" width="26" height="22" rx="3"/><path d="M55 40v-6a8 8 0 0 1 16 0v6"/></g>
+  <rect class="card" x="570" y="186" width="208" height="112" rx="8"/>
+  <text class="tx ink" x="582" y="208">Takes <tspan class="b">github_token</tspan></text>
+  <text class="tx ink" x="582" y="226">from the encrypted vault,</text>
+  <text class="tx ink" x="582" y="250">sends it only to a host the</text>
+  <text class="tx ink" x="582" y="268">secret allows:</text>
+  <text class="mono acc b" x="582" y="288">api.github.com</text>
+  <text class="tx mut" x="570" y="328">A command goes to a <tspan class="b">runner</tspan></text>
+  <text class="tx mut" x="570" y="346">instead: a signed, encrypted job</text>
+  <text class="tx mut" x="570" y="364">for that machine only.</text>
+  <text class="tx mut" x="570" y="390">Everything is in the audit log.</text>
 
-  <!-- HTTP API -->
-  <rect class="box" x="700" y="196" width="236" height="96" rx="12"/>
-  <text class="h" x="718" y="226">HTTP API</text>
-  <text class="t" x="718" y="250">Only the hosts the secret</text>
-  <text class="t" x="718" y="268">allows, e.g. api.github.com</text>
+  <!-- 4. The agent gets the answer -->
+  <rect class="panel" x="824" y="62" width="236" height="352" rx="14"/>
+  <circle class="badge" cx="848" cy="90" r="13"/><text class="badget" x="848" y="95" text-anchor="middle">4</text>
+  <text class="h2 ink" x="870" y="96">The agent gets</text>
+  <text class="h2 ink" x="870" y="116">the answer</text>
+  <g class="icon" transform="translate(902 128)"><path d="M10 2h40l14 14v34a4 4 0 0 1-4 4H10a4 4 0 0 1-4-4V6a4 4 0 0 1 4-4z"/><path d="M50 2v14h14M18 30h32M18 40h24"/></g>
+  <rect class="card" x="838" y="196" width="208" height="102" rx="8"/>
+  <text class="mono okf b" x="850" y="218">200 OK</text>
+  <text class="mono ink" x="850" y="240">{"login": "octocat",</text>
+  <text class="mono ink" x="850" y="258"> "plan": "free"}</text>
+  <text class="mono mut" x="850" y="284">echo → <tspan class="red b">[REDACTED]</tspan></text>
+  <text class="tx mut" x="838" y="328">If the token shows up in the</text>
+  <text class="tx mut" x="838" y="346">reply or output, it comes back</text>
+  <text class="tx mut" x="838" y="364">as [REDACTED].</text>
 
-  <!-- Runner -->
-  <rect class="box" x="700" y="330" width="236" height="140" rx="12"/>
-  <text class="h" x="718" y="360">Runner · ucr runner</text>
-  <text class="t" x="718" y="384">Another PC, server or Pi.</text>
-  <text class="t" x="718" y="402">Polls out, opens no port.</text>
-  <text class="t" x="718" y="420">Jobs are signed and sealed;</text>
-  <text class="t" x="718" y="438">runs only its allow list</text>
-  <text class="t" x="718" y="456">(runner.toml).</text>
+  <!-- arrows between steps -->
+  <path class="arrow" d="M258 238H284" marker-end="url(#ar)"/>
+  <path class="arrow" d="M526 238H552" marker-end="url(#ar)"/>
+  <path class="arrow" d="M794 238H820" marker-end="url(#ar)"/>
 
-  <!-- 1: agent asks -->
-  <path class="ln" d="M254 220 H336" marker-end="url(#a)"/>
-  <circle class="num" cx="270" cy="200" r="10"/><text class="numt" x="270" y="204" text-anchor="middle">1</text>
-  <text class="lbl" x="284" y="204">request</text>
-  <text class="m" x="262" y="242" font-size="10.5">{{secret:x}}</text>
+  <!-- Who holds what -->
+  <text class="h1 ink" x="24" y="464">Who holds what</text>
 
-  <!-- 2: shows you, 3: you approve -->
-  <path class="ln" d="M620 150 C660 150 660 80 696 80" marker-end="url(#a)"/>
-  <circle class="num" cx="642" cy="96" r="10"/><text class="numt" x="642" y="100" text-anchor="middle">2</text>
-  <text class="lbl" x="560" y="72">exact command</text>
-  <path class="back" d="M700 118 C670 118 668 176 624 176" marker-end="url(#b)"/>
-  <circle class="num" cx="676" cy="150" r="10"/><text class="numt" x="676" y="154" text-anchor="middle">3</text>
-  <text class="lblb" x="690" y="168">approve</text>
+  <rect class="zone-agent" x="20" y="482" width="236" height="168" rx="14"/>
+  <text class="h2 ink" x="38" y="510">Agent's machine</text>
+  <text class="sm red b" x="38" y="530">NOT TRUSTED</text>
+  <text class="tx ink" x="38" y="556">AI agent + <tspan class="mono">ucr mcp</tspan></text>
+  <text class="tx mut" x="38" y="580">Holds: one agent token</text>
+  <text class="tx mut" x="38" y="600">Can: list secrets, ask</text>
+  <text class="tx mut" x="38" y="620">Cannot: read a secret</text>
 
-  <!-- 4: runs it -->
-  <path class="ln" d="M620 244 H696" marker-end="url(#a)"/>
-  <circle class="num" cx="652" cy="226" r="10"/><text class="numt" x="652" y="230" text-anchor="middle">4</text>
-  <text class="lbl" x="630" y="266">secret</text>
-  <text class="lbl" x="630" y="282">added</text>
-  <path class="ln" d="M700 380 H624" marker-end="url(#a)"/>
-  <text class="lbl" x="632" y="356">polls,</text>
-  <text class="lbl" x="632" y="372">gets job</text>
+  <rect class="zone-srv" x="288" y="482" width="236" height="168" rx="14"/>
+  <text class="h2 w" x="306" y="510">ucanrun server</text>
+  <text class="sm ws b" x="306" y="530">YOUR SERVER</text>
+  <text class="tx w" x="306" y="556">Web UI · Agent API</text>
+  <text class="tx ws" x="306" y="580">Holds: secrets (encrypted),</text>
+  <text class="tx ws" x="306" y="598">rules, audit log</text>
+  <text class="tx ws" x="306" y="620">Can: run approved work</text>
 
-  <!-- 5: result back -->
-  <path class="back" d="M336 330 H258" marker-end="url(#b)"/>
-  <circle class="num" cx="320" cy="350" r="10"/><text class="numt" x="320" y="354" text-anchor="middle">5</text>
-  <text class="lblb" x="262" y="372">result,</text>
-  <text class="lblb" x="262" y="388">redacted</text>
+  <rect class="zone-you" x="556" y="482" width="236" height="168" rx="14"/>
+  <text class="h2 ink" x="574" y="510">You</text>
+  <text class="sm acc b" x="574" y="530">PHONE OR BROWSER</text>
+  <text class="tx ink" x="574" y="556">Telegram, Discord, LINE,</text>
+  <text class="tx ink" x="574" y="574">WhatsApp, web</text>
+  <text class="tx mut" x="574" y="598">Holds: TOTP, passkeys</text>
+  <text class="tx mut" x="574" y="620">Can: approve or deny</text>
 
-  <text class="foot" x="24" y="510">The agent never holds a secret. Nothing runs before you approve it, unless you let a secret run without asking.</text>
-  <text class="foot" x="24" y="532">Every request, approval and run goes into the hash-chained audit log.</text>
+  <rect class="zone-run" x="824" y="482" width="236" height="168" rx="14"/>
+  <text class="h2 ink" x="842" y="510">Runners (optional)</text>
+  <text class="sm mut b" x="842" y="530">PC, SERVER, RASPBERRY PI</text>
+  <text class="tx ink" x="842" y="556"><tspan class="mono">ucr runner</tspan>, own user</text>
+  <text class="tx mut" x="842" y="580">Holds: its keys, an allow</text>
+  <text class="tx mut" x="842" y="598">list of programs</text>
+  <text class="tx mut" x="842" y="620">Connects out, opens no port</text>
+
+  <path class="link" d="M256 566H288"/><path class="link" d="M524 566H556"/><path class="link" d="M792 566H824"/>
+
+  <text class="tx mut" x="24" y="688">Agents never hold a secret. Nothing runs until you approve it, unless you allow a secret to run without asking.</text>
 </svg>
