@@ -32,21 +32,33 @@ Giving an agent a token means the token ends up in transcripts, logs and model c
 
 ## Quick start
 
+You need Docker. No config file, no clone:
+
 ```bash
-git clone <repo> && cd ucanrun
+mkdir ucanrun && cd ucanrun
+curl -fsSLO https://raw.githubusercontent.com/huydnd/ucanrun/main/compose.yml
 docker compose up -d
 docker logs ucanrun
 ```
 
-No config file is needed. Open `http://127.0.0.1:8780`, enter the access code from the log, and follow the Start tab. See the [quick start](docs/quickstart.md).
+The log prints two codes:
 
-On each machine where an agent runs, `ucr` comes from npm (Node 18 or later):
-
-```json
-{ "mcpServers": { "ucanrun": { "command": "npx", "args": ["-y", "ucanrun", "mcp"] } } }
+```
+ucanrun is not set up yet. Setup token: 3f9c…
+Access code: Kx7…
 ```
 
-Sign in once with `npx -y ucanrun login <agent-api-url>` and the token from the Agent tokens tab. Without Node, take the binary from the [releases](https://github.com/huydnd/ucanrun/releases). Runners install as a service; follow the Runner tab.
+1. Open `http://127.0.0.1:8780` and enter the **access code**.
+2. Enter the **setup token**, then choose a **master password**. Save the master password in a password manager: it cannot be recovered.
+3. Follow the **Start** tab: connect an approval channel, turn on TOTP, save a secret, create an agent token.
+
+Why two codes? The **access code** keeps strangers away from the web UI, and you keep using it on every new device (`docker exec ucanrun ucr gate` shows it again). The **setup token** works once, only before the vault exists: it proves that whoever creates the vault, and so chooses the master password, can read the server's log. A leaked or reused access code is then not enough to take over a fresh install.
+
+**Agents.** On each machine where an agent runs, the **Agent tokens** tab shows the commands for your system: download `ucr`, save the token, and add ucanrun to the agent's MCP settings without touching the others.
+
+**Runners** run commands on other machines. The **Runner** tab gives a pairing code and the install commands. See [runners](docs/runners.md).
+
+More in the [quick start](docs/quickstart.md).
 
 ## Documentation
 

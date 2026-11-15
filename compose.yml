@@ -1,9 +1,11 @@
-# git clone, then `docker compose up -d`. No other setup is needed.
-# Set UCANRUN_PUBLIC_URL when serving from a domain.
+# ucanrun from the published image. Download this file, then:
+#   docker compose up -d && docker logs ucanrun
+# Set UCANRUN_PUBLIC_URL when serving from a domain. To run programs on the
+# server itself, use the image tag latest-exec. To build from source instead:
+#   docker build -t ghcr.io/huydnd/ucanrun:latest .
 services:
   ucanrun:
-    image: ucanrun:local
-    build: .
+    image: ghcr.io/huydnd/ucanrun:latest
     container_name: ucanrun
     restart: unless-stopped
     read_only: true

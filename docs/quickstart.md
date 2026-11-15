@@ -4,39 +4,53 @@ About 10 minutes.
 
 ## 0. Install
 
+You need Docker. Download the compose file and start it:
+
 ```bash
-git clone <repo> && cd ucanrun
+mkdir ucanrun && cd ucanrun
+curl -fsSLO https://raw.githubusercontent.com/huydnd/ucanrun/main/compose.yml
 docker compose up -d
 docker logs ucanrun
 ```
 
-The log prints an **Access code** and a **Setup token**. No config file is needed. Open `http://127.0.0.1:8780` and enter the access code. Save it in a password manager; `docker exec ucanrun ucr gate` shows it again.
+It runs `ghcr.io/huydnd/ucanrun:latest`. To run programs on the server itself, use the `latest-exec` tag; see [configuration](configuration.md).
 
-If the port is taken: `UCANRUN_PORT=9000 docker compose up -d`.
-
-To serve from a domain, see [configuration](configuration.md):
+If the port is taken: `UCANRUN_PORT=9000 docker compose up -d`. To serve from a domain:
 
 ```bash
 UCANRUN_PUBLIC_URL=https://ucanrun.example.com docker compose up -d
 ```
 
-## 1. Create the vault
+## 1. Two codes from the log
 
-1. Enter the setup token from the log.
-2. Choose a **master password** and save it in a password manager. It cannot be recovered.
+The log prints an **Access code** and a **Setup token**.
 
-## 2. Follow the Start tab
+| | Access code | Setup token |
+|---|---|---|
+| Stops | strangers reaching the web UI | someone else creating the vault first |
+| Used | on every new device, for as long as you run ucanrun | once, before the vault exists |
+| Lives | in `data/gate.token` or `UCANRUN_GATE_TOKEN`; `docker exec ucanrun ucr gate` shows it | in the log only; new at each start until the vault exists |
 
-The Start tab walks through four steps. Skip any step and return to it later with **Do this step**.
+Whoever creates the vault chooses the master password and owns everything in it. The setup token proves they can read the server's log, so a leaked or reused access code is not enough to take over a fresh install. The access code can be turned off (`UCANRUN_GATE=off`, behind another access layer); the setup token cannot.
 
-1. **Connect Telegram:** create a bot with @BotFather, paste its token, and send `/pair <code>` to the bot. The code has 6 characters, lasts 3 minutes and is cancelled after 3 wrong tries.
-2. **Enable TOTP:** scan the QR code and save the 8 recovery codes. They are shown once.
-3. **Save a secret:** on the Secrets tab, paste the value, write one line on what it is for, and list the hosts it may be sent to, such as `api.github.com`. Without hosts, agents cannot use it.
-4. **Create an agent token:** choose your agent and the profiles it may use, then follow the instructions shown. The token goes into that agent's own MCP settings.
+## 2. Create the vault
 
-The agent machine needs the `ucr` command: `docker cp ucanrun:/usr/local/bin/ucr ~/.local/bin/ucr`.
+1. Open `http://127.0.0.1:8780` and enter the access code. Save it in a password manager.
+2. Enter the setup token.
+3. Choose a **master password** and save it in a password manager. It cannot be recovered.
 
-Check it: `ucr profiles` with `UCANRUN_URL` and `UCANRUN_TOKEN` set, or call `list_profiles` from the agent.
+## 3. Follow the Start tab
+
+The Start tab walks through the steps in order. Skip any step and return to it later; **Hide guides** in a page title hides the explanations once you know them.
+
+1. **Connect an approval channel:** Telegram, Discord, LINE or WhatsApp, under **Settings**. For Telegram, create a bot with @BotFather, paste its token, and send `/pair <code>` to the bot. The code has 6 characters, lasts 3 minutes and is cancelled after 3 wrong tries. See [approval channels](channels.md).
+2. **Turn on TOTP:** scan the QR code and save the 8 recovery codes. They are shown once. Add a [passkey](passkeys.md) too: it resists phishing better than TOTP.
+3. **Save a secret:** on the Secrets tab, paste the value, write one line on what it is for, and list the hosts it may be sent to, such as `api.github.com`. Without hosts, agents cannot use it in calls.
+4. **Add a runner (optional):** to run commands on a machine. See [runners](runners.md).
+5. **Create an agent token:** choose your agent and what it may use, then follow the commands shown for its system: download `ucr`, save the token with `ucr login`, and add ucanrun to the agent's MCP settings. The token is stored on that machine (Windows Credential Manager, or `~/.config/ucanrun` with mode 0600), not in the agent's settings file.
+6. **Fixed actions (optional):** when the agent should only do the jobs you defined.
+
+Check it on the agent's machine with `ucr doctor`, or call `list_secrets` from the agent.
 
 ## How an agent uses a secret
 
@@ -83,7 +97,7 @@ iPhone keeps separate storage for home screen apps, so you enter the access code
 
 ## Daily use
 
-An agent asks, you get a Telegram message, you tap **Approve** or **Deny**. No answer within 2 minutes counts as denied.
+An agent asks, you get a message on your approval channels, you tap **Approve** or **Deny**. No answer within 2 minutes counts as denied.
 
 After a restart the vault is locked until you sign in. Agents get error 423 until then.
 
