@@ -14,7 +14,7 @@ The Secrets tab starts with templates for common services. Tap one and the form 
 | Notion | `notion_token` | `api.notion.com` | |
 | PostgreSQL | `postgres`, fields host, port, user, database (public) and password | none | for `psql` with `run_command`; needs the `exec` image |
 | SSH key | `ssh_key`, several lines | none | for `ssh` with `run_command`; needs the `exec` image |
-| sudo password | `sudo_password` | none | always asks for TOTP; see [ssh-sudo](ssh-sudo.md) |
+| sudo password | `sudo_password` | none | always asks for TOTP; see [commands as root](runners.md#commands-as-root) |
 | Other API key | you name it | you list them | |
 
 The notes tell agents exactly how to use the secret, for example which header to send, so they can call the API without guessing. Secrets used in commands are marked "allow in commands", which only shows when the server runs with `UCANRUN_ENABLE_EXEC=1`.

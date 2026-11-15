@@ -9,13 +9,16 @@ A credential broker for AI agents, with a human in the loop. The command is `ucr
 3. **The agent sends a request** with `{{secret:name}}` where the secret goes.
 4. **You approve** the exact request on Telegram, and **ucanrun runs it** and returns a redacted result.
 
+<p align="center"><img src="docs/assets/architecture.svg" alt="How ucanrun works: the agent sends a request naming a secret; ucanrun shows you the exact command; once you approve, it adds the secret and calls the HTTP API, or hands a signed job to a runner; the agent gets the result with secrets redacted." width="900"></p>
+
+A request names a secret instead of holding it:
+
 ```
-Agent ── call(GET https://api.github.com/user, Authorization: Bearer {{secret:github_token}}) ──> ucanrun
-ucanrun ── shows the real request ──> you approve on Telegram
-ucanrun ── adds the secret, sends it, redacts the reply ──> Agent
+call GET https://api.github.com/user
+     Authorization: Bearer {{secret:github_token}}
 ```
 
-[Tiếng Việt](docs/vi/quickstart.md)
+Commands run on **runners**: `ucr runner` on another machine, which fetches approved jobs and runs only the programs its own allow list names. See [runners](docs/runners.md).
 
 ## Why
 
@@ -55,7 +58,9 @@ Sign in once with `npx -y ucanrun login <agent-api-url>` and the token from the 
 - [Agent skill](skills/ucanrun/SKILL.md): copy to `~/.claude/skills/ucanrun`
 - [Fixed actions (advanced)](docs/fixed-actions.md)
 - [Creating profiles](docs/profiles.md)
-- [Root commands over SSH](docs/ssh-sudo.md)
+- [Runners](docs/runners.md)
+- [Approval channels](docs/channels.md)
+- [Passkeys](docs/passkeys.md)
 - [Security model](docs/security.md)
 - [Troubleshooting](docs/troubleshooting.md)
 
