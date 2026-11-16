@@ -316,7 +316,7 @@ async function viewSecrets(body, editing, tpl) {
   const templates = mine.map(t => Object.assign({}, t, {custom: true})).concat(builtin);
   const cur = editing ? list.find(x => x.name === editing) : null;
   const execOn = !!(state.status && state.status.exec);
-  const n = field("Tên", {autocomplete: "off", spellcheck: "false", placeholder: "github_token"});
+  const n = field("Tên", {autocomplete: "off", spellcheck: "false", placeholder: "Ví dụ: github_token, db_prod"});
   const known = workspacesOf(list).filter(Boolean);
   const ws = field("Workspace", {autocomplete: "off", spellcheck: "false", placeholder: tr("Chung"), list: "ws-names", maxlength: 32});
   ws.input.value = cur ? (cur.workspace || "") : state.secretWs != null && state.secretWs !== "*" ? state.secretWs : "";
@@ -326,9 +326,9 @@ async function viewSecrets(body, editing, tpl) {
     "aria-pressed": String(ws.input.value.trim() === w), onclick: () => { ws.input.value = w; drawPicks(); }}, wsLabel(w))));
   ws.input.addEventListener("input", drawPicks);
   drawPicks();
-  const v = field(cur ? "Giá trị mới (để trống nếu giữ nguyên)" : "Giá trị", {type: "password", autocomplete: "off"});
-  const desc = h("textarea", {class: "short desc", rows: 2, "aria-label": "Dùng để làm gì", placeholder: "Ví dụ: Token GitHub cá nhân, đọc repo và tạo issue"});
-  const hosts = field("Máy chủ được phép gửi tới", {autocomplete: "off", spellcheck: "false", placeholder: "api.github.com, *.example.com"});
+  const v = field(cur ? "Giá trị mới (để trống nếu giữ nguyên)" : "Giá trị", {type: "password", autocomplete: "off", placeholder: cur ? "" : "Dán token, mật khẩu hoặc khoá"});
+  const desc = h("textarea", {class: "short desc", rows: 2, "aria-label": "Dùng để làm gì", placeholder: "Ví dụ: Token API của dịch vụ X, chỉ đọc. Gửi header Authorization: Bearer {{secret:tên}}."});
+  const hosts = field("Máy chủ được phép gửi tới", {autocomplete: "off", spellcheck: "false", placeholder: "api.example.com, *.example.com"});
   const multi = h("textarea", {class: "short", spellcheck: "false", "aria-label": "Giá trị nhiều dòng", hidden: true});
   const toggle = h("input", {type: "checkbox", onchange: e => { multi.hidden = !e.target.checked; v.el.hidden = e.target.checked; }});
   const cmd = h("input", {type: "checkbox", onchange: () => { hostWarn(); drawSummary(); }});
@@ -365,11 +365,15 @@ async function viewSecrets(body, editing, tpl) {
     n.input.value = cur.name; n.input.readOnly = true;
     desc.value = cur.description || ""; hosts.input.value = (cur.hosts || []).join(", "); cmd.checked = !!cur.allow_commands;
   } else if (tpl) {
-    // A template fills everything except the value.
-    n.input.value = tpl.name || ""; desc.value = L(tpl, "description") || ""; hosts.input.value = (tpl.hosts || []).join(", ");
+    // A template fills everything except the value, and its own examples
+    // replace the general ones where it leaves a field empty.
+    n.input.value = tpl.name || ""; hosts.input.value = (tpl.hosts || []).join(", ");
+    if (tpl.description_is_example) desc.placeholder = L(tpl, "description") || desc.placeholder; else desc.value = L(tpl, "description") || "";
+    if (L(tpl, "name_hint")) n.input.placeholder = tr("Ví dụ") + ": " + L(tpl, "name_hint");
+    if (L(tpl, "hosts_hint")) hosts.input.placeholder = L(tpl, "hosts_hint");
     if (tpl.workspace) ws.input.value = tpl.workspace;
     cmd.checked = !!tpl.allow_commands && execOn;
-    if (tpl.placeholder) v.input.placeholder = tpl.placeholder;
+    if (L(tpl, "placeholder")) v.input.placeholder = multi.placeholder = L(tpl, "placeholder");
     if (tpl.multiline) { toggle.checked = true; multi.hidden = false; v.el.hidden = true; }
   }
   // Options that weaken approvals need a current TOTP code.
