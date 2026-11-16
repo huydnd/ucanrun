@@ -52,6 +52,63 @@ points at the newest one. The **Add runner** box in the web UI shows the exact
 commands for each system; set `UCANRUN_DOWNLOAD_URL` on the server to download
 from somewhere else, such as your own mirror.
 
+### With a package manager
+
+A package manager installs ucr where your own user cannot change it, and
+updates it with the rest of the system.
+
+**Debian, Ubuntu, Raspberry Pi OS, WSL.** Releases after 0.13.3 carry
+`ucr_amd64.deb` and `ucr_arm64.deb` (also with the version in the name):
+
+```sh
+curl -fsSLO https://github.com/huydnd/ucanrun/releases/latest/download/ucr_amd64.deb
+sudo apt install ./ucr_amd64.deb
+```
+
+It installs `/usr/bin/ucr`, the `ucr-runner` user with `/var/lib/ucr-runner`,
+and the `ucr-runner` service, left off. Then enroll and start it:
+
+```sh
+sudo -u ucr-runner UCANRUN_RUNNER_DIR=/var/lib/ucr-runner ucr runner enroll URL CODE --name NAME
+sudoedit /var/lib/ucr-runner/runner.toml
+sudo systemctl enable --now ucr-runner
+```
+
+For root commands, add the sudo rule:
+`sudo SUDO_CMDS="/usr/bin/systemctl" sh /usr/share/ucr/runner-setup-linux.sh`.
+Installing a newer `.deb` restarts a running runner on the new version;
+`apt purge ucr` also removes the runner's keys, user and sudo rule. Agents on
+the same machine can use `/usr/bin/ucr` too.
+
+**macOS and Linux with Homebrew:**
+
+```sh
+brew tap huydnd/ucanrun https://github.com/huydnd/ucanrun
+brew install ucr
+ucr runner enroll URL CODE --name NAME
+brew services start ucr      # the runner, under your user
+```
+
+`brew upgrade ucr` updates it; restart with `brew services restart ucr`.
+
+**Windows with Scoop:**
+
+```powershell
+scoop bucket add ucanrun https://github.com/huydnd/ucanrun
+scoop install ucanrun/ucr
+ucr runner enroll URL CODE --name NAME
+powershell -ExecutionPolicy Bypass -File runner-windows.ps1 -Ucr "$(scoop prefix ucr)\ucr.exe"
+```
+
+`scoop update ucr` updates it; stop the "ucanrun runner" task first, since
+Windows cannot replace a running program.
+
+**Rust users:** `cargo binstall --git https://github.com/huydnd/ucanrun ucanrun`
+takes `ucr` from the release instead of building it.
+
+Each release file also has a build provenance attestation:
+`gh attestation verify ucr-linux-amd64 -R huydnd/ucanrun`.
+
 ## Enroll a runner
 
 1. In the web UI: the **Runner** tab → **Add runner**. You get a

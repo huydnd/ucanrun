@@ -6,7 +6,8 @@ on:
 permissions:
   contents: write
   packages: write
-  id-token: write # keyless cosign signing
+  id-token: write # keyless cosign signing, provenance
+  attestations: write
 jobs:
   image:
     runs-on: ubuntu-latest
@@ -91,7 +92,20 @@ jobs:
           merge-multiple: true
       # The runner guide in the web UI downloads these from the release.
       - run: cp scripts/runner-setup-linux.sh scripts/runner-windows.ps1 dist/
+      # Debian packages: ucr, the ucr-runner user and a service left off.
+      - run: |
+          v="${GITHUB_REF_NAME#v}"
+          chmod +x dist/ucr-linux-*
+          sh scripts/build-deb.sh "$v" amd64 dist/ucr-linux-amd64 dist
+          sh scripts/build-deb.sh "$v" arm64 dist/ucr-linux-arm64 dist
+          # Stable names for releases/latest/download/ucr_<arch>.deb
+          cp "dist/ucr_${v}_amd64.deb" dist/ucr_amd64.deb
+          cp "dist/ucr_${v}_arm64.deb" dist/ucr_arm64.deb
       - run: cd dist && sha256sum * > SHA256SUMS
+      # Provenance for every file: gh attestation verify FILE -R huydnd/ucanrun
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*

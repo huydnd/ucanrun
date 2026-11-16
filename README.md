@@ -46,17 +46,18 @@ The log prints two codes:
 ```
 ucanrun is not set up yet. Setup token: 3f9c…
 Access code: Kx7…
+Open http://127.0.0.1:8780/#setup=3f9c… to finish setup: the setup token is filled in.
 ```
 
-1. Open `http://127.0.0.1:8780` and enter the **access code**.
-2. Enter the **setup token**, then choose a **master password**. Save the master password in a password manager: it cannot be recovered.
+1. Open the link from the last line and enter the **access code**.
+2. The **setup token** is already filled in; choose a **master password**. Save the master password in a password manager: it cannot be recovered.
 3. Follow the **Start** tab: connect an approval channel, turn on TOTP, save a secret, create an agent token.
 
 Why two codes? The **access code** keeps strangers away from the web UI, and you keep using it on every new device (`docker exec ucanrun ucr gate` shows it again). The **setup token** works once, only before the vault exists: it proves that whoever creates the vault, and so chooses the master password, can read the server's log. A leaked or reused access code is then not enough to take over a fresh install.
 
 **Agents.** On each machine where an agent runs, the **Agent tokens** tab shows the commands for your system: download `ucr`, save the token, and add ucanrun to the agent's MCP settings without touching the others.
 
-**Runners** run commands on other machines. The **Runner** tab gives a pairing code and the install commands. See [runners](docs/runners.md).
+**Runners** run commands on other machines. The **Runner** tab gives a pairing code and the install commands. `ucr` also comes as a Debian package, a Homebrew formula and a Scoop manifest; see [runners](docs/runners.md#with-a-package-manager).
 
 More in the [quick start](docs/quickstart.md).
 

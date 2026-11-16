@@ -233,7 +233,11 @@ pub(crate) async fn serve_core(c: &Arc<Core>, dir: &Path) -> Res {
         s.gate_token = tok;
     }
     if !setup.is_empty() {
-        println!("Open {public} to finish setup. Show the access code again with: ucr gate");
+        // The token rides in the fragment, which browsers never send to a
+        // server or a proxy log; the setup page reads it and drops it.
+        println!(
+            "Open {public}/#setup={setup} to finish setup: the setup token is filled in. Show the access code again with: ucr gate"
+        );
     }
     let _ = std::io::stdout().flush();
     harden();

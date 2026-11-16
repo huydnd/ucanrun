@@ -2684,10 +2684,11 @@ async fn cli_serve_and_health() {
     );
     assert!(got[1].starts_with("Access code: "), "{got:?}");
     let port = web_addr.rsplit_once(':').unwrap().1;
+    let setup = got[0].trim_start_matches("ucanrun is not set up yet. Setup token: ");
     assert_eq!(
         got[2],
         format!(
-            "Open http://127.0.0.1:{port} to finish setup. Show the access code again with: ucr gate"
+            "Open http://127.0.0.1:{port}/#setup={setup} to finish setup: the setup token is filled in. Show the access code again with: ucr gate"
         )
     );
     let env = [("UCANRUN_WEB_ADDR", web_addr.as_str())];

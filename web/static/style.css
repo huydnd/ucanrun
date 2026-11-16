@@ -425,3 +425,8 @@ details.outdated>summary{font-weight:400;color:var(--warn);flex-wrap:wrap}
 details.outdated>summary::before{background:transparent;color:var(--warn)}
 details.outdated[open]>summary{margin-bottom:8px}
 details.outdated .steps-list{display:grid;gap:6px}
+/* Setup: why two codes. */
+details.why{margin:4px 0 8px;font-size:13px;color:var(--muted)}
+details.why>summary{font-weight:500;color:var(--accent)}
+details.why>summary::before{width:18px;height:18px;font-size:12px}
+details.why p{margin:6px 0 0}

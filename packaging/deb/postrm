@@ -1,0 +1,10 @@
+#!/bin/sh
+# Purge removes the runner's keys and user; remove keeps them.
+set -e
+if [ "$1" = purge ]; then
+  rm -rf /var/lib/ucr-runner
+  rm -f /etc/sudoers.d/ucr-runner
+  userdel ucr-runner >/dev/null 2>&1 || true
+fi
+if [ -d /run/systemd/system ]; then systemctl daemon-reload >/dev/null 2>&1 || true; fi
+exit 0

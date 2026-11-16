@@ -79,13 +79,21 @@ const authPage = card => h("div", {class: "narrow"}, h("div", {class: "auth-bran
 
 function renderSetup() {
   const tok = field("Setup token (trong log của container)", {type: "password", autocomplete: "off"});
+  // The link in the log carries the token as #setup=…; take it, then drop it
+  // from the address bar so it does not linger in history or screenshots.
+  const m = location.hash.match(/^#setup=([0-9a-f]{32})$/);
+  if (m) { tok.input.value = m[1]; history.replaceState(null, "", location.pathname + location.search); }
+  const why = h("details", {class: "why"}, h("summary", null, tr("Vì sao cần cả mã truy cập lẫn setup token?")),
+    h("p", null, tr("Mã truy cập chặn người lạ vào trang web, và bạn dùng nó lâu dài trên mọi thiết bị.")),
+    h("p", null, tr("Setup token chỉ dùng một lần, trước khi có kho. Người tạo kho sẽ đặt mật khẩu chính và làm chủ mọi secret, nên ucanrun đòi một mã chỉ có trong log của server: chứng minh người đó quản trị máy, không chỉ biết mã truy cập. Lấy lại bằng docker logs ucanrun.")));
   const p1 = field("Mật khẩu chính, ít nhất 12 ký tự", {type: "password", autocomplete: "new-password"});
   const p2 = field("Nhập lại mật khẩu chính", {type: "password", autocomplete: "new-password"});
   app.replaceChildren(authPage(form("Khởi tạo ucanrun", [tok, p1, p2], "Khởi tạo", async () => {
     if (p1.input.value !== p2.input.value) throw new Error("Hai mật khẩu không khớp");
     await api("POST", "/api/setup", {setup_token: tok.input.value, passphrase: p1.input.value});
     boot();
-  }, h("p", {class: "note"}, "Không có cách khôi phục nếu mất mật khẩu chính. Hãy lưu vào trình quản lý mật khẩu."))));
+  }, [m ? h("p", {class: "muted"}, tr("Setup token đã được điền từ link trong log.")) : null,
+    h("p", {class: "note"}, "Không có cách khôi phục nếu mất mật khẩu chính. Hãy lưu vào trình quản lý mật khẩu."), why])));
 }
 
 function renderLogin(locked) {
@@ -1791,6 +1799,8 @@ function enrollBox(rinfo, done) {
       h("p", null, tr("Mã ghép nối, dùng một lần, hết hạn lúc"), " ", new Date(c.expires).toLocaleTimeString(), ": ", h("b", {class: "code"}, c.code)),
       h("div", {class: "row tight"}, sw, h("label", {class: "inline-field"}, h("span", null, tr("Tên runner")), name)),
       note,
+      h("p", {class: "muted guide"}, tr("Hoặc cài bằng trình quản lý gói (gói .deb, Homebrew, Scoop), cập nhật cùng hệ thống:"), " ",
+        h("a", {href: "https://github.com/huydnd/ucanrun/blob/main/docs/runners.md#with-a-package-manager", target: "_blank", rel: "noopener noreferrer"}, "docs/runners.md")),
       steps,
       h("p", {class: "muted"}, `${tr("Khi ghép xong, máy kia in ra khoá server; khoá đúng là")}: ${rinfo ? rinfo.server_key : "?"}.`),
       h("div", {class: "row"}, h("button", {class: "primary", onclick: done}, "Đã chạy xong, tải lại"), h("button", {onclick: () => { box.hidden = true; }}, "Huỷ")));

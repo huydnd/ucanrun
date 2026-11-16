@@ -1,6 +1,8 @@
 #!/bin/sh
 # Sets up a ucanrun runner on Linux: its own user, the ucr binary and a
 # systemd service. Run as root:  sudo sh runner-setup-linux.sh ./ucr
+# With the Debian package installed, run it without a binary to add only the
+# sudo rule:  sudo SUDO_CMDS="..." sh /usr/share/ucr/runner-setup-linux.sh
 #
 # Commands that need root go through sudo with the runner user's password,
 # which only ucanrun holds. Nothing here gives the runner passwordless root.
@@ -17,12 +19,16 @@ if [ "$(id -u)" -ne 0 ]; then
   echo "run as root: sudo sh $0 PATH_TO_UCR" >&2
   exit 1
 fi
-if [ -z "$BIN" ] || [ ! -x "$BIN" ]; then
+# The Debian package already put ucr and the service in place.
+PACKAGED=
+if [ -z "$BIN" ] && [ -x /usr/bin/ucr ] && { [ -f /usr/lib/systemd/system/ucr-runner.service ] || [ -f /lib/systemd/system/ucr-runner.service ]; }; then
+  PACKAGED=1
+elif [ -z "$BIN" ] || [ ! -x "$BIN" ]; then
   echo "usage: sudo sh $0 PATH_TO_UCR" >&2
   exit 1
 fi
 
-install -m 0755 "$BIN" /usr/local/bin/ucr
+[ -n "$PACKAGED" ] || install -m 0755 "$BIN" /usr/local/bin/ucr
 
 if ! id -u "$RUNNER_USER" >/dev/null 2>&1; then
   useradd --system --home-dir "$DIR" --create-home --shell /usr/sbin/nologin "$RUNNER_USER"
@@ -58,7 +64,7 @@ if [ -n "$SUDO_CMDS" ]; then
   unset pw
 fi
 
-cat > /etc/systemd/system/ucr-runner.service <<UNIT
+[ -n "$PACKAGED" ] || cat > /etc/systemd/system/ucr-runner.service <<UNIT
 [Unit]
 Description=ucanrun runner
 After=network-online.target
@@ -75,7 +81,7 @@ PrivateTmp=yes
 [Install]
 WantedBy=multi-user.target
 UNIT
-systemctl daemon-reload
+if [ -d /run/systemd/system ]; then systemctl daemon-reload; fi
 
 cat <<NEXT
 

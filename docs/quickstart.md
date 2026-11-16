@@ -35,8 +35,8 @@ Whoever creates the vault chooses the master password and owns everything in it.
 
 ## 2. Create the vault
 
-1. Open `http://127.0.0.1:8780` and enter the access code. Save it in a password manager.
-2. Enter the setup token.
+1. Open the link the log prints (`http://127.0.0.1:8780/#setup=…`) and enter the access code. Save it in a password manager.
+2. The setup token is filled in from the link; it travels after `#`, so it never reaches the server's or a proxy's logs. Without the link, paste it from the log.
 3. Choose a **master password** and save it in a password manager. It cannot be recovered.
 
 ## 3. Follow the Start tab

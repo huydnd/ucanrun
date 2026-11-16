@@ -1,0 +1,26 @@
+{
+    "version": "0.13.3",
+    "description": "Client for ucanrun: AI agents ask, you approve, secrets stay hidden",
+    "homepage": "https://github.com/huydnd/ucanrun",
+    "license": "MIT",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/huydnd/ucanrun/releases/download/v0.13.3/ucr-windows-amd64.exe#/ucr.exe",
+            "hash": "cdbf02b0d113bf98e3922851e062729f595d05f27e1bd583aa4db32d289558bc"
+        }
+    },
+    "bin": "ucr.exe",
+    "checkver": {
+        "github": "https://github.com/huydnd/ucanrun"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/huydnd/ucanrun/releases/download/v$version/ucr-windows-amd64.exe#/ucr.exe"
+            }
+        },
+        "hash": {
+            "url": "$baseurl/SHA256SUMS"
+        }
+    }
+}

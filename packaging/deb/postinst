@@ -1,0 +1,16 @@
+#!/bin/sh
+# The runner's own user and key directory. The service stays off until the
+# runner is enrolled and started: systemctl enable --now ucr-runner
+set -e
+if [ "$1" = configure ]; then
+  if ! getent passwd ucr-runner >/dev/null; then
+    useradd --system --user-group --home-dir /var/lib/ucr-runner --no-create-home --shell /usr/sbin/nologin ucr-runner
+  fi
+  install -d -o ucr-runner -g ucr-runner -m 700 /var/lib/ucr-runner
+  if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    # An upgrade restarts a running runner on the new binary.
+    systemctl try-restart ucr-runner.service >/dev/null 2>&1 || true
+  fi
+fi
+exit 0

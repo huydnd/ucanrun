@@ -1,0 +1,16 @@
+[Unit]
+Description=ucanrun runner
+Documentation=https://github.com/huydnd/ucanrun/blob/main/docs/runners.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ucr-runner
+Environment=UCANRUN_RUNNER_DIR=/var/lib/ucr-runner
+ExecStart=/usr/bin/ucr runner serve
+Restart=always
+RestartSec=5
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -680,19 +680,25 @@ async fn gate(State(s): State<Arc<Server>>, req: Request, next: Next) -> Respons
     {
         return next.run(req).await;
     }
-    if req.method() != Method::POST || req.uri().path() != "/gate" {
+    if req.method() != Method::POST {
         return gate_deny(StatusCode::UNAUTHORIZED);
     }
-    if s.gate_throttled() {
-        return gate_deny(StatusCode::TOO_MANY_REQUESTS);
-    }
-    let site = header_str(req.headers(), "sec-fetch-site").to_string();
     let form = header_str(req.headers(), "content-type")
         .split(';')
         .next()
         .unwrap_or("")
         .trim()
         .eq_ignore_ascii_case("application/x-www-form-urlencoded");
+    // The form posts to the page's own address, so the browser keeps a
+    // #fragment, such as the setup link's, across the redirect. Elsewhere
+    // only the form counts as an attempt; API calls just get the gate page.
+    if req.uri().path() != "/gate" && !form {
+        return gate_deny(StatusCode::UNAUTHORIZED);
+    }
+    if s.gate_throttled() {
+        return gate_deny(StatusCode::TOO_MANY_REQUESTS);
+    }
+    let site = header_str(req.headers(), "sec-fetch-site").to_string();
     let body = tokio::time::timeout(
         READ_TIMEOUT,
         axum::body::to_bytes(req.into_body(), MAX_GATE_BODY),
